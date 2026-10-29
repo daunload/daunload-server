@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>숭실 LMS 대시보드</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%233182f6'/%3E%3Crect x='7' y='9' width='18' height='3' rx='1.5' fill='white'/%3E%3Crect x='7' y='15' width='12' height='3' rx='1.5' fill='white'/%3E%3Crect x='7' y='21' width='15' height='3' rx='1.5' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#view">본문으로 건너뛰기</a>
+  <div id="startup" class="startup" role="status">
+    <span class="brand-mark" aria-hidden="true">S</span>
+    <h1>학습 현황을 불러오고 있어요</h1>
+    <p class="muted" id="startup-message">잠시만 기다려 주세요.</p>
+    <button class="btn primary" id="retry-boot" hidden>다시 시도</button>
+    <button class="btn ghost" id="startup-login" hidden>로그인 화면으로</button>
+  </div>
+  <!-- 로그인 / 가입 -->
+  <main id="auth" class="auth" hidden>
+    <div class="auth-box">
+      <div class="auth-brand"><span class="brand-mark" aria-hidden="true">S</span><span class="brand">숭실 LMS</span></div>
+      <div><h1>학번으로 로그인해 주세요</h1><p class="muted small-text">숭실대 통합 로그인(유세인트, LMS) 비밀번호를 그대로 써요.</p></div>
+      <form id="login-form" class="stack">
+        <label>학번<input name="student_id" placeholder="학번을 입력하세요" inputmode="numeric" autocomplete="username" required></label>
+        <label for="password">비밀번호</label>
+        <div class="password-field"><input id="password" name="password" type="password" placeholder="학교 계정 비밀번호" autocomplete="current-password" required><button type="button" id="password-toggle" aria-controls="password" aria-pressed="false">표시</button></div>
+        <div class="consent" id="consent-row" hidden>
+          <p>처음 로그인하셨네요. 시작하기 전에 확인해 주세요.</p>
+          <ul>
+            <li>학교 비밀번호는 LMS를 대신 조회하기 위해 이 서버에 암호화되어 보관됩니다. 계정 메뉴에서 언제든 지울 수 있습니다.</li>
+            <li>강의 자동 재생은 직접 시청하지 않은 수강이므로 학칙상 문제가 될 수 있습니다. 과목마다 직접 켜야 동작합니다.</li>
+          </ul>
+          <label class="check"><input name="agree" type="checkbox"><span>위 내용을 이해했고 동의합니다.</span></label>
+        </div>
+        <p class="error" id="auth-error" role="alert"></p>
+        <button class="btn primary" id="auth-submit">로그인</button>
+      </form>
+    </div>
+  </main>
+
+  <!-- 대시보드 -->
+  <div id="app" hidden>
+    <header class="topbar">
+      <a class="brand home-link" href="#dashboard"><span class="brand-mark" aria-hidden="true">S</span>숭실 LMS </a>
+      <span class="sync" id="sync-status" role="status"></span>
+      <button class="btn small" id="sync-btn">지금 동기화</button>
+      <button class="btn small ghost" id="logout-btn">로그아웃</button>
+    </header>
+    <div class="app-shell">
+      <div class="navigation"><button class="mobile-menu btn" id="menu-toggle" aria-controls="main-menu" aria-expanded="false"><span id="current-view">할 일</span><span>전체 메뉴 <span aria-hidden="true">⌄</span></span></button>
+      <nav class="side" id="main-menu" aria-label="메뉴">
+        <p class="nav-label">나의 학습</p>
+        <button data-view="dashboard" class="on"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>학습 현황</button>
+        <button data-view="todos"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="3"/><path d="m8 12 3 3 5-6"/></svg>할 일</button>
+        <button data-view="assignments"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M12 12v4m0 3h.01"/></svg>미제출 과제</button>
+        <button data-view="calendar"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>캘린더</button>
+        <button data-view="courses"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 6c-3-2-7-2-10-1v15c3-1 7-1 10 1 3-2 7-2 10-1V5c-3-1-7-1-10 1Zm0 0v15"/></svg>과목</button>
+        <button data-view="announcements"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 10 16-6v16L3 14v-4Zm3 5 2 6h3l-2-5M22 9v6"/></svg>공지</button>
+        <button data-view="playback"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4Z"/></svg>영상 재생</button>
+        <button data-view="videos"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M12 7v10m-4-4 4 4 4-4"/></svg>강의 영상</button>
+        <p class="nav-label settings-label">설정</p>
+        <button data-view="notifications"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>알림</button>
+        <button data-view="account"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg>계정</button>
+      </nav>
+      </div>
+      <div class="workspace">
+        <section class="overview" aria-labelledby="overview-title">
+          <div class="overview-heading"><div><p class="eyebrow" id="today-label"></p><h1 id="overview-title">오늘의 학습</h1></div><a class="btn small" href="https://lms.ssu.ac.kr" target="_blank" rel="noopener">학교 LMS</a></div>
+          <div class="stats" id="stats"></div>
+        </section>
+        <main class="view" id="view" tabindex="-1"></main>
+        <section class="rail-wrap" aria-labelledby="rail-title">
+          <div class="rail-head">
+            <h2 id="rail-title">앞으로 7일</h2>
+            <button class="btn small ghost" id="calendar-toggle" aria-expanded="true" aria-controls="calendar-content">일정 접기</button>
+          </div>
+          <div id="calendar-content">
+            <div class="legend">
+              <i class="dot video"></i>영상 <i class="dot assignment"></i>과제 <i class="dot quiz"></i>퀴즈
+            </div>
+          <div class="rail" id="rail" tabindex="0" role="region" aria-label="7일 마감 일정"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/calendar.js"></script>
+  <script src="/app.js"></script>
+  <script src="/week.js"></script>
+</body>
+</html>

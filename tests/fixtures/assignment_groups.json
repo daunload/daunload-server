@@ -1,0 +1,11 @@
+[
+  {"id": "152510", "name": "과제", "assignments": [
+    {"id": "1", "name": "과제1 (미제출)", "course_id": "45446", "due_at": "2026-10-09T14:59:59Z", "unlock_at": "2026-10-01T00:00:00Z",
+     "lock_at": "2026-10-30T14:59:59Z", "points_possible": 10, "submission_types": ["online_upload"], "published": true, "locked_for_user": false,
+     "html_url": "https://canvas.ssu.ac.kr/courses/45446/assignments/1"},
+    {"id": "2", "name": "과제2 (제출함)", "due_at": "2026-10-09T14:59:59Z", "submission_types": ["online_upload"], "published": true},
+    {"id": "3", "name": "퀴즈1", "due_at": "2026-10-12T14:59:59Z", "submission_types": ["online_quiz"], "published": true, "locked_for_user": false},
+    {"id": "4", "name": "마감 지남", "due_at": "2026-10-01T14:59:59Z", "lock_at": "2026-10-30T14:59:59Z", "submission_types": ["online_upload"], "published": true},
+    {"id": "5", "name": "잠김", "due_at": "2026-10-20T14:59:59Z", "submission_types": ["online_upload"], "published": true, "locked_for_user": true}
+  ]}
+]

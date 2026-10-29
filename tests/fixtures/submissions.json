@@ -1,0 +1,7 @@
+[
+  {"assignment_id": "1", "workflow_state": "unsubmitted", "submitted_at": null, "cached_due_date": "2026-10-09T14:59:59Z", "excused": false},
+  {"assignment_id": "2", "workflow_state": "submitted", "submitted_at": "2026-10-05T01:00:00Z", "excused": false},
+  {"assignment_id": "3", "workflow_state": "unsubmitted", "submitted_at": null, "excused": false},
+  {"assignment_id": "4", "workflow_state": "unsubmitted", "submitted_at": null, "excused": false},
+  {"assignment_id": "5", "workflow_state": "unsubmitted", "submitted_at": null, "excused": false}
+]

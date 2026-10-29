@@ -1,0 +1,4 @@
+{"learnstatuses": [{"course": {"id": 45446, "term_id": 46}, "sections": [
+  {"section_id": 1, "section_title": null, "position": 1, "is_upcoming": false, "subsections": [
+    {"subsection_id": 1000001, "subsection_title": null, "position": 0, "status": "attendance"},
+    {"subsection_id": 1000002, "subsection_title": null, "position": 1, "status": "absent"}]}]}], "total_count": 1}

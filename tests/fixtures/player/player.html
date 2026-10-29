@@ -1,0 +1,15 @@
+<!doctype html><html><body>
+<div class="vc-front-screen-play-btn" style="width:100px;height:40px;background:#ccc" onclick="start()">재생</div>
+<div id="log"></div>
+<script>
+  // Commons 플레이어 흉내: 재생 버튼을 눌러야 <video>가 생긴다.
+  function start() {
+    if (document.querySelector('video')) return;
+    const v = document.createElement('video');
+    v.src = 'clip.webm'; v.muted = true; v.playbackRate = 2;  // 배속을 1로 되돌리는지 확인
+    v.addEventListener('ended', () => { window.parent.postMessage('ended', '*'); });
+    document.body.appendChild(v);
+    v.play();
+  }
+</script>
+</body></html>

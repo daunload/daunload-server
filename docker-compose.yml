@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lms
+      POSTGRES_PASSWORD: lms
+      POSTGRES_DB: lms
+    volumes: [pgdata:/var/lib/postgresql/data]
+    ports: ["127.0.0.1:5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lms"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports: ["127.0.0.1:6379:6379"]
+
+  api:
+    build: .
+    restart: unless-stopped
+    platform: linux/amd64
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://lms:lms@postgres:5432/lms
+      REDIS_URL: redis://redis:6379/0
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_started}
+
+  # Google Chrome은 linux/amd64 전용이다. Apple Silicon Mac에서는 에뮬레이션으로 Chrome이 죽으므로
+  # 이 서비스 대신 호스트에서 워커를 실행한다: docker compose up -d && ./scripts/run-worker.sh
+  worker:
+    profiles: ["amd64"]
+    build: .
+    restart: unless-stopped
+    platform: linux/amd64
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://lms:lms@postgres:5432/lms
+      REDIS_URL: redis://redis:6379/0
+    command: arq app.worker.main.WorkerSettings
+    shm_size: 1gb  # Chrome 영상 재생에 필요
+    depends_on:
+      api: {condition: service_started}
+
+volumes:
+  pgdata:
