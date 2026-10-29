@@ -98,3 +98,15 @@ async def test_video_relay_still_works(env):
     respx.get(f"{cdn}/a.mp4").respond(200, content=b"mp4")
     got = await api.get(url)
     assert got.status_code == 200 and got.headers["content-type"] == "video/mp4"
+
+
+@respx.mock
+async def test_relay_asks_upstream_for_uncompressed_bytes(env):
+    """압축 응답을 디코딩하지 않고 그대로 넘기면 파일이 깨진다. 업스트림에 압축하지 말라고 요청한다."""
+    api, _ = env
+    h = await _with_course(api)
+    url = (await api.post("/courses/45446/materials/c12/download-link", headers=h)).json()["url"]
+    up = respx.get("https://commons.ssu.ac.kr/index.php").respond(200, content=b"plain text")
+    got = await api.get(url)
+    assert got.content == b"plain text"
+    assert up.calls.last.request.headers["Accept-Encoding"] == "identity"

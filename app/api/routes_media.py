@@ -272,6 +272,7 @@ async def _open_upstream(user_id: int, data: dict, range_header: str | None) -> 
             url = await resolve_media_url(http, data["content_id"])
         if range_header:  # 브라우저 이어받기
             headers["Range"] = range_header
+        headers["Accept-Encoding"] = "identity"  # 디코딩 없이 그대로 넘기므로 압축 응답을 받으면 파일이 깨진다
         upstream = await http.send(http.build_request("GET", url, headers=headers), stream=True)
         try:
             (check_media_host if kind == "video" else check_file_host)(str(upstream.url))  # 리다이렉트 뒤 최종 주소
