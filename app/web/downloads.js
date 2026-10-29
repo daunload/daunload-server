@@ -3,9 +3,11 @@
 /* ---------------- 여러 개 받기 ----------------
  * <a download>는 끝났는지 알 수 없어 동시 수를 지킬 수 없다. 사용자가 고른 폴더에
  * fetch 응답을 스트리밍으로 써서 하나씩 끝을 확인한다(메모리에 올리지 않는다).
- * 서버 제한과 같게 동시 2개, 429면 3초 뒤 다시 시도(최대 5번). */
+ * 서버 제한과 같게 동시 2개. 429(전사 등이 자리를 쓰는 중)면 자리가 날 때까지 또는 중지할 때까지 기다린다. */
 
 const BULK_CONCURRENCY = 2;
+const BULK_RETRY_MS = 3000;
+const LINK_REUSE_MS = 8 * 60 * 1000;  // 링크는 10분짜리다. 만료 전까지는 같은 링크로 다시 시도한다
 const bulk = { ctrl: null };
 
 function bulkDownloadSupported() {
@@ -48,12 +50,25 @@ async function startBulkDownload(items, onUpdate) {
   }
 }
 
+function sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
+  });
+}
+
 async function saveToFolder(dir, item, signal) {
-  for (let attempt = 0; ; attempt++) {
-    const link = await api(item.linkPath, { method: "POST" });  // 링크는 10분짜리라 받기 직전에 발급한다
+  let link = null;
+  let issuedAt = 0;
+  for (;;) {
+    // 링크 발급이 이력에 남으므로, 기다리는 동안에는 만료가 가까울 때만 새로 받는다
+    if (!link || Date.now() - issuedAt > LINK_REUSE_MS) {
+      link = await api(item.linkPath, { method: "POST" });
+      issuedAt = Date.now();
+    }
     const res = await fetch(link.url, { signal });
-    if (res.status === 429 && attempt < 5) {
-      await new Promise((r) => setTimeout(r, 3000));
+    if (res.status === 429) {
+      await sleep(BULK_RETRY_MS, signal);
       continue;
     }
     if (!res.ok) {
