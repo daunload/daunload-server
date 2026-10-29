@@ -226,5 +226,9 @@ def safe_file_name(name: str, limit: int = 150) -> str:
 
 def content_disposition(file_name: str) -> str:
     # 구형 브라우저용 대체 이름. 한글이 섞이면 잘린 이름 대신 일반 이름을 쓴다(최신 브라우저는 filename*를 쓴다).
-    ascii_name = file_name.replace('"', "") if file_name.isascii() else "lecture.mp4"
+    if file_name.isascii():
+        ascii_name = file_name.replace('"', "")
+    else:
+        suffix = Path(file_name).suffix
+        ascii_name = "lecture.mp4" if suffix == ".mp4" else f"download{suffix if suffix.isascii() else ''}"
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(file_name)}"

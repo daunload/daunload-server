@@ -73,6 +73,10 @@ class LmsClient:
     # 요청 공통 처리
     # ------------------------------------------------------------------
 
+    def export_cookies(self) -> list[dict[str, str]]:
+        """지금 세션 쿠키를 auth.import_cookies 형식으로 내보낸다(다른 클라이언트로 파일을 중계할 때)."""
+        return auth.export_cookies(self._http.cookies)
+
     async def relogin(self) -> None:
         if not self._password:
             raise SessionExpired("세션이 만료되었고 재로그인할 자격증명이 없습니다.")
