@@ -30,6 +30,7 @@ const state = {
   me: null, cred: null, todos: [], courses: [], announcements: null,
   batches: [], active: null, plan: null, todoFilter: "all", noticeCourse: null,
   videoCourse: null, videoList: null, savedVideos: null,
+  videoTab: "videos", materialList: null, notDownloadedOnly: false, bulk: null,
   assignments: null, assignmentFilter: "unsubmitted", todoSearch: "", todoDeadline: "all",
 };
 
@@ -171,7 +172,7 @@ function logout() {
   stopPolling();
   Object.assign(state, { me: null, cred: null, todos: [], courses: [], announcements: null,
     batches: [], active: null, plan: null, planForm: null, planQuery: null,
-    videoCourse: null, videoList: null, savedVideos: null,
+    videoCourse: null, videoList: null, savedVideos: null, materialList: null, bulk: null,
   assignments: null, assignmentFilter: "unsubmitted", noticeCourse: null, todoSearch: "", todoFilter: "all", todoDeadline: "all" });
   $("#password").type = "password";
   $("#password-toggle").textContent = "표시";
@@ -859,65 +860,184 @@ async function viewVideos() {
   const opt = (id, name) => `<option value="${id}" ${id === state.videoCourse ? "selected" : ""}>${esc(name)}</option>`;
   const options = courses.map((c) => opt(c.lms_course_id, c.name)).join("")
     + (pastCourses.length ? `<optgroup label="지난 과목 (저장된 영상)">${pastCourses.map(([id, name]) => opt(id, name)).join("")}</optgroup>` : "");
+  const isPast = !courses.some((c) => c.lms_course_id === state.videoCourse);
+  if (isPast) state.videoTab = "videos";  // 지난 과목은 수업자료를 LMS에서 볼 수 없다
   $("#view").innerHTML = `
     <div class="view-head"><h1>강의 영상</h1>
       <label>과목<select id="video-course">${options}</select></label></div>
-    <p class="notice-inline">본인이 수강하는 강의를 개인 복습용으로 받는 기능입니다. 강의 영상은 교수와 학교의 저작물이므로 다른 사람에게 공유하거나 올리지 마세요. 영상 파일은 서버에 저장하지 않고 학교에서 받는 대로 바로 전달합니다. 동기화 때 영상 주소를 저장해 두므로 시청기간이 끝난 영상도 받을 수 있지만, 학교 서버가 주소를 막거나 영상을 지우면 받을 수 없습니다.</p>
-    <div class="panel" id="video-list"><div class="empty"><p>LMS에서 영상 목록을 불러오는 중</p></div></div>`;
-  $("#video-course").addEventListener("change", (e) => { state.videoCourse = Number(e.target.value); state.videoList = null; viewVideos(); });
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="videos" aria-selected="${state.videoTab === "videos"}">영상</button>
+      <button role="tab" data-tab="materials" aria-selected="${state.videoTab === "materials"}" ${isPast ? "disabled" : ""}>수업자료</button>
+      <label class="check inline"><input type="checkbox" id="not-downloaded" ${state.notDownloadedOnly ? "checked" : ""}><span>안 받은 것만</span></label>
+    </div>
+    <p class="notice-inline">본인이 수강하는 강의와 자료를 개인 복습용으로 받는 기능입니다. 강의 영상과 자료는 교수와 학교의 저작물이므로 다른 사람에게 공유하거나 올리지 마세요. 파일은 서버에 저장하지 않고 학교에서 받는 대로 바로 전달합니다. 동기화 때 영상 주소를 저장해 두므로 시청기간이 끝난 영상도 받을 수 있지만, 학교 서버가 주소를 막거나 영상을 지우면 받을 수 없습니다.</p>
+    <p class="bulk-status" id="bulk-status" role="status"></p>
+    <div class="panel" id="video-list"><div class="empty"><p>LMS에서 목록을 불러오는 중</p></div></div>`;
+  $("#video-course").addEventListener("change", (e) => {
+    state.videoCourse = Number(e.target.value); state.videoList = null; state.materialList = null; viewVideos();
+  });
+  document.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => { state.videoTab = b.dataset.tab; viewVideos(); }));
+  $("#not-downloaded").addEventListener("change", (e) => { state.notDownloadedOnly = e.target.checked; renderCurrentTab(); });
+  renderBulkStatus();
 
   const courseId = state.videoCourse;
-  if (!courses.some((c) => c.lms_course_id === courseId)) {  // 지난 과목: 저장된 영상만
+  if (isPast) {  // 지난 과목: 저장된 영상만
     state.videoList = { courseId, items: [] };
     renderVideoList();
     return;
   }
-  if (!state.videoList || state.videoList.courseId !== courseId) {
+  const key = state.videoTab === "videos" ? "videoList" : "materialList";
+  const path = state.videoTab === "videos" ? `/courses/${courseId}/videos` : `/courses/${courseId}/materials`;
+  if (!state[key] || state[key].courseId !== courseId) {
     try {
-      state.videoList = { courseId, items: await api(`/courses/${courseId}/videos`) };
+      state[key] = { courseId, items: await api(path) };
     } catch (err) {
       if (state.view === "videos" && state.videoCourse === courseId) viewError(err.message, viewVideos);
       return;
     }
   }
   if (state.view !== "videos" || state.videoCourse !== courseId) return;
-  renderVideoList();
+  renderCurrentTab();
 }
+
+function renderCurrentTab() {
+  if (state.videoTab === "materials") renderMaterialList(); else renderVideoList();
+}
+
+function renderBulkStatus() {
+  const box = $("#bulk-status");
+  if (!box) return;
+  const b = state.bulk;
+  if (!b) { box.innerHTML = ""; return; }
+  const text = b.running ? `여러 개 받는 중: ${b.done + b.failed}/${b.total} (실패 ${b.failed})`
+    : b.stopped ? `중지했습니다: ${b.done}/${b.total} 완료` : `다 받았습니다: ${b.done}/${b.total} 완료, 실패 ${b.failed}`;
+  box.innerHTML = `${esc(text)} ${b.running ? '<button class="btn small" id="bulk-stop">중지</button>' : ""}
+    ${b.errors?.length ? `<details><summary>실패 항목</summary><ul>${b.errors.map((e) => `<li>${esc(e)}</li>`).join("")}</ul></details>` : ""}`;
+  $("#bulk-stop")?.addEventListener("click", stopBulkDownload);
+}
+
+function bulkButton(items) {
+  const label = items.length ? `전체 받기 (${items.length})` : "전체 받기";
+  return bulkDownloadSupported()
+    ? `<button class="btn small" data-bulk ${items.length && !state.bulk?.running ? "" : "disabled"}>${label}</button>`
+    : `<button class="btn small" disabled title="폴더에 바로 저장하는 기능은 데스크톱 Chrome·Edge에서만 지원합니다.">${label}</button>`;
+}
+
+function wireBulk(box, groups) {
+  box.querySelectorAll("[data-bulk]").forEach((b, i) => b.addEventListener("click", async () => {
+    try {
+      await startBulkDownload(groups[i], (stat) => { state.bulk = stat; renderBulkStatus(); if (!stat.running) renderCurrentTab(); });
+    } catch (err) {
+      if (err.name !== "AbortError") toast(err.message, true);  // 폴더 선택 취소는 조용히
+    }
+  }));
+}
+
+function groupBy(items, key, title) {
+  const groups = new Map();
+  for (const v of items) {
+    if (!groups.has(v[key])) groups.set(v[key], { title: v[title], items: [] });
+    groups.get(v[key]).items.push(v);
+  }
+  return [...groups.values()];
+}
+
+const doneBadge = (at) => at ? `<span class="badge done" title="${esc(fmtDate(new Date(at)))}에 받음">✓ 받음</span>` : "";
 
 function renderVideoList() {
   const courseId = state.videoList.courseId;
+  const course = state.courses.find((c) => c.lms_course_id === courseId);
   const saved = new Map(state.savedVideos.filter((v) => v.lms_course_id === courseId).map((v) => [v.module_item_id, v]));
   // LMS 목록을 기준으로 하고, LMS에서 사라진 저장 영상을 뒤에 붙인다
-  const items = state.videoList.items.map((v) => ({ ...v, savedRow: saved.get(v.module_item_id) }));
+  let items = state.videoList.items.map((v) => ({ ...v, savedRow: saved.get(v.module_item_id) }));
   const live = new Set(items.map((v) => v.module_item_id));
   for (const s of saved.values()) {
     if (!live.has(s.module_item_id)) items.push({ ...s, module_id: `saved-${s.module_title}`, available: false, completed: false, savedRow: s });
   }
-  const box = $("#video-list");
-  if (!items.length) { box.innerHTML = `<div class="empty"><p>이 과목에는 내려받을 수 있는 강의 영상이 없습니다.</p></div>`; return; }
-  const groups = new Map();
   for (const v of items) {
-    if (!groups.has(v.module_id)) groups.set(v.module_id, { title: v.module_title, items: [] });
-    groups.get(v.module_id).items.push(v);
+    v.courseName = course?.name || v.savedRow?.course_name || "";
+    v.downloaded_at = v.downloaded_at || v.savedRow?.downloaded_at || null;
+    v.transcript_id = v.transcript_id ?? v.savedRow?.transcript_id ?? null;
+    v.linkPath = v.available ? `/courses/${courseId}/videos/${v.module_item_id}/download-link`
+      : v.savedRow?.saved ? `/saved-videos/${v.savedRow.id}/download-link` : null;
+    v.audioPath = v.available ? `/courses/${courseId}/videos/${v.module_item_id}/audio-link`
+      : v.savedRow?.saved ? `/saved-videos/${v.savedRow.id}/audio-link` : null;
   }
+  if (state.notDownloadedOnly) items = items.filter((v) => !v.downloaded_at);
+  const box = $("#video-list");
+  if (!items.length) {
+    box.innerHTML = `<div class="empty"><p>${state.notDownloadedOnly ? "아직 받지 않은 영상이 없습니다." : "이 과목에는 내려받을 수 있는 강의 영상이 없습니다."}</p></div>`;
+    return;
+  }
+  const groups = groupBy(items, "module_id", "module_title");
   const status = (v) => v.available ? (v.completed ? "수강 완료" : "미수강")
     : v.savedRow ? "시청기간 종료" : "아직 열리지 않음";
-  const button = (v) => v.available
-    ? `<button class="btn small" data-dl="${v.module_item_id}">내려받기</button>`
-    : v.savedRow?.saved
-      ? `<button class="btn small" data-saved="${v.savedRow.id}">내려받기</button>`
-      : `<button class="btn small" disabled title="${esc(v.savedRow?.resolve_error || "")}">내려받기</button>`;
-  box.innerHTML = [...groups.values()].map((g) => `<div class="group-label">${esc(g.title)}</div><ul class="list">${g.items.map((v) => `
+  const thumb = (v) => v.thumbnail_url
+    ? `<img class="thumb" src="${esc(v.thumbnail_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : "";
+  const button = (v) => v.linkPath
+    ? `<button class="btn small" data-link="${esc(v.linkPath)}">내려받기</button>`
+    : `<button class="btn small" disabled title="${esc(v.savedRow?.resolve_error || "")}">내려받기</button>`;
+  const bulkGroups = groups.map((g) => g.items.filter((v) => v.linkPath).map((v) => ({
+    linkPath: v.linkPath, label: v.title, onDone: () => { v.downloaded_at = new Date().toISOString(); markDownloaded(v); } })));
+  box.innerHTML = groups.map((g, i) => `<div class="group-label row">${esc(g.title)}
+      <span class="group-actions">${bulkButton(bulkGroups[i])}${typeof transcribeGroupButton === "function" ? transcribeGroupButton(g.items) : ""}</span></div>
+    <ul class="list">${g.items.map((v) => `
     <li class="video-row">
+      ${thumb(v)}
       <span class="video-info"><span class="title">${esc(v.title)}</span><br>
         <span class="meta row"><span>${v.duration ? fmtDuration(v.duration) : ""}</span><span>${fmtSize(v.size)}</span>
-          <span>${status(v)}</span>${v.savedRow?.saved ? "<span>주소 저장됨</span>" : ""}</span></span>
-      ${button(v)}
+          <span>${status(v)}</span>${v.savedRow?.saved ? "<span>주소 저장됨</span>" : ""}${doneBadge(v.downloaded_at)}</span></span>
+      <span class="row-actions">${typeof transcribeButton === "function" ? transcribeButton(v, courseId) : ""}${button(v)}</span>
     </li>`).join("")}</ul>`).join("");
-  box.querySelectorAll("[data-dl]").forEach((b) => b.addEventListener("click", () =>
-    downloadVideo(b, `/courses/${courseId}/videos/${b.dataset.dl}/download-link`)));
-  box.querySelectorAll("[data-saved]").forEach((b) => b.addEventListener("click", () =>
-    downloadVideo(b, `/saved-videos/${b.dataset.saved}/download-link`)));
+  box.querySelectorAll("[data-link]").forEach((b) => b.addEventListener("click", async () => {
+    if (await downloadVideo(b, b.dataset.link)) {
+      const v = items.find((x) => x.linkPath === b.dataset.link);
+      if (v) { v.downloaded_at = new Date().toISOString(); markDownloaded(v); }
+      renderVideoList();
+    }
+  }));
+  wireBulk(box, bulkGroups);
+  if (typeof wireTranscribe === "function") wireTranscribe(box, items, courseId);
+}
+
+function markDownloaded(v) {
+  // 다시 그려도 표시가 남도록 원본 목록에도 반영한다
+  const src = state.videoList.items.find((x) => x.module_item_id === v.module_item_id);
+  if (src) src.downloaded_at = v.downloaded_at;
+  if (v.savedRow) v.savedRow.downloaded_at = v.downloaded_at;
+}
+
+function renderMaterialList() {
+  const courseId = state.materialList.courseId;
+  let items = state.materialList.items.map((m) => ({ ...m, linkPath: `/courses/${courseId}/materials/${encodeURIComponent(m.key)}/download-link` }));
+  if (state.notDownloadedOnly) items = items.filter((m) => !m.downloaded_at);
+  const box = $("#video-list");
+  if (!items.length) {
+    box.innerHTML = `<div class="empty"><p>${state.notDownloadedOnly ? "아직 받지 않은 자료가 없습니다." : "이 과목에는 받을 수 있는 수업자료가 없습니다."}</p></div>`;
+    return;
+  }
+  const groups = groupBy(items, "module_id", "module_title");
+  const markMaterial = (key) => {
+    const src = state.materialList.items.find((x) => x.key === key);
+    if (src) src.downloaded_at = new Date().toISOString();
+  };
+  const bulkGroups = groups.map((g) => g.items.map((m) => ({ linkPath: m.linkPath, label: m.file_name, onDone: () => markMaterial(m.key) })));
+  box.innerHTML = groups.map((g, i) => `<div class="group-label row">${esc(g.title)}<span class="group-actions">${bulkButton(bulkGroups[i])}</span></div>
+    <ul class="list">${g.items.map((m) => `
+    <li class="video-row">
+      <span class="video-info"><span class="title">${esc(m.file_name)}</span><br>
+        <span class="meta row"><span>${esc(m.title)}</span><span>${fmtSize(m.size)}</span>
+          <span>${m.kind === "canvas_file" ? "위키 첨부" : "자료"}</span>${doneBadge(m.downloaded_at)}</span></span>
+      <button class="btn small" data-link="${esc(m.linkPath)}">내려받기</button>
+    </li>`).join("")}</ul>`).join("");
+  box.querySelectorAll("[data-link]").forEach((b) => b.addEventListener("click", async () => {
+    if (await downloadVideo(b, b.dataset.link)) {
+      const m = items.find((x) => x.linkPath === b.dataset.link);
+      if (m) markMaterial(m.key);
+      renderMaterialList();
+    }
+  }));
+  wireBulk(box, bulkGroups);
 }
 
 async function downloadVideo(btn, linkPath) {
@@ -932,8 +1052,10 @@ async function downloadVideo(btn, linkPath) {
     a.click();
     a.remove();
     toast(`${link.file_name} 내려받기를 시작했습니다. 브라우저 다운로드 목록에서 진행 상황을 볼 수 있습니다.`);
+    return true;
   } catch (err) {
     toast(err.message, true);
+    return false;
   } finally {
     btn.disabled = false;
     btn.textContent = "내려받기";
