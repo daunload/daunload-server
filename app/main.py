@@ -4,7 +4,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.api import routes_account, routes_data, routes_media, routes_notifications, routes_playback
+from app.api import routes_account, routes_data, routes_media, routes_notifications, routes_playback, routes_transcripts
 from app.api.deps import Queue
 from app.config import get_settings
 from app.db.base import init_engine
@@ -37,6 +37,7 @@ def create_app(lifespan_=lifespan) -> FastAPI:
     app.include_router(routes_playback.router)
     app.include_router(routes_notifications.router)
     app.include_router(routes_media.router)
+    app.include_router(routes_transcripts.router)
 
     @app.get("/health", tags=["meta"])
     async def health():

@@ -37,6 +37,7 @@ from app.lms.models import Course
 from app.security import DOWNLOAD_LINK_MINUTES, create_download_token, decode_download_token
 from app.services.downloads import downloaded_map, record_download, video_key
 from app.services.lms_access import NoCredentials, lms_client_for
+from app.services.transcripts import transcript_map
 
 router = APIRouter(tags=["videos"])
 
@@ -57,6 +58,7 @@ class VideoOut(BaseModel):
     available: bool
     thumbnail_url: str | None
     downloaded_at: datetime | None = None
+    transcript_id: int | None = None
 
 
 class LinkOut(BaseModel):
@@ -77,6 +79,7 @@ class SavedVideoOut(BaseModel):
     saved: bool  # mp4 주소를 저장했는지
     resolve_error: str | None
     downloaded_at: datetime | None = None
+    transcript_id: int | None = None
 
 
 class MaterialOut(BaseModel):
@@ -130,8 +133,10 @@ async def list_videos(course_id: int, user: CurrentUser, db: Db):
     """과목의 강의 영상 목록(완료한 영상 포함, LMS에서 실시간 조회)."""
     videos = await _videos(db, user.id, course_id)
     done = await downloaded_map(db, user.id, course_id)
+    tmap = await transcript_map(db, user.id, course_id)
     return [VideoOut(**{k: getattr(v, k) for k in _VIDEO_FIELDS},
-                     downloaded_at=done.get((course_id, video_key(v.module_item_id)))) for v in videos]
+                     downloaded_at=done.get((course_id, video_key(v.module_item_id))),
+                     transcript_id=tmap.get((course_id, v.module_item_id))) for v in videos]
 
 
 async def _open_video(db, user_id: int, course_id: int, module_item_id: int) -> CourseVideo:
@@ -191,10 +196,12 @@ async def list_saved_videos(user: CurrentUser, db: Db, course_id: int | None = N
         stmt = stmt.where(SavedVideo.lms_course_id == course_id)
     stmt = stmt.order_by(SavedVideo.course_name, SavedVideo.lms_course_id, SavedVideo.module_position, SavedVideo.item_position)
     done = await downloaded_map(db, user.id, course_id)
-    skip = {"saved", "downloaded_at"}
+    tmap = await transcript_map(db, user.id, course_id)
+    skip = {"saved", "downloaded_at", "transcript_id"}
     return [
         SavedVideoOut(**{k: getattr(r, k) for k in SavedVideoOut.model_fields if k not in skip}, saved=r.media_url is not None,
-                      downloaded_at=done.get((r.lms_course_id, video_key(r.module_item_id))))
+                      downloaded_at=done.get((r.lms_course_id, video_key(r.module_item_id))),
+                      transcript_id=tmap.get((r.lms_course_id, r.module_item_id)))
         for r in (await db.scalars(stmt)).all()
     ]
 
