@@ -19,7 +19,9 @@ from starlette.background import BackgroundTask
 from app.api.deps import CurrentUser, Db
 from app.db.base import sessionmaker
 from app.db.models import CourseRow, SavedVideo
+from app.config import get_settings
 from app.lms import auth
+from app.lms.audio import SAMPLE_RATE, ffmpeg_path, pcm_stream
 from app.lms.errors import InvalidCredentials, LmsError
 from app.lms.materials import CourseMaterial, check_file_host, commons_download_url, course_materials
 from app.lms.media import (
@@ -40,6 +42,7 @@ router = APIRouter(tags=["videos"])
 
 MAX_DOWNLOADS_PER_USER = 2
 _active: dict[int, int] = defaultdict(int)
+_audio_streams = 0
 
 
 class VideoOut(BaseModel):
@@ -131,16 +134,30 @@ async def list_videos(course_id: int, user: CurrentUser, db: Db):
                      downloaded_at=done.get((course_id, video_key(v.module_item_id)))) for v in videos]
 
 
-@router.post("/courses/{course_id}/videos/{module_item_id}/download-link", response_model=LinkOut)
-async def create_link(course_id: int, module_item_id: int, user: CurrentUser, db: Db, request: Request):
-    video = next((v for v in await _videos(db, user.id, course_id) if v.module_item_id == module_item_id), None)
+async def _open_video(db, user_id: int, course_id: int, module_item_id: int) -> CourseVideo:
+    video = next((v for v in await _videos(db, user_id, course_id) if v.module_item_id == module_item_id), None)
     if video is None:
         raise HTTPException(404, "이 과목에서 해당 영상을 찾을 수 없습니다.")
     if not video.available:
         raise HTTPException(409, "아직 열리지 않은 영상입니다.")
+    return video
+
+
+@router.post("/courses/{course_id}/videos/{module_item_id}/download-link", response_model=LinkOut)
+async def create_link(course_id: int, module_item_id: int, user: CurrentUser, db: Db, request: Request):
+    video = await _open_video(db, user.id, course_id, module_item_id)
     token = create_download_token(user.id, {"content_id": video.content_id, "file_name": video.file_name})
     await record_download(db, user.id, course_id, video_key(module_item_id), "video", video.title)
     return LinkOut(url=request.app.url_path_for("download_video", token=token), file_name=video.file_name)
+
+
+@router.post("/courses/{course_id}/videos/{module_item_id}/audio-link", response_model=LinkOut)
+async def create_audio_link(course_id: int, module_item_id: int, user: CurrentUser, db: Db, request: Request):
+    """전사용 오디오(16kHz 모노 PCM) 스트림 링크. 다운로드 이력에는 남기지 않는다."""
+    video = await _open_video(db, user.id, course_id, module_item_id)
+    token = create_download_token(user.id, {"kind": "audio", "content_id": video.content_id,
+                                            "duration": video.duration, "file_name": video.file_name})
+    return LinkOut(url=request.app.url_path_for("stream_audio", token=token), file_name=video.file_name)
 
 
 @router.get("/courses/{course_id}/materials", response_model=list[MaterialOut])
@@ -192,6 +209,18 @@ async def create_saved_link(saved_id: int, user: CurrentUser, db: Db, request: R
     token = create_download_token(user.id, {"media_url": row.media_url, "file_name": row.file_name})
     await record_download(db, user.id, row.lms_course_id, video_key(row.module_item_id), "video", row.title)
     return LinkOut(url=request.app.url_path_for("download_video", token=token), file_name=row.file_name)
+
+
+@router.post("/saved-videos/{saved_id}/audio-link", response_model=LinkOut)
+async def create_saved_audio_link(saved_id: int, user: CurrentUser, db: Db, request: Request):
+    row = await db.get(SavedVideo, saved_id)
+    if row is None or row.user_id != user.id:
+        raise HTTPException(404, "저장된 영상이 아닙니다.")
+    if row.media_url is None:
+        raise HTTPException(409, row.resolve_error or "아직 영상 주소를 저장하지 못했습니다. 다음 동기화 뒤에 다시 시도하세요.")
+    token = create_download_token(user.id, {"kind": "audio", "media_url": row.media_url,
+                                            "duration": row.duration, "file_name": row.file_name})
+    return LinkOut(url=request.app.url_path_for("stream_audio", token=token), file_name=row.file_name)
 
 
 # ----------------------------------------------------------------------
@@ -291,3 +320,42 @@ async def download_video(token: str, request: Request):
     media_type = "video/mp4" if data.get("kind", "video") == "video" else upstream.headers.get("content-type", "application/octet-stream")
     return StreamingResponse(body(), status_code=upstream.status_code, media_type=media_type,
                              headers=out_headers, background=BackgroundTask(cleanup))
+
+
+@router.get("/audio/{token}", name="stream_audio")
+async def stream_audio(token: str):
+    global _audio_streams
+    decoded = decode_download_token(token)
+    if decoded is None or decoded[1].get("kind") != "audio":
+        raise HTTPException(401, "전사 링크가 만료되었거나 올바르지 않습니다. 다시 시도하세요.")
+    user_id, data = decoded
+    if ffmpeg_path() is None:
+        raise HTTPException(503, "서버에 ffmpeg가 설치되어 있지 않습니다.")
+    if _active[user_id] >= MAX_DOWNLOADS_PER_USER:
+        raise HTTPException(429, f"동시에 {MAX_DOWNLOADS_PER_USER}개까지 받을 수 있습니다. 진행 중인 작업이 끝난 뒤 다시 시도하세요.")
+    if _audio_streams >= get_settings().max_audio_streams:
+        raise HTTPException(429, "서버가 바쁩니다. 잠시 뒤 다시 시도하세요.")
+    try:
+        if saved_url := data.get("media_url"):
+            url = check_media_host(saved_url)
+        else:
+            async with _relay_client() as http:
+                url = await resolve_media_url(http, data["content_id"])
+    except MediaError as e:
+        raise HTTPException(422, str(e)) from e
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"학교 서버에 연결하지 못했습니다: {e}") from e
+
+    _active[user_id] += 1
+    _audio_streams += 1
+
+    async def cleanup():
+        global _audio_streams
+        _active[user_id] -= 1
+        _audio_streams -= 1
+
+    headers = {"X-Audio-Sample-Rate": str(SAMPLE_RATE), "Cache-Control": "no-store"}
+    if data.get("duration"):
+        headers["X-Audio-Duration"] = str(data["duration"])
+    return StreamingResponse(pcm_stream(url, COMMONS_HEADERS), media_type="application/octet-stream",
+                             headers=headers, background=BackgroundTask(cleanup))

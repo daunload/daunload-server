@@ -32,7 +32,7 @@ dev = [
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
-markers = ["browser: 실제 Chrome을 띄우는 테스트"]
+markers = ["browser: 실제 Chrome을 띄우는 테스트", "ffmpeg: 실제 ffmpeg를 실행하는 테스트"]
 
 [build-system]
 requires = ["hatchling"]

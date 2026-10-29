@@ -9,6 +9,8 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 RUN playwright install --with-deps chrome
+# 전사용 오디오 추출(16kHz PCM)
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 
 COPY . .
 RUN uv sync --frozen --no-dev

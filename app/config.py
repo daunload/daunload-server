@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     playback_max_reloads: int = 3
     verify_attempts: int = 4
     verify_interval_seconds: int = 20
+    # 전사용 오디오 스트림(ffmpeg) 서버 전체 동시 실행 수
+    max_audio_streams: int = 4
 
     # 개발용: CLI에서 쓰는 본인 계정
     lms_id: str = ""
