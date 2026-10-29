@@ -167,7 +167,7 @@ async def course_materials(client: LmsClient, course: Course, modules: list[Modu
 - 메시지 프로토콜:
   - in: `{type:"start", jobId, duration}`, `{type:"chunk", jobId, samples: Float32Array}`, `{type:"end", jobId}`, `{type:"cancel", jobId}`
   - out: `{type:"model-progress", percent}`, `{type:"progress", jobId, seconds}`, `{type:"segment", jobId, start, end, text}`, `{type:"done", jobId}`, `{type:"error", jobId, message, fatal}`
-- 처리: 받은 샘플을 버퍼에 쌓고 30초(480,000 샘플)가 차면 그 창을 전사한다. 다음 창은 앞 창의 마지막 5초와 겹쳐 시작하고, 겹친 구간에서 시작하는 세그먼트는 버린다. 세그먼트 시각은 전체 기준 절대 시각으로 바꾼다. `end`를 받으면 남은 버퍼를 전사한다. 메모리는 창 2개 분량만 쓴다.
+- 처리: 받은 샘플을 버퍼에 쌓고 30초(480,000 샘플)가 차면 그 창을 전사한다. 마지막 창이 아니면 끝 시각이 "창 길이 - 5초" 안에 있는 세그먼트만 내고, 다음 창은 마지막으로 낸 세그먼트의 끝에서 시작한다(창 끝에서 잘린 문장을 처음부터 다시 듣는다). 끊을 곳이 없을 만큼 긴 세그먼트는 25초에서 자르고 넘어간다. 규칙은 `app/web/whisper-window.mjs`에 있다. 세그먼트 시각은 전체 기준 절대 시각으로 바꾼다. `end`를 받으면 남은 버퍼를 전사한다. 메모리는 창 2개 분량만 쓴다.
 
 ### 브라우저: 큐와 UI (`app/web/transcribe.js`)
 

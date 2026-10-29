@@ -1,6 +1,7 @@
 // 브라우저에서 Whisper를 실행하는 모듈 Worker.
 // 모델은 처음 실행할 때 Hugging Face Hub에서 내려받아 브라우저 캐시에 남는다.
 import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1";
+import { planWindow } from "./whisper-window.mjs";
 
 const MODEL = "onnx-community/whisper-small";
 const RATE = 16000;
@@ -68,16 +69,12 @@ async function drain(id, job) {
     const out = await transcriber(audio, { language: "korean", task: "transcribe", return_timestamps: true });
     if (job.cancelled) return;
     const base = job.base / RATE;
-    for (const c of out.chunks || []) {
-      const text = (c.text || "").trim();
-      const start = base + (c.timestamp?.[0] ?? 0);
-      const end = base + (c.timestamp?.[1] ?? take / RATE);
-      if (!text || start < job.lastEnd - 0.5) continue;  // 겹친 구간에서 이미 낸 문장
-      post({ type: "segment", jobId: id, start, end, text });
-      job.lastEnd = end;
-    }
     const last = job.ended && take === job.length;
-    const advance = last ? take : take - OVERLAP;
+    const plan = planWindow(out.chunks, take / RATE, last, OVERLAP / RATE);
+    for (const seg of plan.segments) {
+      post({ type: "segment", jobId: id, start: base + seg.start, end: base + seg.end, text: seg.text });
+    }
+    const advance = last ? take : Math.min(take, Math.max(RATE, Math.round(plan.advanceSeconds * RATE)));
     dropSamples(job, advance);
     job.base += advance;
     post({ type: "progress", jobId: id, seconds: job.base / RATE });
@@ -98,7 +95,7 @@ function schedule(id, job) {
 
 self.onmessage = ({ data: m }) => {
   if (m.type === "start") {
-    jobs.set(m.jobId, { chunks: [], length: 0, base: 0, lastEnd: 0, ended: false, cancelled: false, chain: Promise.resolve() });
+    jobs.set(m.jobId, { chunks: [], length: 0, base: 0, ended: false, cancelled: false, chain: Promise.resolve() });
     loadPipeline().catch((err) => {
       jobs.delete(m.jobId);
       post({ type: "error", jobId: m.jobId, message: `Whisper 모델을 불러오지 못했습니다: ${err.message}`, fatal: true });
