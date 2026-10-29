@@ -218,3 +218,40 @@ class SavedVideo(Base):
     resolve_error: Mapped[str | None] = mapped_column(Text)  # 주소를 찾지 못한 이유(지원하지 않는 형식 등)
     resolved_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class DownloadRecord(Base):
+    """다운로드 링크를 발급한 기록. 브라우저에서 저장을 마쳤는지는 서버가 알 수 없다."""
+
+    __tablename__ = "download_records"
+    __table_args__ = (UniqueConstraint("user_id", "lms_course_id", "item_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    lms_course_id: Mapped[int] = mapped_column(Integer)
+    item_key: Mapped[str] = mapped_column(String(64))  # 영상 "v{module_item_id}", 자료 CourseMaterial.key
+    kind: Mapped[str] = mapped_column(String(16))  # video / commons_file / canvas_file
+    title: Mapped[str] = mapped_column(String(500))
+    count: Mapped[int] = mapped_column(Integer, default=1)
+    first_at: Mapped[datetime] = mapped_column(default=utcnow)
+    last_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class Transcript(Base):
+    """브라우저 Whisper로 만든 강의 전사 결과. 다시 전사하면 덮어쓴다."""
+
+    __tablename__ = "transcripts"
+    __table_args__ = (UniqueConstraint("user_id", "lms_course_id", "module_item_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    lms_course_id: Mapped[int] = mapped_column(Integer)
+    module_item_id: Mapped[int] = mapped_column(Integer)
+    course_name: Mapped[str] = mapped_column(String(255))
+    title: Mapped[str] = mapped_column(String(500))
+    text: Mapped[str] = mapped_column(Text)
+    segments: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)  # [{start, end, text}]
+    model: Mapped[str] = mapped_column(String(100))
+    duration: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
