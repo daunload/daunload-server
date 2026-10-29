@@ -82,3 +82,53 @@ async def test_transcript_dialog_toggle_and_delete(dashboard):
     await page.get_by_role("button", name="삭제").click()
     await expect(page.locator("#transcript-dialog")).not_to_be_visible()
     await expect(page.get_by_role("button", name="전사됨 보기")).to_have_count(0)
+
+
+FAILING_WORKER = """
+window.Worker = class {
+  constructor() { this.listeners = []; }
+  addEventListener(type, fn) { if (type === "message") this.listeners.push(fn); }
+  terminate() {}
+  postMessage(m) {
+    if (m.type === "start") setTimeout(() => this.listeners.forEach((fn) => fn({ data: { type: "error", jobId: m.jobId, message: "디코더 오류", fatal: false } })), 0);
+  }
+};
+"""
+
+
+async def _start_one(page, data, worker, audio_seconds, duration):
+    await page.add_init_script(worker)
+    data["/saved-videos"] = []
+    data["/courses/1/videos"] = [_video(12, "2강 재귀")]
+    data["/courses/1/videos/12/audio-link"] = {"url": "/audio/tok", "file_name": "a.mp4", "expires_in_minutes": 10}
+    saved = []
+
+    async def audio(route):
+        await route.fulfill(body=b"\x00\x10" * (16000 * audio_seconds),
+                            headers={"X-Audio-Duration": str(duration), "Content-Type": "application/octet-stream"})
+
+    async def transcript(route):
+        saved.append(route.request.post_data)
+        await route.fulfill(json={"id": 9})
+
+    await page.route("**/audio/tok", audio)
+    await page.route("**/courses/1/videos/12/transcript", transcript)
+    await page.goto("http://dashboard.test/#videos")
+    await page.get_by_role("button", name="전사", exact=True).click()
+    return saved
+
+
+async def test_failed_job_aborts_audio_stream(dashboard):
+    page, data = dashboard
+    saved = await _start_one(page, data, FAILING_WORKER, audio_seconds=2, duration=2)
+    await expect(page.locator("#transcribe-panel")).to_contain_text("디코더 오류")
+    # 실패한 작업의 오디오 요청을 끊어야 서버의 동시 실행 자리가 풀린다
+    assert await page.evaluate("tx.finished[0].ctrl.signal.aborted") is True
+    assert saved == []
+
+
+async def test_truncated_audio_is_not_saved(dashboard):
+    page, data = dashboard
+    saved = await _start_one(page, data, FAKE_WORKER, audio_seconds=2, duration=60)
+    await expect(page.locator("#transcribe-panel")).to_contain_text("오디오가 중간에 끊겼습니다")
+    assert saved == []

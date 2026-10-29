@@ -6,6 +6,7 @@
 
 const WHISPER_RATE = 16000;
 const READ_AHEAD_SECONDS = 60;  // Worker보다 이만큼만 앞서 받는다(메모리 일정)
+const MIN_AUDIO_RATIO = 0.97;   // LMS의 영상 길이와 실제 오디오 길이의 오차 허용
 const tx = { worker: null, device: null, modelPercent: null, queue: [], current: null, finished: [], nextId: 1 };
 
 function txKey(courseId, moduleItemId) { return `${courseId}:${moduleItemId}`; }
@@ -102,6 +103,10 @@ async function runNext() {
     onTranscriptSaved(job, saved.id);
   } catch (err) {
     if (job.status !== "cancelled") { job.status = "failed"; job.error = err.message; }
+  } finally {
+    // 실패해도 오디오 요청을 끊어야 서버의 동시 실행 자리가 풀린다
+    job.ctrl.abort();
+    tx.worker?.postMessage({ type: "cancel", jobId: job.id });
   }
   tx.finished.push(job);
   tx.current = null;
@@ -136,6 +141,10 @@ async function pumpAudio(body, job, worker) {
   }
   job.totalSeconds = sent / WHISPER_RATE;
   if (sent === 0) throw new Error("오디오가 비어 있습니다. 소리가 없는 영상이거나 서버에서 변환하지 못했습니다.");
+  // 서버는 변환 중 오류가 나도 스트림을 정상 종료하므로 길이로 끊김을 알아낸다
+  if (job.duration && job.totalSeconds < job.duration * MIN_AUDIO_RATIO) {
+    throw new Error(`오디오가 중간에 끊겼습니다 (${fmtDuration(job.totalSeconds)} / ${fmtDuration(job.duration)}). 다시 시도하세요.`);
+  }
 }
 
 function onTranscriptSaved(job, id) {
