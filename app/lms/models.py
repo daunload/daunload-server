@@ -51,12 +51,14 @@ class ItemContentData(LmsModel):
     content_type: str | None = None  # movie / everlec / video / mp4 / readystream / pdf ...
     total_file_size: int | None = None
     thumbnail_url: str | None = None
+    file_name: str | None = None  # content_type이 "file"인 commons 자료의 원래 파일 이름
 
 
 class ContentData(LmsModel):
     item_id: int | None = None
     item_content_type: str | None = None
     item_content_data: ItemContentData | None = None
+    url: str | None = None  # wiki_page 항목의 페이지 slug
     title: str | None = None
     description: str | None = None
     use_attendance: bool | None = True
