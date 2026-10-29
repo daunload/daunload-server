@@ -109,3 +109,39 @@ async def test_audio_without_ffmpeg_is_503(env, monkeypatch):
     monkeypatch.setattr(routes_media, "ffmpeg_path", lambda: None)
     url = (await api.post("/courses/45446/videos/11/audio-link", headers=h)).json()["url"]
     assert (await api.get(url)).status_code == 503
+
+
+@pytest.mark.ffmpeg
+@needs_ffmpeg
+async def test_client_disconnect_through_starlette_kills_ffmpeg(tmp_path, monkeypatch):
+    """uvicorn처럼 Starlette가 스트림을 취소해도(anyio 취소 범위) ffmpeg가 남지 않아야 한다."""
+    from starlette.responses import StreamingResponse
+
+    src = _sine(tmp_path / "long.m4a", 600)
+    procs = []
+    real = asyncio.create_subprocess_exec
+
+    async def spy(*a, **k):
+        p = await real(*a, **k)
+        procs.append(p)
+        return p
+
+    monkeypatch.setattr(audio.asyncio, "create_subprocess_exec", spy)
+    sent, disconnect = 0, asyncio.Event()
+
+    async def send(message):
+        nonlocal sent
+        sent += 1
+        if sent == 3:
+            disconnect.set()
+
+    async def receive():
+        await disconnect.wait()
+        return {"type": "http.disconnect"}
+
+    await StreamingResponse(audio.pcm_stream(src))({"type": "http", "asgi": {"spec_version": "2.3"}}, receive, send)
+    for _ in range(50):
+        if procs[0].returncode is not None:
+            break
+        await asyncio.sleep(0.1)
+    assert procs[0].returncode is not None

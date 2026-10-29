@@ -10,6 +10,8 @@ import logging
 import shutil
 from collections.abc import AsyncIterator
 
+import anyio
+
 log = logging.getLogger(__name__)
 
 SAMPLE_RATE = 16000
@@ -41,12 +43,10 @@ async def pcm_stream(source: str, headers: dict[str, str] | None = None, chunk: 
             log.warning("ffmpeg 실패(%s): %s", proc.returncode, err)
     finally:
         if proc.returncode is None:
-            # 읽기를 멈춘 파이프는 EOF까지 비워야 wait()가 끝난다
-            proc.terminate()
-            try:
-                await asyncio.wait_for(asyncio.gather(_drain(proc.stdout), _drain(proc.stderr), proc.wait()), 5)
-            except TimeoutError:
-                proc.kill()
+            # 클라이언트가 끊으면 취소된 채로 여기에 온다. 정리 중의 await가 다시 취소되지 않게 막는다.
+            with anyio.CancelScope(shield=True):
+                proc.kill()  # 가득 찬 파이프에 막힌 ffmpeg는 SIGTERM에 바로 반응하지 않는다
+                # 읽기를 멈춘 파이프는 EOF까지 비워야 wait()가 끝난다
                 await asyncio.gather(_drain(proc.stdout), _drain(proc.stderr), proc.wait())
 
 
