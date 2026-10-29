@@ -55,6 +55,7 @@ class CourseVideo:
     duration: float | None
     size: int | None
     completed: bool
+    thumbnail_url: str | None = None
 
     @property
     def available(self) -> bool:
@@ -85,6 +86,7 @@ def course_videos(course: Course, modules: list[Module]) -> list[CourseVideo]:
                     item_position=item.position or 0, title=data.title or item.title or "",
                     content_id=cid, content_type=icd.content_type or "", duration=icd.duration,
                     size=icd.total_file_size, completed=bool(item.completed),
+                    thumbnail_url=icd.thumbnail_url if (icd.thumbnail_url or "").startswith("https://") else None,
                 )
             )
     result.sort(key=lambda v: (v.module_position, v.item_position))

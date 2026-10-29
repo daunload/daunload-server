@@ -7,6 +7,7 @@
 """
 
 from collections import defaultdict
+from datetime import datetime
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -32,6 +33,7 @@ from app.lms.media import (
 )
 from app.lms.models import Course
 from app.security import DOWNLOAD_LINK_MINUTES, create_download_token, decode_download_token
+from app.services.downloads import downloaded_map, record_download, video_key
 from app.services.lms_access import NoCredentials, lms_client_for
 
 router = APIRouter(tags=["videos"])
@@ -50,6 +52,8 @@ class VideoOut(BaseModel):
     size: int | None
     completed: bool
     available: bool
+    thumbnail_url: str | None
+    downloaded_at: datetime | None = None
 
 
 class LinkOut(BaseModel):
@@ -69,6 +73,7 @@ class SavedVideoOut(BaseModel):
     size: int | None
     saved: bool  # mp4 주소를 저장했는지
     resolve_error: str | None
+    downloaded_at: datetime | None = None
 
 
 class MaterialOut(BaseModel):
@@ -79,6 +84,7 @@ class MaterialOut(BaseModel):
     title: str
     file_name: str
     size: int | None
+    downloaded_at: datetime | None = None
 
 
 async def _course_row(db, user_id: int, course_id: int) -> CourseRow:
@@ -112,10 +118,17 @@ async def _materials(db, user_id: int, course_id: int) -> list[CourseMaterial]:
         raise HTTPException(502, f"LMS 조회 실패: {e}") from e
 
 
+_VIDEO_FIELDS = ("module_item_id", "module_id", "module_title", "title", "content_type", "duration", "size",
+                 "completed", "available", "thumbnail_url")
+
+
 @router.get("/courses/{course_id}/videos", response_model=list[VideoOut])
 async def list_videos(course_id: int, user: CurrentUser, db: Db):
     """과목의 강의 영상 목록(완료한 영상 포함, LMS에서 실시간 조회)."""
-    return [VideoOut(**{k: getattr(v, k) for k in VideoOut.model_fields}) for v in await _videos(db, user.id, course_id)]
+    videos = await _videos(db, user.id, course_id)
+    done = await downloaded_map(db, user.id, course_id)
+    return [VideoOut(**{k: getattr(v, k) for k in _VIDEO_FIELDS},
+                     downloaded_at=done.get((course_id, video_key(v.module_item_id)))) for v in videos]
 
 
 @router.post("/courses/{course_id}/videos/{module_item_id}/download-link", response_model=LinkOut)
@@ -126,13 +139,17 @@ async def create_link(course_id: int, module_item_id: int, user: CurrentUser, db
     if not video.available:
         raise HTTPException(409, "아직 열리지 않은 영상입니다.")
     token = create_download_token(user.id, {"content_id": video.content_id, "file_name": video.file_name})
+    await record_download(db, user.id, course_id, video_key(module_item_id), "video", video.title)
     return LinkOut(url=request.app.url_path_for("download_video", token=token), file_name=video.file_name)
 
 
 @router.get("/courses/{course_id}/materials", response_model=list[MaterialOut])
 async def list_materials(course_id: int, user: CurrentUser, db: Db):
     """과목의 수업자료(commons 파일 + 위키 첨부, LMS에서 실시간 조회)."""
-    return [MaterialOut(**{k: getattr(m, k) for k in MaterialOut.model_fields}) for m in await _materials(db, user.id, course_id)]
+    mats = await _materials(db, user.id, course_id)
+    done = await downloaded_map(db, user.id, course_id)
+    return [MaterialOut(**{k: getattr(m, k) for k in MaterialOut.model_fields if k != "downloaded_at"},
+                        downloaded_at=done.get((course_id, m.key))) for m in mats]
 
 
 @router.post("/courses/{course_id}/materials/{key}/download-link", response_model=LinkOut)
@@ -145,6 +162,7 @@ async def create_material_link(course_id: int, key: str, user: CurrentUser, db: 
     else:
         data = {"kind": mat.kind, "content_id": mat.source_id, "file_name": mat.file_name}
     token = create_download_token(user.id, data)
+    await record_download(db, user.id, course_id, mat.key, mat.kind, mat.file_name)
     return LinkOut(url=request.app.url_path_for("download_video", token=token), file_name=mat.file_name)
 
 
@@ -155,8 +173,11 @@ async def list_saved_videos(user: CurrentUser, db: Db, course_id: int | None = N
     if course_id is not None:
         stmt = stmt.where(SavedVideo.lms_course_id == course_id)
     stmt = stmt.order_by(SavedVideo.course_name, SavedVideo.lms_course_id, SavedVideo.module_position, SavedVideo.item_position)
+    done = await downloaded_map(db, user.id, course_id)
+    skip = {"saved", "downloaded_at"}
     return [
-        SavedVideoOut(**{k: getattr(r, k) for k in SavedVideoOut.model_fields if k != "saved"}, saved=r.media_url is not None)
+        SavedVideoOut(**{k: getattr(r, k) for k in SavedVideoOut.model_fields if k not in skip}, saved=r.media_url is not None,
+                      downloaded_at=done.get((r.lms_course_id, video_key(r.module_item_id))))
         for r in (await db.scalars(stmt)).all()
     ]
 
@@ -169,6 +190,7 @@ async def create_saved_link(saved_id: int, user: CurrentUser, db: Db, request: R
     if row.media_url is None:
         raise HTTPException(409, row.resolve_error or "아직 영상 주소를 저장하지 못했습니다. 다음 동기화 뒤에 다시 시도하세요.")
     token = create_download_token(user.id, {"media_url": row.media_url, "file_name": row.file_name})
+    await record_download(db, user.id, row.lms_course_id, video_key(row.module_item_id), "video", row.title)
     return LinkOut(url=request.app.url_path_for("download_video", token=token), file_name=row.file_name)
 
 
