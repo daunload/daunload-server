@@ -1,16 +1,16 @@
 """실제 브라우저(Chrome)로 가짜 플레이어 페이지를 재생해 본다. Chrome이 없으면 건너뛴다."""
 
-from datetime import UTC, datetime
 from contextlib import AsyncExitStack
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from app.config import Settings
 from app.lms.auth import LmsSession
-from app.lms.models import Module
 from app.lms.errors import PlaybackError
-from app.lms.player import VideoPlayer, launch_browser, verify_completed
+from app.lms.models import Module
+from app.lms.player import VideoPlayer, _accept_dialog, _confirm_resume, launch_browser, verify_completed
 from app.lms.todo import VideoTodo
 
 PAGE = (Path(__file__).parent / "fixtures" / "player" / "index.html").resolve().as_uri()
@@ -93,6 +93,99 @@ async def test_short_media_does_not_count_as_lecture_end(browser):
     session = LmsSession(user_id="1", bearer_token="b", cookies=[])
     with pytest.raises(PlaybackError, match="강의 길이와 감지한 영상 길이가 다릅니다"):
         await VideoPlayer(browser, SETTINGS, poll_seconds=0.5).play(session, _video(duration=2400))
+
+
+@pytest.mark.browser
+@pytest.mark.parametrize("dialog_attributes", ['role="dialog"', 'class="modal"'])
+async def test_confirms_delayed_resume_in_iframe(browser, dialog_attributes):
+    context = await browser.new_context()
+    try:
+        page = await context.new_page()
+        clip = Path(__file__).parent / "fixtures" / "player" / "clip.webm"
+        await page.route("**/lecture.webm", lambda route: route.fulfill(path=str(clip)))
+        await page.route("**/index.html", lambda route: route.fulfill(
+            content_type="text/html", body='<iframe src="/player.html"></iframe>',
+        ))
+        await page.route("**/player.html", lambda route: route.fulfill(
+            content_type="text/html", body=f"""
+            <meta charset="utf-8">
+            <video muted preload="auto"></video>
+            <script>
+              window.resumed = false;
+              const video = document.querySelector('video');
+              // Blob URLs support seeking without a test HTTP Range server.
+              fetch('/lecture.webm').then(r => r.blob()).then(blob => {{
+                video.src = URL.createObjectURL(blob);
+              }});
+              let scheduled = false;
+              video.addEventListener('play', () => {{
+                if (!window.resumed) {{
+                  video.pause();
+                  if (!scheduled) {{ scheduled = true; setTimeout(showResume, 800); }}
+                }}
+              }});
+              function showResume() {{
+                const dialog = document.createElement('div');
+                dialog.setAttribute('data-resume', '');
+                dialog.innerHTML = '<p>00:01부터 보시겠습니까?</p><button>확인</button>';
+                const template = document.createElement('div');
+                template.innerHTML = '<div {dialog_attributes}></div>';
+                const wrapper = template.firstChild;
+                wrapper.appendChild(dialog);
+                document.body.appendChild(wrapper);
+                dialog.querySelector('button').onclick = () => {{
+                  window.resumed = true;
+                  video.currentTime = 1.2;
+                  wrapper.remove();
+                  video.play();
+                }};
+              }}
+            </script>
+            """,
+        ))
+        resumed_positions = []
+
+        async def progress(v, t, d):
+            frame = page.frames[1]
+            if await frame.evaluate("window.resumed && !document.querySelector('video').seeking"):
+                resumed_positions.append(t)
+
+        result = await VideoPlayer(browser, SETTINGS, poll_seconds=0.2)._play_on_page(
+            page, _video("https://player.test/index.html"), progress,
+        )
+        assert resumed_positions and resumed_positions[0] >= 1.2
+        assert result.position >= 3.9
+        assert result.reloads == 0
+    finally:
+        await context.close()
+
+
+@pytest.mark.browser
+async def test_resume_confirmation_leaves_unrelated_buttons_alone(browser):
+    page = await browser.new_page()
+    try:
+        await page.set_content("""
+            <button onclick="window.clicked = true">확인</button>
+            <div role="dialog">삭제하시겠습니까?
+              <button onclick="window.clicked = true">확인</button>
+            </div>
+            <div role="dialog" hidden>10분부터 보시겠습니까?<button>확인</button></div>
+        """)
+        assert await _confirm_resume(page) is False
+        assert await page.evaluate("!!window.clicked") is False
+    finally:
+        await page.close()
+
+
+@pytest.mark.browser
+async def test_native_resume_prompt_preserves_suggested_position(browser):
+    page = await browser.new_page()
+    try:
+        page.on("dialog", _accept_dialog)
+        assert await page.evaluate("prompt('몇 분부터 보시겠습니까?', '12:30')") == "12:30"
+        assert await page.evaluate("confirm('이어서 보시겠습니까?')") is True
+    finally:
+        await page.close()
 
 
 class _FakeClient:
