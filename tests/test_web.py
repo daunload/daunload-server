@@ -283,3 +283,21 @@ async def test_admin_settings_disclosure_retry_and_mobile(dashboard, tmp_path):
     await expect(details).not_to_have_attribute("open", "")
     await page.keyboard.press("Enter")
     await expect(details.get_by_role("heading", name="알림 설정")).to_be_visible()
+
+
+async def test_lms_links_only_allow_https(dashboard):
+    page, data = dashboard
+    now = datetime.now(UTC).isoformat()
+    data["/announcements"] = [{"lms_id": 1, "lms_course_id": 1, "course_name": "컴퓨터프로그래밍", "title": "공지",
+                               "message": "본문", "url": "javascript:alert(1)", "author": "교수", "posted_at": now,
+                               "attachments": [{"name": "첨부", "url": "javascript:alert(2)"}, {"name": "정상", "url": "https://canvas.ssu.ac.kr/f/1"}]}]
+    data["/todos"][0]["url"] = "javascript:alert(3)"
+    data["/assignments"][0]["url"] = "data:text/html,<script>alert(4)</script>"
+    for view in ("announcements", "todos", "assignments", "dashboard"):
+        await page.goto(f"http://dashboard.test/#{view}")
+        await page.wait_for_load_state("networkidle")
+        hrefs = await page.eval_on_selector_all("a[href]", "els => els.map((a) => a.getAttribute('href'))")
+        assert not [h for h in hrefs if h.lower().startswith(("javascript:", "data:"))], (view, hrefs)
+    await page.goto("http://dashboard.test/#announcements")
+    await page.locator("summary").first.click()
+    await expect(page.get_by_role("link", name="정상")).to_have_attribute("href", "https://canvas.ssu.ac.kr/f/1")

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, Db
@@ -67,10 +67,10 @@ async def play_single(module_item_id: int, user: CurrentUser, db: Db):
 
 
 @router.get("/batches", response_model=list[BatchOut])
-async def list_batches(user: CurrentUser, db: Db, limit: int = 20):
+async def list_batches(user: CurrentUser, db: Db, limit: int = Query(default=20, ge=1, le=100)):
     stmt = (
         select(PlaybackBatch).where(PlaybackBatch.user_id == user.id)
-        .order_by(PlaybackBatch.id.desc()).limit(min(limit, 100))
+        .order_by(PlaybackBatch.id.desc()).limit(limit)
     )
     batches = (await db.scalars(stmt)).all()
     estimates = await playback.queue_estimates(db)

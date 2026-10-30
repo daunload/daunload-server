@@ -494,3 +494,39 @@ async def test_password_change_revokes_existing_tokens(env):
     new = {"Authorization": f"Bearer {r.json()['access_token']}"}
     assert (await api.get("/me", headers=old)).status_code == 401
     assert (await api.get("/me", headers=new)).status_code == 200
+
+
+async def test_security_headers_on_dashboard_and_api(env):
+    api, _ = env
+    for path in ("/", "/health", "/app.js"):
+        r = await api.get(path)
+        csp = r.headers["content-security-policy"]
+        assert "frame-ancestors 'none'" in csp and "object-src 'none'" in csp, path
+        # onnxruntime-web은 wasm 백엔드를 blob: 모듈로 불러오고, 글꼴(Pretendard)은 jsdelivr에서 받는다
+        assert "script-src 'self' https://cdn.jsdelivr.net blob: 'wasm-unsafe-eval'" in csp
+        assert "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net" in csp
+        assert "font-src 'self' https://cdn.jsdelivr.net" in csp
+        assert r.headers["x-content-type-options"] == "nosniff"
+        assert r.headers["referrer-policy"] == "no-referrer"
+        assert r.headers["strict-transport-security"].startswith("max-age=")
+
+
+async def test_api_docs_are_off_unless_enabled(env, monkeypatch):
+    api, _ = env
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert (await api.get(path)).status_code == 404, path
+    monkeypatch.setenv("API_DOCS", "true")
+    get_settings.cache_clear()
+    app = create_app()
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as dev:
+        assert (await dev.get("/openapi.json")).status_code == 200
+        docs = await dev.get("/docs")
+        assert docs.status_code == 200 and "content-security-policy" not in docs.headers  # Swagger UI는 CDN·인라인 스크립트를 쓴다
+
+
+async def test_list_limits_must_be_positive(env):
+    api, _ = env
+    h = await _signup(api)
+    assert (await api.get("/announcements?limit=-1", headers=h)).status_code == 422
+    assert (await api.get("/playback/batches?limit=0", headers=h)).status_code == 422
+    assert (await api.get("/announcements?limit=200", headers=h)).status_code == 200
