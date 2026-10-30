@@ -15,9 +15,9 @@ Db = Annotated[AsyncSession, Depends(get_db)]
 
 
 async def current_user(db: Db, token: Annotated[str, Depends(oauth2)]) -> User:
-    user_id = decode_access_token(token)
-    user = await db.get(User, user_id) if user_id else None
-    if user is None:
+    decoded = decode_access_token(token)
+    user = await db.get(User, decoded[0]) if decoded else None
+    if user is None or user.token_version != decoded[1]:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "인증이 필요합니다.", headers={"WWW-Authenticate": "Bearer"})
     return user
 
