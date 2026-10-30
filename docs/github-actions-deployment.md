@@ -47,6 +47,7 @@ Deployment branches를 `main`으로 제한한다. 매번 자동 배포하려면 
 | `DEPLOY_HOST` | 실제 서버 IP 또는 SSH용 호스트명. Cloudflare 프록시 주소 대신 직접 접속 주소 사용 |
 | `DEPLOY_SSH_KEY` | Mac의 `~/.ssh/daunload_actions` 개인키 전체 |
 | `DEPLOY_KNOWN_HOSTS` | 접속 대상 서버의 검증된 SSH host key 행 |
+| `HETZNER_API_TOKEN` | 해당 프로젝트의 Read & Write API 토큰. 방화벽 임시 규칙 추가·제거에 사용 |
 | `PRODUCTION_ENV` (선택) | 운영 `.env`의 전체 내용. 등록하면 배포 시 서버 설정을 이 내용으로 교체 |
 
 ### 환경변수를 GitHub에서 변경하기
@@ -83,10 +84,11 @@ Secret을 삭제하거나 비워 두면 그 이후부터 서버의 현재 `.env`
 JWT_SECRET 변경은 허용하지만 기존 로그인·다운로드 토큰이 무효화된다.
 성공·실패 시 전송용 임시 `.env`를 정리한다.
 
-Environment Variables는 필요할 때만 설정한다.
+Environment Variables에 방화벽 ID를 반드시 등록한다. 나머지는 필요할 때만 설정한다.
 
 | 이름 | 기본값 |
 |---|---|
+| `HETZNER_FIREWALL_ID` | 기본값 없음. 실제 서버에 적용된 방화벽의 숫자 ID(필수) |
 | `DEPLOY_USER` | `deploy` |
 | `DEPLOY_PORT` | `22` |
 
@@ -110,12 +112,31 @@ GHCR 인증은 GitHub이 자동 발급하는 `GITHUB_TOKEN`을 사용하므로 �
 
 ## 3. SSH 방화벽 확인
 
-GitHub 호스팅 러너에서 서버의 SSH 포트에 도달할 수 있어야 한다.
-22번 포트를 본인 IP `/32`에만 허용했다면 GitHub Actions는 접속하지 못한다.
-고정 출구 IP를 쓰는 러너나 VPN을 구성하면 방화벽에서 그 IP만 허용할 수 있다.
-기본 GitHub 호스팅 러너의 주소는 바뀌므로 특정 러너 IP 하나를 고정해서 등록하지 않는다.
-SSH를 모든 IP에 허용하는 운영 방식을 선택한다면 SSH 키 인증을 사용하고 비밀번호 로그인을 비활성화한다.
-웹 포트 80·443은 기존대로 유지한다.
+워크플로는 첫 SCP 전에 현재 `deploy` 러너의 공인 IPv4를 조회한다.
+`HETZNER_API_TOKEN`과 `HETZNER_FIREWALL_ID`로 해당 IP `/32`에만 `DEPLOY_PORT`를 허용한다.
+API의 규칙 적용이 끝나고 TCP 접속이 가능한지 확인한 뒤 업로드·배포를 진행한다.
+SSH와 SCP는 IPv4를 사용해 조회한 IP와 접속 주소 체계를 맞춘다.
+
+Hetzner Console의 해당 프로젝트 **Security → API Tokens**에서 Read & Write 토큰을 만들고
+GitHub `production` 환경의 `HETZNER_API_TOKEN` Secret에 등록한다.
+이 토큰은 프로젝트 리소스를 수정할 권한이 있으므로 로그·코드·운영 `.env`에 넣지 않는다.
+방화벽 ID는 `production` 환경의 **Variables**에 `HETZNER_FIREWALL_ID`로 등록한다.
+
+기존 웹 포트 80·443과 관리자 SSH IP 허용 규칙은 유지한다.
+임시 규칙에는 `github-actions:저장소:실행ID:시도번호` 설명을 붙인다.
+정리 단계는 `if: always()`로 실행하며, 최신 규칙을 다시 조회해 **이 실행의 규칙만** 제거한다.
+배포 중 다른 사람이 추가·수정한 규칙을 이전 스냅샷으로 덮어쓰지 않는다.
+같은 저장소의 배포는 직렬화하지만, 별도 자동화나 콘솔에서 동시에 같은 방화벽을 편집하는 것은 피한다.
+
+기존에 22번을 `0.0.0.0/0` 또는 `::/0`에 허용한 규칙이 있으면 SSH는 계속 전체 공개 상태다.
+임시 허용 방식으로 운영하려면 해당 전체 공개 규칙을 제거하고 관리자 IP 허용은 남긴다.
+서버 UFW가 별도로 SSH를 본인 IP에만 제한하면 Hetzner 규칙만으로는 접속할 수 없다.
+UFW가 활성 상태라면 SSH 포트를 UFW에서 허용하고 출발지 IP 제한은 Hetzner 방화벽에서 적용한다.
+기본 포트의 예시는 `sudo ufw allow 22/tcp`다. 웹 포트 80·443은 기존대로 유지한다.
+
+러너 강제 종료나 Hetzner API 장애로 정리 단계를 완료하지 못하면 임시 규칙이 남을 수 있다.
+이 경우 작업은 실패로 표시되며 콘솔에서 해당 실행 ID의 규칙만 제거한다. 자동 만료 기능은 아니다.
+방화벽 자동화의 실제 API 호출은 GitHub 러너에서만 수행하고 테스트에서는 모의 API를 사용한다.
 
 ## 4. 최초 실행
 
@@ -126,12 +147,13 @@ GitHub **Actions → Deploy production**에서 실행 결과를 확인한다.
 
 서버 배포 순서는 다음과 같다.
 
-1. GHCR 로그인과 이미지 다운로드. 실패하면 기존 서비스 유지.
+1. 러너 IP 임시 허용 후 SSH 접속, GHCR 로그인과 이미지 다운로드. 실패하면 기존 서비스 유지.
 2. 선택적으로 새 환경 설정 검증, 이전 이미지 참조 보관과 DB·환경 설정 백업. 실패하면 기존 서비스 유지.
 3. API·워커·Caddy 중지 후 선택적으로 `.env` 교체. 이 시점부터 짧은 서비스 중단 발생.
 4. 새 이미지로 `alembic upgrade head`. 실패하면 다음 단계 중단.
 5. 새 API·워커·Caddy 실행과 컨테이너 상태 확인.
 6. 새 `DOMAIN`의 공개 HTTPS 상태 확인 후 성공한 이미지 참조를 서버의 `.release.env`에 저장.
+7. 성공·실패 여부와 관계없이 이번 실행의 임시 SSH 규칙 정리.
 
 브라우저·ffmpeg·외부 PostgreSQL 통합 테스트는 자동 배포의 테스트 단계에서 제외한다.
 HTTP 상태 확인은 실제 LMS 재생 성공까지 보장하지 않는다.

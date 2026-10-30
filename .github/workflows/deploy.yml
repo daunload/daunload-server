@@ -92,11 +92,16 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/deploy-ssh/key"
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/deploy-ssh/known_hosts"
           chmod 600 "$RUNNER_TEMP/deploy-ssh/"*
+      - name: Temporarily allow this runner through Hetzner firewall
+        env:
+          HETZNER_API_TOKEN: ${{ secrets.HETZNER_API_TOKEN }}
+          HETZNER_FIREWALL_ID: ${{ vars.HETZNER_FIREWALL_ID }}
+        run: python3 deploy/hetzner/firewall.py open --state "$RUNNER_TEMP/hetzner-firewall.json"
       - name: Upload deployment configuration
         shell: bash
         run: |
           set -euo pipefail
-          ssh_options=(-i "$RUNNER_TEMP/deploy-ssh/key" -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$RUNNER_TEMP/deploy-ssh/known_hosts" -o ConnectTimeout=15)
+          ssh_options=(-4 -i "$RUNNER_TEMP/deploy-ssh/key" -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$RUNNER_TEMP/deploy-ssh/known_hosts" -o ConnectTimeout=15)
           scp "${ssh_options[@]}" -P "$DEPLOY_PORT" \
             deploy/hetzner/{compose.yml,compose.sh,backup.sh,deploy.sh,Caddyfile} \
             "$DEPLOY_USER@$DEPLOY_HOST:/opt/ssu-lms/deploy/hetzner/"
@@ -109,7 +114,7 @@ jobs:
           PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
         run: |
           set -euo pipefail
-          ssh_options=(-i "$RUNNER_TEMP/deploy-ssh/key" -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$RUNNER_TEMP/deploy-ssh/known_hosts" -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+          ssh_options=(-4 -i "$RUNNER_TEMP/deploy-ssh/key" -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$RUNNER_TEMP/deploy-ssh/known_hosts" -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
           env_name=""
           if [[ -n "$PRODUCTION_ENV" ]]; then
             umask 077
@@ -123,3 +128,14 @@ jobs:
           printf '%s' "$GHCR_TOKEN" | ssh "${ssh_options[@]}" -p "$DEPLOY_PORT" \
             "$DEPLOY_USER@$DEPLOY_HOST" \
             "sudo -n bash /opt/ssu-lms/deploy/hetzner/deploy.sh '$IMAGE' '$REGISTRY_USER' '$env_name'"
+      - name: Remove this runner's temporary SSH rule
+        if: always()
+        env:
+          HETZNER_API_TOKEN: ${{ secrets.HETZNER_API_TOKEN }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/hetzner-firewall.json" ]]; then
+            python3 deploy/hetzner/firewall.py close --state "$RUNNER_TEMP/hetzner-firewall.json"
+          fi
+      - name: Remove temporary SSH credentials
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/deploy-ssh"
