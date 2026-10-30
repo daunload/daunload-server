@@ -24,6 +24,10 @@ migrations/     Alembic
 
 ## Hetzner 운영 배포
 
+`main`에 반영될 때 자동 배포하려면 [GitHub Actions 설정 가이드](docs/github-actions-deployment.md)를 따른다.
+GitHub에서 테스트·이미지 빌드 후 GHCR을 통해 서버에 전달한다.
+환경 설정은 서버 `.env`를 유지하거나 선택적으로 GitHub Secret `PRODUCTION_ENV`에서 배포마다 반영한다.
+
 **CPX12를 구매했다면 [CPX12 배포 가이드](docs/hetzner-cpx12-deployment.md)를 따른다.**
 2GB swap, 로컬 이미지 빌드·전송, 재생 검증과 오디오 활성화 순서를 포함한다.
 

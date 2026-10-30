@@ -12,8 +12,13 @@ trap 'rm -rf -- "$staging_dir"' EXIT
 "$config_dir/compose.sh" exec -T postgres pg_restore --list < "$staging_dir/database.dump" > /dev/null
 install -m 600 "$config_dir/.env" "$staging_dir/app.env"
 cp "$config_dir/compose.yml" "$config_dir/Caddyfile" "$staging_dir/"
+backup_files=(database.dump app.env compose.yml Caddyfile)
+if [[ -f "$config_dir/.release.env" ]]; then
+  cp "$config_dir/.release.env" "$staging_dir/"
+  backup_files+=(.release.env)
+fi
 archive="$backup_dir/ssu-lms-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
-tar -C "$staging_dir" -czf "$staging_dir/backup.tar.gz" database.dump app.env compose.yml Caddyfile
+tar -C "$staging_dir" -czf "$staging_dir/backup.tar.gz" "${backup_files[@]}"
 mv "$staging_dir/backup.tar.gz" "$archive"
 # Retain 14 days of this script's local archives; off-server retention is separate.
 find "$backup_dir" -maxdepth 1 -type f -name 'ssu-lms-*.tar.gz' -mtime +13 -delete

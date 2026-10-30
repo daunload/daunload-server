@@ -2,6 +2,10 @@
 __pycache__/
 *.pyc
 .env
+.env.*
+!.env.example
 .pytest_cache/
 *.db
 debug/
+deploy/hetzner/.release.env*
+deploy/hetzner/.deploy.lock

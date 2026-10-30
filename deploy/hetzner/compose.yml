@@ -6,11 +6,11 @@ x-logging: &logging
     max-file: "3"
 
 x-app: &app
-  image: ssu-lms:${APP_IMAGE_TAG:-local}
+  image: ${APP_IMAGE:-ssu-lms:${APP_IMAGE_TAG:-local}}
   platform: linux/amd64
   restart: unless-stopped
   init: true
-  env_file: .env
+  env_file: ${APP_ENV_FILE:-.env}
   environment:
     DATABASE_URL: postgresql+asyncpg://lms:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/lms
     REDIS_URL: redis://redis:6379/0
