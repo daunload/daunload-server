@@ -81,16 +81,29 @@ dc run --rm --no-deps api alembic upgrade head
 dc up -d --no-build --no-deps --force-recreate --wait --wait-timeout 180 api
 dc up -d --no-build --no-deps --force-recreate --wait --wait-timeout 180 sync-worker worker caddy
 dc exec -T api python -c '
-import os, sys, time, urllib.request
-url = "https://" + os.environ["DOMAIN"] + "/health"
+import http.client, os, socket, sys, time
+
+# Connect to Caddy directly so a CDN proxy (e.g. Cloudflare bot rules) cannot block the check,
+# while still verifying the certificate and Host routing for DOMAIN.
+class CaddyConnection(http.client.HTTPSConnection):
+    def connect(self):
+        sock = socket.create_connection(("caddy", 443), self.timeout)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
 for attempt in range(6):
     try:
-        with urllib.request.urlopen(url, timeout=15) as response:
-            assert response.status == 200
+        conn = CaddyConnection(os.environ["DOMAIN"], timeout=15)
+        try:
+            conn.request("GET", "/health")
+            status = conn.getresponse().status
+        finally:
+            conn.close()
+        if status != 200:
+            raise RuntimeError(f"HTTP {status}")
         break
-    except Exception:
+    except Exception as exc:
         if attempt == 5:
-            print("Public HTTPS health check failed.", file=sys.stderr)
+            print(f"HTTPS health check through Caddy failed: {exc!r}", file=sys.stderr)
             sys.exit(1)
         time.sleep(5)
 '
