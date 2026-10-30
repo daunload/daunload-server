@@ -181,3 +181,105 @@ async def test_deep_link_and_skip_link_keep_current_page(dashboard):
     await expect(page.locator("#view")).to_be_focused()
     await expect(page).to_have_url("http://dashboard.test/#courses")
     await expect(page.locator(".overview")).to_be_hidden()
+
+
+async def test_playback_queue_shows_wait_and_deadline_risk(dashboard):
+    page, data = dashboard
+    now = datetime.now(UTC)
+    batch = {
+        "id": 5, "status": "queued", "scope": "all", "total": 1,
+        "done_count": 0, "failed_count": 0, "skipped_count": 0,
+        "cancel_requested": False, "queue_position": 3, "estimated_wait_seconds": 3600,
+        "estimated_start": (now + timedelta(hours=1)).isoformat(),
+        "expected_end": (now + timedelta(hours=2)).isoformat(), "deadline_at_risk": True,
+        "jobs": [{"position": 0, "module_item_id": 1, "title": "대기 중 강의", "duration": 1800,
+                  "status": "queued", "progress_seconds": 0, "attempts": 0, "error": None,
+                  "deadline": (now + timedelta(minutes=30)).isoformat(),
+                  "expected_end": (now + timedelta(hours=2)).isoformat()}],
+    }
+    data["/playback/batches"] = [batch]
+    data["/playback/batches/5"] = batch
+    await page.goto("http://dashboard.test/#playback")
+    await expect(page.get_by_text("다음 영상 대기 3번째", exact=False)).to_be_visible()
+    await expect(page.get_by_text("대기 시간으로 인해 일부 영상이 마감 전에 끝나지 않을 수 있습니다.")).to_be_visible()
+    await expect(page.get_by_role("button", name="재생 중지", exact=True)).to_be_visible()
+    await page.set_viewport_size({"width": 375, "height": 844})
+    assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+
+
+async def test_admin_users_search_mobile_and_access(dashboard, tmp_path):
+    page, data = dashboard
+    data["/me"]["is_admin"] = True
+    now = datetime.now(UTC).isoformat()
+    data["/admin/users"] = {"total": 1, "users": [{
+        "student_id": "20201234", "created_at": now, "last_login_at": now,
+        "login_count": 3, "lms_status": "ok",
+    }]}
+    await page.goto("http://dashboard.test/#admin")
+    await expect(page.get_by_role("heading", name="사용자 관리", exact=True)).to_be_visible()
+    await expect(page.locator(".admin-users")).to_contain_text("20201234")
+    await expect(page.locator(".admin-users")).to_contain_text("3회")
+    await expect(page.locator("#admin-prev")).to_be_disabled()
+    await expect(page.locator("#admin-next")).to_be_disabled()
+    await page.screenshot(path=tmp_path / "admin-desktop.png", full_page=True)
+    await page.emulate_media(reduced_motion="reduce")
+    for width, height in ((375, 812), (812, 375)):
+        await page.set_viewport_size({"width": width, "height": height})
+        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        await expect(page.locator(".admin-users")).to_contain_text("20201234")
+    await page.set_viewport_size({"width": 375, "height": 812})
+    await page.screenshot(path=tmp_path / "admin-mobile.png", full_page=True)
+    await page.get_by_label("학번 검색").fill("9999")
+    data["/admin/users"] = {"total": 0, "users": []}
+    async with page.expect_request(lambda r: "/admin/users?" in r.url and "q=9999" in r.url):
+        await page.get_by_role("button", name="검색", exact=True).click()
+    await expect(page.get_by_text("해당하는 사용자가 없습니다.")).to_be_visible()
+    for width, height in ((375, 812), (812, 375)):
+        await page.set_viewport_size({"width": width, "height": height})
+        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    data["/me"]["is_admin"] = False
+    await page.reload()
+    await expect(page.get_by_text("관리자 권한이 필요합니다.", exact=True)).to_be_visible()
+    await expect(page.locator("#admin-menu")).to_be_hidden()
+
+
+async def test_admin_settings_disclosure_retry_and_mobile(dashboard, tmp_path):
+    page, data = dashboard
+    now = datetime.now(UTC).isoformat()
+    data["/me"]["is_admin"] = True
+    data["/admin/users"] = {"total": 1, "users": [{
+        "student_id": "20209999", "created_at": now, "last_login_at": now,
+        "login_count": 2, "lms_status": "ok",
+    }]}
+    settings_url = "/admin/users/20209999/settings"
+    data[settings_url] = {
+        "student_id": "20209999", "is_admin": False, "consent_at": now,
+        "lms": {"status": "ok", "last_login_at": now, "last_synced_at": now, "next_sync_at": None},
+        "courses": [{"name": "<img src=x onerror=alert(1)> 긴 과목 이름 " * 3, "active": True, "auto_play": True},
+                    {"name": "이전 과목", "active": False, "auto_play": False}],
+        "channels": [{"kind": "telegram", "enabled": False, "created_at": now}],
+    }
+    await page.route("**" + settings_url, lambda route: route.fulfill(status=503, json={"detail": "잠시 후 다시 시도하세요."}))
+    await page.goto("http://dashboard.test/#admin")
+    details = page.locator(".admin-settings")
+    await expect(details.locator("h3")).to_have_count(0)
+    await page.get_by_text("20209999 설정 보기", exact=True).click()
+    await expect(details.get_by_role("alert")).to_contain_text("잠시 후")
+    await page.unroute("**" + settings_url)
+    await details.get_by_role("button", name="다시 시도", exact=True).click()
+    await expect(details.get_by_role("heading", name="과목별 자동 재생")).to_be_visible()
+    await expect(details).to_contain_text("자동 재생 켜짐")
+    await expect(details).to_contain_text("이전 과목 · 비활성 과목")
+    await expect(details).to_contain_text("Telegram")
+    await expect(details).to_contain_text("사용 안 함")
+    await expect(details.locator("img")).to_have_count(0)
+    for width, height in ((1440, 1100), (375, 812), (812, 375)):
+        await page.set_viewport_size({"width": width, "height": height})
+        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    await page.set_viewport_size({"width": 375, "height": 812})
+    await page.screenshot(path=tmp_path / "admin-settings-mobile.png", full_page=True)
+    await details.locator("summary").focus()
+    await page.keyboard.press("Enter")
+    await expect(details).not_to_have_attribute("open", "")
+    await page.keyboard.press("Enter")
+    await expect(details.get_by_role("heading", name="알림 설정")).to_be_visible()

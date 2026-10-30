@@ -43,8 +43,20 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://lms:lms@postgres:5432/lms
       REDIS_URL: redis://redis:6379/0
-    command: arq app.worker.main.WorkerSettings
+    command: python -m app.worker.playback
     shm_size: 1gb  # Chrome 영상 재생에 필요
+    depends_on:
+      api: {condition: service_started}
+
+  sync-worker:
+    build: .
+    restart: unless-stopped
+    platform: linux/amd64
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://lms:lms@postgres:5432/lms
+      REDIS_URL: redis://redis:6379/0
+    command: arq app.worker.main.WorkerSettings
     depends_on:
       api: {condition: service_started}
 

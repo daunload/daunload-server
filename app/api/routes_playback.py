@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 
-from app.api.deps import CurrentUser, Db, JobQueue
-from app.api.schemas import BatchDetailOut, BatchIn, BatchOut, PlanItemOut, PlanOut
+from app.api.deps import CurrentUser, Db
+from app.api.schemas import BatchDetailOut, BatchIn, BatchOut, JobOut, PlanItemOut, PlanOut
 from app.db.models import PlaybackBatch, PlaybackJob
 from app.lms.batch import BatchPlan, Scope
 from app.services import playback
@@ -41,29 +41,29 @@ async def preview_batch(user: CurrentUser, db: Db, scope: Scope, course_id: int 
     return _plan_out(await playback.preview(db, user.id, scope, course_id, module_id))
 
 
-async def _create(db, queue, user_id: int, scope: str, videos, course_id=None, module_id=None) -> PlaybackBatch:
+async def _create(db, user_id: int, scope: str, videos, course_id=None, module_id=None) -> BatchOut:
     if not videos:
         raise HTTPException(404, "기간 안에 재생할 미수강 영상이 없습니다.")
     try:
         batch = await playback.create_batch(db, user_id, scope, videos, course_id, module_id)
     except playback.ActiveBatchExists as e:
         raise HTTPException(409, str(e)) from e
-    await queue.enqueue("run_batch_job", batch.id, job_id=f"batch:{batch.id}")
-    return batch
+    # DB 커밋 자체가 큐 등록이다. Redis 장애와 무관하게 워커가 읽는다.
+    return await _batch_out(db, batch)
 
 
 @router.post("/batches", response_model=BatchOut, status_code=201)
-async def create_batch(body: BatchIn, user: CurrentUser, db: Db, queue: JobQueue):
+async def create_batch(body: BatchIn, user: CurrentUser, db: Db):
     _validate_scope(body.scope, body.course_id, body.module_id)
     videos = await playback.pending_videos_from_db(db, user.id, body.scope, body.course_id, body.module_id)
-    return await _create(db, queue, user.id, body.scope, videos, body.course_id, body.module_id)
+    return await _create(db, user.id, body.scope, videos, body.course_id, body.module_id)
 
 
 @router.post("/items/{module_item_id}", response_model=BatchOut, status_code=201)
-async def play_single(module_item_id: int, user: CurrentUser, db: Db, queue: JobQueue):
+async def play_single(module_item_id: int, user: CurrentUser, db: Db):
     """영상 한 개 재생(항목 1개짜리 묶음)."""
     videos = [v for v in await playback.pending_videos_from_db(db, user.id, "all") if v.module_item_id == module_item_id]
-    return await _create(db, queue, user.id, "item", videos, videos[0].course_id if videos else None)
+    return await _create(db, user.id, "item", videos, videos[0].course_id if videos else None)
 
 
 @router.get("/batches", response_model=list[BatchOut])
@@ -72,7 +72,9 @@ async def list_batches(user: CurrentUser, db: Db, limit: int = 20):
         select(PlaybackBatch).where(PlaybackBatch.user_id == user.id)
         .order_by(PlaybackBatch.id.desc()).limit(min(limit, 100))
     )
-    return (await db.scalars(stmt)).all()
+    batches = (await db.scalars(stmt)).all()
+    estimates = await playback.queue_estimates(db)
+    return [await _batch_out(db, b, estimates) for b in batches]
 
 
 async def _own_batch(db, user_id: int, batch_id: int) -> PlaybackBatch:
@@ -88,16 +90,24 @@ async def get_batch(batch_id: int, user: CurrentUser, db: Db):
     jobs = (await db.scalars(
         select(PlaybackJob).where(PlaybackJob.batch_id == batch_id).order_by(PlaybackJob.position)
     )).all()
-    return BatchDetailOut.model_validate({**BatchOut.model_validate(batch).model_dump(), "jobs": jobs})
+    estimates = await playback.queue_estimates(db)
+    info = estimates.get(batch.id, {})
+    return BatchDetailOut.model_validate({
+        **(await _batch_out(db, batch, estimates)).model_dump(),
+        "jobs": [{**JobOut.model_validate(j).model_dump(),
+                  **info.get("job_estimates", {}).get(j.position, {})} for j in jobs],
+    })
 
 
 @router.delete("/batches/{batch_id}", response_model=BatchOut)
 async def cancel_batch(batch_id: int, user: CurrentUser, db: Db):
-    batch = await _own_batch(db, user.id, batch_id)
-    if batch.status == "queued":
-        # 아직 시작 전이면 바로 취소한다(워커는 queued/running이 아니면 실행하지 않음).
-        batch.status = "cancelled"
-    elif batch.status == "running":
-        batch.cancel_requested = True
-    await db.commit()
-    return batch
+    batch = await playback.cancel_batch(db, batch_id, user.id)
+    if batch is None:
+        raise HTTPException(404, "묶음을 찾을 수 없습니다.")
+    return await _batch_out(db, batch)
+
+
+async def _batch_out(db, batch, estimates=None) -> BatchOut:
+    estimates = await playback.queue_estimates(db) if estimates is None else estimates
+    info = {k: v for k, v in estimates.get(batch.id, {}).items() if k != "job_estimates"}
+    return BatchOut.model_validate({**BatchOut.model_validate(batch).model_dump(), **info})

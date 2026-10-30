@@ -4,6 +4,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db.base import get_db
 from app.db.models import User
 from app.security import decode_access_token
@@ -22,6 +23,19 @@ async def current_user(db: Db, token: Annotated[str, Depends(oauth2)]) -> User:
 
 
 CurrentUser = Annotated[User, Depends(current_user)]
+
+
+def is_admin(user: User) -> bool:
+    return user.student_id in get_settings().admin_student_ids
+
+
+async def admin_user(user: CurrentUser) -> User:
+    if not is_admin(user):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "관리자 권한이 필요합니다.")
+    return user
+
+
+AdminUser = Annotated[User, Depends(admin_user)]
 
 
 class Queue:

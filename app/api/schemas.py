@@ -117,6 +117,8 @@ class BatchIn(BaseModel):
 
 
 class JobOut(Orm):
+    expected_start: datetime | None = None
+    expected_end: datetime | None = None
     position: int
     lms_course_id: int
     module_item_id: int
@@ -132,6 +134,10 @@ class JobOut(Orm):
 
 
 class BatchOut(Orm):
+    queue_position: int | None = None
+    estimated_start: datetime | None = None
+    estimated_wait_seconds: float | None = None
+    deadline_at_risk: bool = False
     id: int
     scope: str
     lms_course_id: int | None

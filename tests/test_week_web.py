@@ -102,7 +102,7 @@ async def test_first_screen_shows_only_this_week(page, tmp_path):
     # 첫 화면에는 요약 카드·검색·7일 일정표가 없다
     await expect(page.locator(".overview")).to_be_hidden()
     await expect(page.locator(".rail-wrap")).to_be_hidden()
-    await expect(page.locator("#view .btn.primary")).to_have_count(1)
+    await expect(page.locator("#week-panel .btn.primary")).to_have_count(1)
     await page.screenshot(path=tmp_path / "home.png", full_page=True)
     for width in (1280, 768, 390, 320):
         await page.set_viewport_size({"width": width, "height": 844})
@@ -147,7 +147,66 @@ async def test_all_done(page):
     page.data["/week"].update(videos=[], video_seconds=0, assignments=[])
     await page.goto("http://dashboard.test/")
     await expect(page.get_by_role("heading", name="이번 주 할 일을 모두 끝냈어요")).to_be_visible()
-    await expect(page.locator("#view .btn.primary")).to_have_count(0)
+    await expect(page.locator("#week-panel .btn.primary")).to_have_count(0)
     await page.get_by_role("button", name="전체 할 일 보기").click()
     await expect(page).to_have_url("http://dashboard.test/#todos")
 
+
+
+async def test_dashboard_all_playable_lectures_start_with_one_click(page, tmp_path):
+    # A lecture due next week still belongs to the all-courses playable list.
+    plan = page.data["/playback/batches/preview"]
+    plan["items"][1]["deadline"] = (datetime.now(UTC) + timedelta(days=10)).isoformat()
+    page.data["/week"]["videos"] = page.data["/week"]["videos"][:1]
+    await page.goto("http://dashboard.test/")
+    panel = page.locator("#dashboard-playback")
+    await expect(panel.get_by_role("heading", name="재생 가능한 강의 2개", exact=True)).to_be_visible()
+    await expect(panel.locator(".dashboard-lecture-list li")).to_have_count(2)
+    await expect(panel).to_contain_text("버튼과 LED")
+    for width in (1280, 768, 375, 320):
+        await page.set_viewport_size({"width": width, "height": 844})
+        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    await page.screenshot(path=tmp_path / "playable-mobile.png", full_page=True)
+    await panel.get_by_role("button", name="모두 재생 (2개)", exact=True).click()
+    await expect(panel.get_by_role("status")).to_contain_text("0/2개 완료")
+    assert page.calls == [("POST", "/playback/batches", {"scope": "all"})]
+    await expect(panel.locator("#dashboard-play-all")).to_have_count(0)
+    await expect(panel).to_contain_text("재생 중")
+    await panel.get_by_role("button", name="재생 현황 보기").click()
+    await expect(page).to_have_url("http://dashboard.test/#playback")
+
+
+async def test_dashboard_playable_empty_and_loading_error(page):
+    page.data["/playback/batches/preview"].update(items=[], total_seconds=0, expected_end=None)
+    await page.goto("http://dashboard.test/")
+    panel = page.locator("#dashboard-playback")
+    await expect(panel.get_by_role("button", name="모두 재생 (0개)")).to_be_disabled()
+    await expect(panel).to_contain_text("현재 재생 가능한 미수강 강의가 없습니다.")
+    await page.route("**/playback/batches/preview?scope=all", lambda r: r.fulfill(status=503, json={"detail": "조회 실패"}))
+    await panel.get_by_role("button", name="목록 새로고침").click()
+    await expect(panel.get_by_role("alert")).to_contain_text("조회 실패")
+    await page.unroute("**/playback/batches/preview?scope=all")
+    await panel.get_by_role("button", name="다시 시도").click()
+    await expect(panel).to_contain_text("현재 재생 가능한 미수강 강의가 없습니다.")
+
+
+async def test_dashboard_accepted_job_survives_detail_failure(page):
+    await page.route("**/playback/batches/7", lambda r: r.fulfill(status=503, json={"detail": "일시 오류"}))
+    await page.goto("http://dashboard.test/")
+    panel = page.locator("#dashboard-playback")
+    await panel.get_by_role("button", name="모두 재생 (2개)").click()
+    await expect(panel.get_by_role("status")).to_contain_text("0/2개 완료")
+    await expect(panel.locator("#dashboard-play-all")).to_have_count(0)
+    assert page.calls == [("POST", "/playback/batches", {"scope": "all"})]
+
+
+async def test_dashboard_repeated_click_only_enqueues_once(page):
+    await page.goto("http://dashboard.test/")
+    await expect(page.locator("#dashboard-play-all")).to_be_enabled()
+    await page.evaluate('''() => {
+      const button = document.getElementById("dashboard-play-all");
+      button.click();
+      button.click();
+    }''')
+    await expect(page.locator(".dashboard-playback-progress")).to_contain_text("0/2개 완료")
+    assert page.calls == [("POST", "/playback/batches", {"scope": "all"})]

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Boolean, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Boolean, Float, ForeignKey, Integer, String, Text, UniqueConstraint, Index, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, utcnow
@@ -18,6 +18,8 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     consent_at: Mapped[datetime]  # 계정 정보 보관·학칙 안내 동의 시각
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    last_login_at: Mapped[datetime | None]
+    login_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class LmsCredential(Base):
@@ -129,6 +131,12 @@ class AnnouncementRow(Base):
 
 class PlaybackBatch(Base):
     __tablename__ = "playback_batches"
+    __table_args__ = (
+        Index("uq_playback_active_user", "user_id", unique=True,
+              postgresql_where=text("status IN ('queued', 'running')"),
+              sqlite_where=text("status IN ('queued', 'running')")),
+    )
+    queue_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)

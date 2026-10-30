@@ -233,7 +233,7 @@ async def test_full_flow_sync_batch_and_notifications(env):
     r = await api.post("/playback/batches", headers=h, json={"scope": "course", "course_id": COURSE_ID})
     assert r.status_code == 201, r.text
     batch_id = r.json()["id"]
-    assert queue.jobs[-1] == ("run_batch_job", (batch_id,), f"batch:{batch_id}")
+    assert not any(job[0] == "run_batch_job" for job in queue.jobs)  # DB 자체가 재생 큐
     assert (await api.post("/playback/batches", headers=h, json={"scope": "all"})).status_code == 409
 
     # 5) 워커 실행(가짜 플레이어): 첫 영상은 이미 완료된 상태로 바뀌어 있다고 가정
@@ -299,3 +299,109 @@ async def test_dashboard_is_served_and_api_still_wins(env):
     assert (await api.get("/health")).json() == {"ok": True}
     h = await _signup(api)
     assert (await api.get("/me", headers=h)).json()["student_id"] == "20201234"
+
+
+async def test_admin_access_search_pagination_and_no_secrets(env, monkeypatch):
+    api, _ = env
+    monkeypatch.setattr(get_settings(), "admin_student_ids", ["20201234"])
+    admin = await _signup(api)
+    other = await _signup(api, "20209999")
+    assert (await api.get("/admin/users")).status_code == 401
+    assert (await api.get("/admin/users", headers=other)).status_code == 403
+    assert (await api.get("/me", headers=admin)).json()["is_admin"] is True
+    assert (await api.get("/me", headers=other)).json()["is_admin"] is False
+    r = await api.get("/admin/users?limit=1", headers=admin)
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-store"
+    assert r.json()["total"] == 2
+    assert r.json()["users"][0]["student_id"] == "20209999"
+    assert set(r.json()["users"][0]) == {
+        "student_id", "created_at", "last_login_at", "login_count", "lms_status",
+    }
+    second = (await api.get("/admin/users?offset=1&limit=1", headers=admin)).json()
+    assert second["users"][0]["student_id"] == "20201234"
+    filtered = (await api.get("/admin/users?q=9999", headers=admin)).json()
+    assert filtered["total"] == 1
+    assert filtered["users"][0]["student_id"] == "20209999"
+    assert (await api.get("/admin/users?q=%25", headers=admin)).json()["total"] == 0
+    assert (await api.get("/admin/users?limit=101", headers=admin)).status_code == 422
+    monkeypatch.setattr(get_settings(), "admin_student_ids", [])
+    assert (await api.get("/admin/users", headers=admin)).status_code == 403
+
+
+async def test_site_login_activity_counts_success_only(env, monkeypatch):
+    from app.db.models import User
+    api, _ = env
+    monkeypatch.setattr(get_settings(), "admin_student_ids", ["20201234"])
+    admin = await _signup(api)
+    first = (await api.get("/admin/users", headers=admin)).json()["users"][0]
+    assert first["login_count"] == 1 and first["last_login_at"]
+    await api.get("/me", headers=admin)
+    assert (await api.post("/auth/login", data={"username": "20201234", "password": "bad"})).status_code == 401
+    row = (await api.get("/admin/users", headers=admin)).json()["users"][0]
+    assert row["login_count"] == 1 and row["last_login_at"] == first["last_login_at"]
+    assert (await api.post("/auth/login", data={"username": "20201234", "password": "right"})).status_code == 200
+    api.school_password["current"] = "changed"
+    assert (await api.post("/auth/login", data={"username": "20201234", "password": "changed"})).status_code == 200
+    row = (await api.get("/admin/users", headers=admin)).json()["users"][0]
+    assert row["login_count"] == 3
+    assert row["last_login_at"] >= first["last_login_at"]
+    # Legacy users have no invented login date; missing credentials are allowed.
+    async with db_base.sessionmaker()() as db:
+        db.add(User(student_id="legacy", password_hash="unused", consent_at=datetime.now(UTC)))
+        await db.commit()
+    legacy = (await api.get("/admin/users?q=legacy", headers=admin)).json()["users"][0]
+    assert legacy["last_login_at"] is None and legacy["login_count"] == 0
+    assert legacy["lms_status"] is None
+
+
+async def test_admin_user_settings_are_scoped_read_only_and_hide_secrets(env, monkeypatch):
+    from app.db.models import CourseRow, NotificationChannel
+    api, _ = env
+    monkeypatch.setattr(get_settings(), "admin_student_ids", ["20201234"])
+    admin = await _signup(api)
+    other = await _signup(api, "20209999")
+    async with db_base.sessionmaker()() as db:
+        db.add_all([
+            CourseRow(user_id=1, lms_course_id=1, name="관리자 과목", auto_play=False),
+            CourseRow(user_id=2, lms_course_id=1, name="자동 재생 과목", auto_play=True),
+            CourseRow(user_id=2, lms_course_id=2, name="이전 과목", auto_play=False, active=False),
+            NotificationChannel(user_id=1, kind="discord", target_enc="ADMIN-SECRET"),
+            NotificationChannel(user_id=2, kind="telegram", target_enc="BOT-SECRET", enabled=False),
+        ])
+        await db.commit()
+    url = "/admin/users/20209999/settings"
+    assert (await api.get(url)).status_code == 401
+    assert (await api.get(url, headers=other)).status_code == 403
+    r = await api.get(url, headers=admin)
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-store"
+    body = r.json()
+    assert body["student_id"] == "20209999" and body["is_admin"] is False
+    assert body["consent_at"] and body["lms"]["status"] == "ok"
+    assert set(body["lms"]) == {"status", "last_login_at", "last_synced_at", "next_sync_at"}
+    assert body["courses"] == [
+        {"name": "자동 재생 과목", "active": True, "auto_play": True},
+        {"name": "이전 과목", "active": False, "auto_play": False},
+    ]
+    assert len(body["channels"]) == 1
+    assert body["channels"][0]["kind"] == "telegram" and body["channels"][0]["enabled"] is False
+    assert set(body["channels"][0]) == {"kind", "enabled", "created_at"}
+    for secret in ("SECRET", "password", "session", "target_enc", "bearer_token"):
+        assert secret not in r.text
+    assert (await api.get("/admin/users/unknown/settings", headers=admin)).status_code == 404
+    mine = (await api.get("/admin/users/20201234/settings", headers=admin)).json()
+    assert mine["is_admin"] is True and mine["courses"][0]["name"] == "관리자 과목"
+    assert (await api.patch(url, headers=admin, json={"is_admin": True})).status_code == 405
+
+
+async def test_admin_settings_empty_user(env, monkeypatch):
+    from app.db.models import User
+    api, _ = env
+    monkeypatch.setattr(get_settings(), "admin_student_ids", ["20201234"])
+    admin = await _signup(api)
+    async with db_base.sessionmaker()() as db:
+        db.add(User(student_id="legacy", password_hash="unused", consent_at=datetime.now(UTC)))
+        await db.commit()
+    r = await api.get("/admin/users/legacy/settings", headers=admin)
+    assert r.status_code == 200
+    assert r.json()["lms"] is None and r.json()["courses"] == [] and r.json()["channels"] == []

@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     fernet_key: str = ""
     jwt_secret: str = "change-me"
     jwt_expire_minutes: int = 60 * 24
+    admin_student_ids: list[str] = []
 
     # "이번 주"(월~일)를 계산할 기준 시간대
     timezone: str = "Asia/Seoul"
@@ -20,7 +21,6 @@ class Settings(BaseSettings):
     # 동기화·재생 정책
     sync_interval_minutes: int = 45
     sync_jitter_minutes: int = 15
-    max_browsers: int = 4
     playback_extra_seconds: int = 30
     playback_gap_seconds: tuple[int, int] = (10, 30)
     playback_headless: bool = True

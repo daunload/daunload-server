@@ -79,4 +79,49 @@ async def test_week_batch_plays_only_this_weeks_videos(env):
     assert [i["module_item_id"] for i in preview["items"]] == [12, 11]
     r = await api.post("/playback/batches", headers=h, json={"scope": "week"})
     assert r.status_code == 201 and r.json()["scope"] == "week" and r.json()["total"] == 2
-    assert queue.jobs[-1][0] == "run_batch_job"
+    assert not any(job[0] == "run_batch_job" for job in queue.jobs)  # 재생은 DB 큐
+
+
+async def test_all_playable_preview_and_queue_include_next_week_but_exclude_unavailable(env):
+    api, _ = env
+    headers = await _signup(api)
+    await _signup(api, "20209999")
+    now, _, _ = await _seed()
+    async with db_base.sessionmaker()() as db:
+        db.add_all([_video(1, 16, now - timedelta(seconds=1)),
+                    _video(2, 99, now + timedelta(days=1))])
+        await db.commit()
+    preview = await api.get("/playback/batches/preview?scope=all", headers=headers)
+    assert preview.status_code == 200
+    ids = {i["module_item_id"] for i in preview.json()["items"]}
+    assert ids == {11, 12, 13}
+    r = await api.post("/playback/batches", headers=headers, json={"scope": "all"})
+    assert r.status_code == 201 and r.json()["total"] == 3
+    detail = (await api.get(f"/playback/batches/{r.json()['id']}", headers=headers)).json()
+    assert {j["module_item_id"] for j in detail["jobs"]} == ids
+    assert (await api.post("/playback/batches", headers=headers, json={"scope": "all"})).status_code == 409
+
+
+async def test_confirmed_playback_removes_only_owners_completed_todos(env):
+    from app.lms.batch import ItemOutcome, build_plan
+    from app.services import playback
+    from sqlalchemy import select
+    api, _ = env
+    headers = await _signup(api)
+    await _signup(api, "20209999")
+    now, _, _ = await _seed()
+    async with db_base.sessionmaker()() as db:
+        db.add(_video(2, 11, now + timedelta(days=1)))
+        await db.commit()
+        videos = await playback.pending_videos_from_db(db, 1, "all")
+        batch = await playback.create_batch(db, 1, "all", videos)
+    hooks = playback._db_hooks(batch.id)
+    for item in build_plan(videos, now).items:
+        position, video = item.position, item.video
+        status = "done" if video.module_item_id == 11 else "skipped" if video.module_item_id == 13 else "failed"
+        await hooks.on_item_done(ItemOutcome(position, video, status))
+    preview = (await api.get("/playback/batches/preview?scope=all", headers=headers)).json()
+    assert [i["module_item_id"] for i in preview["items"]] == [12]
+    async with db_base.sessionmaker()() as db:
+        other = await db.scalar(select(TodoRow).where(TodoRow.user_id == 2, TodoRow.lms_item_id == 11))
+        assert other.active is True

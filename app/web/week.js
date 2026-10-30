@@ -31,6 +31,7 @@ function whenText(iso) {
 }
 
 function drawWeek() {
+  drawDashboardPlayback();
   const el = document.getElementById("week-panel");
   if (!el) return;
   if (week.error) {
@@ -90,6 +91,7 @@ function taskRow(t) {
 
 function ctaHtml(d) {
   const a = state.active;
+  if (state.playbackStarting) return `<button class="btn primary block" disabled>재생 요청 중…</button>`;
   if (a) {
     const done = a.done_count + a.skipped_count;
     return `<div class="cta-progress">

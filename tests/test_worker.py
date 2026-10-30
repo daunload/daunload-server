@@ -37,15 +37,15 @@ async def test_sync_job_creates_auto_batch_only_for_auto_courses(env):
 
     await api.put(f"/courses/{COURSE_ID}/auto-play", headers=h, json={"enabled": True})
     assert await worker.sync_user_job(ctx, 1) == "ok"
-    fn, (batch_id,), _ = ctx["queue"].jobs[-1]
-    assert fn == "run_batch_job"
+    assert ctx["queue"].jobs == []
     async with db_base.sessionmaker()() as db:
-        batch = await db.get(PlaybackBatch, batch_id)
+        batch = await db.scalar(select(PlaybackBatch))
         assert batch.scope == "auto" and batch.total == 3
 
     # 진행 중인 묶음이 있으면 또 만들지 않는다
     assert await worker.sync_user_job(ctx, 1) == "ok"
-    assert len(ctx["queue"].jobs) == 1
+    async with db_base.sessionmaker()() as db:
+        assert len((await db.scalars(select(PlaybackBatch))).all()) == 1
 
 
 @respx.mock
@@ -95,7 +95,7 @@ def _raising_ctx(exc):
     return ctx
 
 
-async def test_schedule_syncs_and_resume(env):
+async def test_schedule_syncs(env):
     api, _ = env
     await _setup(api)
     ctx = {"queue": Q()}
@@ -106,8 +106,6 @@ async def test_schedule_syncs_and_resume(env):
         await db.commit()
     assert await worker.schedule_syncs(ctx) == 1
     assert ctx["queue"].jobs[-1] == ("sync_user_job", (1,), "sync:1")
-    assert await worker.resume_running_batches(ctx) == 1
-    assert ctx["queue"].jobs[-1][0] == "run_batch_job"
 
 
 async def test_deadline_reminders_survive_duplicate_rollbacks(env):

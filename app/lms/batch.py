@@ -183,14 +183,19 @@ class BatchRunner:
         *,
         start_position: int = 0,
         cancel: asyncio.Event | None = None,
+        end_position: int | None = None,
+        failed_courses: set[int] | None = None,
+        locked_courses: set[int] | None = None,
     ) -> BatchResult:
         """videos는 이미 order_videos로 정렬된 목록이어야 한다. start_position부터 이어서 재생한다."""
         result = BatchResult()
-        failed_courses: set[int] = set()
-        locked_courses: set[int] = set()
+        failed_courses = set(failed_courses or ())
+        locked_courses = set(locked_courses or ())
         first = True
 
         for position, video in enumerate(videos):
+            if end_position is not None and position >= end_position:
+                break
             if position < start_position:
                 continue
             if cancel and cancel.is_set():
@@ -273,8 +278,13 @@ class BatchRunner:
         waiter = asyncio.ensure_future(cancel.wait())
         try:
             await asyncio.wait({play, waiter}, return_when=asyncio.FIRST_COMPLETED)
+        except BaseException:
+            play.cancel()
+            await asyncio.gather(play, return_exceptions=True)
+            raise
         finally:
             waiter.cancel()
+            await asyncio.gather(waiter, return_exceptions=True)
         if play.done():
             play.result()  # 재생 중 발생한 예외를 그대로 올린다
             return True

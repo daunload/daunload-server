@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api import routes_account, routes_data, routes_media, routes_notifications, routes_playback, routes_transcripts
 from app.api.deps import Queue
+from app.api import routes_admin
 from app.config import get_settings
 from app.db.base import init_engine
 
@@ -33,6 +34,7 @@ async def lifespan(app: FastAPI):
 def create_app(lifespan_=lifespan) -> FastAPI:
     app = FastAPI(title="SSU LMS 서버", version="0.1.0", lifespan=lifespan_)
     app.include_router(routes_account.router)
+    app.include_router(routes_admin.router)
     app.include_router(routes_data.router)
     app.include_router(routes_playback.router)
     app.include_router(routes_notifications.router)

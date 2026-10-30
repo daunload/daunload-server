@@ -22,6 +22,17 @@ app/worker/     arq 워커 (주기 동기화, 재생, 마감 알림, 재시작 �
 migrations/     Alembic
 ```
 
+## Hetzner 운영 배포
+
+**CPX12를 구매했다면 [CPX12 배포 가이드](docs/hetzner-cpx12-deployment.md)를 따른다.**
+2GB swap, 로컬 이미지 빌드·전송, 재생 검증과 오디오 활성화 순서를 포함한다.
+
+CX23의 서버 생성·HTTPS·환경변수·백업·업데이트·복구는
+[기본 배포 가이드](docs/hetzner-cx23-deployment.md)를 따른다.
+**CPX02(1GB RAM·20GB 디스크)**는 [CPX02 전용 가이드](docs/hetzner-cpx02-deployment.md)의
+로컬 이미지 빌드·자원 검증·기능별 실행 절차를 먼저 확인한다.
+운영용 Compose와 보조 스크립트는 `deploy/hetzner/`에 있다.
+
 ## 실행
 
 ```bash
@@ -31,13 +42,31 @@ uv run playwright install chrome   # Chrome이 이미 설치돼 있으면 생략
 brew install ffmpeg                # 호스트에서 API를 띄울 때(전사용 오디오 변환). Docker 이미지에는 들어 있다
 ```
 
-**Docker (API·Postgres·Redis)**
+**Docker (API·Postgres·Redis·동기화 워커)**
 
 ```bash
 docker compose up -d            # API: http://localhost:8000/docs (alembic upgrade 자동 실행)
 ```
 
 **워커**
+
+재생은 서버 전체에서 영상 한 개씩 실행한다. 여러 사용자가 기다리면 영상 한 개를 마친 사용자의
+묶음을 대기열 뒤로 옮겨 순환 처리한다(같은 사용자의 영상 순서는 유지).
+사용자당 활성 묶음은 DB 제약으로 1개만 허용하며, 중복 요청에는 409를 반환한다.
+`MAX_BROWSERS` 설정은 더 이상 사용하지 않는다.
+
+- 일반 워커(`arq app.worker.main.WorkerSettings`): Redis 기반 동기화·알림.
+- 재생 워커(`python -m app.worker.playback`): PostgreSQL의 대기열을 직접 읽는다.
+  PostgreSQL 세션 잠금으로 중복 워커를 거부하며, 연결을 잃으면 재생을 중단한다.
+- 재시작 시 실행 중이던 항목을 대기 상태로 복구하고 LMS 완료 여부를 다시 확인한다.
+  중단된 영상은 처음부터 다시 재생될 수 있다. Redis 실행 표시나 만료를 기다리지 않는다.
+- 화면의 순번은 **다음 영상 차례**이며, 예상 시작·종료 및 마감 위험은 현재 대기열을 반영한다.
+  새 요청·재시도·학교 응답 지연에 따라 실제 시간은 달라진다.
+- 배포할 때 기존 재생/일반 워커를 먼저 중지하고 `alembic upgrade head` 적용 후 새 워커를 시작한다.
+  기존 활성 묶음이 계정당 2개 이상이면 마이그레이션이 설명과 함께 중단된다.
+  사용자가 보존할 묶음을 정하고 나머지를 취소한 후 다시 실행한다.
+  이전 Redis 재생 작업은 새 워커가 소비하지 않으며 DB의 미완료 묶음으로 복구한다.
+
 - linux/amd64 서버: `docker compose --profile amd64 up -d` (컨테이너 안에 Google Chrome 포함)
 - Apple Silicon Mac: Chrome이 amd64 전용이라 컨테이너에서는 에뮬레이션으로 죽는다. 호스트에서 실행한다.
   ```bash
@@ -128,3 +157,45 @@ uv run pytest -m "not browser"
 - 위키 첨부는 Canvas가 주는 서명된 파일 주소로 받는다. 그 주소가 허용 호스트(`ALLOWED_FILE_HOSTS`) 밖이면 받지 않는다(실계정으로 확인한 호스트만 추가).
 - 다운로드 이력은 링크 발급 기준이다. 실제 저장 완료 여부는 알 수 없다.
 - 전사는 브라우저 성능에 달려 있다. 탭을 닫으면 진행 중인 전사는 사라지고, 부분 결과는 저장하지 않는다.
+
+### 재생 대기열 검증
+
+`uv run pytest tests/test_playback_queue.py tests/test_worker.py tests/test_api.py tests/test_batch.py`
+로 영상 단위 순환, 대기 시간 계산, 취소, 중단 복구, 계정별 접근 범위를 검증한다.
+`uv run pytest tests/test_web.py -k playback_queue`는 Chrome에서 대기 순번·마감 경고를 확인한다.
+
+실제 PostgreSQL·Redis 통합 검증은 별도 테스트 서버에서 실행한다:
+
+```bash
+QUEUE_TEST_DATABASE_URL=postgresql+asyncpg://queue_test:queue_test@127.0.0.1:55439/queue_test \
+QUEUE_TEST_REDIS_URL=redis://127.0.0.1:56389/0 \
+uv run pytest tests/test_queue_postgres.py -q
+```
+
+테스트는 임시 스키마를 생성·삭제하고 Redis에 고유한 테스트 큐를 사용한다.
+30개 계정의 동시 60건 요청, 취소/시작 충돌, 중복 워커 차단, 실제 프로세스 SIGKILL 후 복구,
+일반 Redis 작업 처리를 확인한다. LMS 응답과 영상 재생은 모의 처리하므로 실제 강의 수강 검증과는 별개다.
+
+### 대시보드 일괄 재생
+
+대시보드의 **재생 가능한 강의**는 현재 열려 있고 마감 전인 전체 미수강 영상 목록이다.
+**모두 재생**을 한 번 누르면 로그인한 사용자의 영상이 기존 재생 큐에 등록된다.
+재생 진행 상황은 대시보드에 표시되고, **재생 현황 보기**에서 상세 상태와 중지를 확인한다.
+목록은 마지막 동기화 기준이며 워커가 재생 직전에 LMS 상태를 다시 확인한다.
+완료가 확인된 영상은 미수강 목록에서 제외한다.
+
+### 관리자 사용자 조회
+
+`.env`에 관리자 학번을 JSON 배열로 지정한다: `ADMIN_STUDENT_IDS=["본인학번"]`.
+기본값 `[]`는 관리자 접근을 허용하지 않는다. 설정 변경 후 API를 재시작한다.
+DB는 `uv run alembic upgrade head`로 갱신한다(Docker Compose API는 시작 시 자동 적용).
+해당 학번으로 로그인하면 **사용자 관리** 메뉴(`/#admin`)가 나타난다.
+
+관리자는 학번 검색과 페이지 이동으로 가입일, 최근 사이트 로그인 시각, 성공한 로그인 횟수,
+LMS 연결 상태를 조회할 수 있다. `/admin/users` API도 서버에서 관리자 권한을 검사한다.
+사용자 카드의 **설정 보기**를 펼치면 권한·이용 동의, LMS 동기화 시각, 과목별 자동 재생,
+알림 채널 종류·사용 여부·등록일을 읽기 전용으로 확인한다.
+`/admin/users/{student_id}/settings`도 관리자 전용이며, 알림 대상 주소나 토큰은 반환하지 않는다.
+비밀번호·토큰·세션 쿠키는 응답에 포함하지 않는다.
+사이트 로그인 기록은 이 기능 적용 이후부터 집계하며, 기존 기록은 `기록 없음`으로 표시한다.
+자동 동기화 중의 LMS 재로그인은 집계하지 않는다. 현재 온라인 여부나 개별 로그인 이력은 제공하지 않는다.

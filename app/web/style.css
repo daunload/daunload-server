@@ -29,6 +29,41 @@
   --font: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", system-ui, sans-serif;
 }
 
+.admin-note { color: var(--ink-2); margin: 4px 0; overflow-wrap: anywhere; }
+.admin-search { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.admin-search input { flex: 1; min-width: 0; width: 100%; background: var(--surface); border-color: var(--line); }
+.admin-search input:focus { border-color: var(--blue); }
+.admin-search .btn { background: var(--surface); }
+.admin-search .btn:hover { background: var(--fill-hover); }
+.admin-search .btn, .admin-pagination .btn, #admin-refresh { min-height: 44px; }
+.admin-users { list-style: none; padding: 0; display: grid; gap: 12px; }
+.admin-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 0; }
+.admin-details dt { color: var(--ink-2); font-size: 13px; }
+.admin-details dd { margin: 4px 0 0; overflow-wrap: anywhere; }
+.admin-pagination { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 20px 0; }
+.dashboard-playback-note { color: var(--ink-2); font-size: 14px; overflow-wrap: anywhere; }
+.dashboard-lecture-list { list-style: none; padding: 0; margin: 0; }
+.dashboard-lecture-list li { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+.dashboard-lecture-list li > div { min-width: 0; overflow-wrap: anywhere; }
+.dashboard-lecture-list h3 { font-size: 16px; }
+.dashboard-lecture-list p { color: var(--ink-2); font-size: 13px; margin-top: 4px; }
+.dashboard-lecture-list .status { flex-shrink: 0; }
+.dashboard-playback-progress { display: grid; gap: 8px; padding: 16px; border-radius: var(--r-btn); background: var(--fill); }
+.dashboard-playback-progress progress { width: 100%; accent-color: var(--blue); }
+#dashboard-playback .btn { min-height: 44px; }
+.admin-settings { border-top: 1px solid var(--line); }
+.admin-settings summary { cursor: pointer; min-height: 44px; padding: 12px 0; font-weight: 600; overflow-wrap: anywhere; }
+.admin-settings summary:hover { color: var(--blue-press); }
+.admin-settings summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 4px; }
+.admin-settings-content { display: grid; gap: 24px; overflow-wrap: anywhere; }
+.admin-setting-list { list-style: none; padding: 0; margin: 8px 0 0; }
+.admin-setting-list li { display: flex; flex-wrap: wrap; gap: 8px 16px; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.admin-setting-list li span { flex: 1 1 180px; min-width: 0; }
+@media (max-width: 480px) {
+  .admin-details { grid-template-columns: minmax(0, 1fr); }
+  .admin-search label { width: 100%; }
+}
+
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body {

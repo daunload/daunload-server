@@ -4,6 +4,24 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>숭실 LMS 대시보드</title>
+  <meta name="description" content="숭실대 LMS 강의와 과제, 공지를 한곳에서 확인하세요.">
+  <link rel="canonical" href="https://daunload.cloud/">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="ko_KR">
+  <meta property="og:site_name" content="숭실 LMS">
+  <meta property="og:title" content="숭실 LMS 대시보드">
+  <meta property="og:description" content="숭실대 LMS 강의와 과제, 공지를 한곳에서 확인하세요.">
+  <meta property="og:url" content="https://daunload.cloud/">
+  <meta property="og:image" content="https://daunload.cloud/og-image.jpg">
+  <meta property="og:image:type" content="image/jpeg">
+  <meta property="og:image:width" content="1000">
+  <meta property="og:image:height" content="562">
+  <meta property="og:image:alt" content="책상에서 글을 쓰며 ‘아유… 하기 싫어…’라고 말하는 장면">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="숭실 LMS 대시보드">
+  <meta name="twitter:description" content="숭실대 LMS 강의와 과제, 공지를 한곳에서 확인하세요.">
+  <meta name="twitter:image" content="https://daunload.cloud/og-image.jpg">
+  <meta name="twitter:image:alt" content="책상에서 글을 쓰며 ‘아유… 하기 싫어…’라고 말하는 장면">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%233182f6'/%3E%3Crect x='7' y='9' width='18' height='3' rx='1.5' fill='white'/%3E%3Crect x='7' y='15' width='12' height='3' rx='1.5' fill='white'/%3E%3Crect x='7' y='21' width='15' height='3' rx='1.5' fill='white'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
   <link rel="stylesheet" href="/style.css">
@@ -63,6 +81,7 @@
         <p class="nav-label settings-label">설정</p>
         <button data-view="notifications"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>알림</button>
         <button data-view="account"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg>계정</button>
+        <button data-view="admin" id="admin-menu" hidden><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3 3 7v5c0 5 9 9 9 9s9-4 9-9V7Z"/><path d="m8 12 3 3 5-6"/></svg>사용자 관리</button>
       </nav>
       </div>
       <div class="workspace">

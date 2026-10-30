@@ -21,11 +21,12 @@ const store = {
   del(k) { try { localStorage.removeItem(k); } catch { /* 저장 불가 환경 */ } },
 };
 
-const VIEW_NAMES = { dashboard: "학습 현황", todos: "할 일", assignments: "미제출 과제", calendar: "캘린더", courses: "과목", announcements: "공지", playback: "영상 재생", videos: "강의 영상", notifications: "알림", account: "계정" };
+const VIEW_NAMES = { dashboard: "학습 현황", todos: "할 일", assignments: "미제출 과제", calendar: "캘린더", courses: "과목", announcements: "공지", playback: "영상 재생", videos: "강의 영상", notifications: "알림", account: "계정", admin: "사용자 관리" };
 const initialView = location.hash.slice(1) || "dashboard";
 
 const state = {
   token: store.get("token"),
+  dashboardPlan: null, dashboardError: null, dashboardLoading: false, playbackStarting: false,
   view: Object.hasOwn(VIEW_NAMES, initialView) ? initialView : "dashboard",
   me: null, cred: null, todos: [], courses: [], announcements: null,
   batches: [], active: null, plan: null, todoFilter: "all", noticeCourse: null,
@@ -167,10 +168,12 @@ $("#login-form").addEventListener("submit", async (e) => {
 });
 
 function logout() {
+  $("#admin-menu").hidden = true;
   state.token = null;
   store.del("token");
   stopPolling();
   Object.assign(state, { me: null, cred: null, todos: [], courses: [], announcements: null,
+    dashboardPlan: null, dashboardError: null, dashboardLoading: false, playbackStarting: false,
     batches: [], active: null, plan: null, planForm: null, planQuery: null,
     videoCourse: null, videoList: null, savedVideos: null, materialList: null, bulk: null,
   assignments: null, assignmentFilter: "unsubmitted", noticeCourse: null, todoSearch: "", todoFilter: "all", todoDeadline: "all" });
@@ -192,6 +195,7 @@ async function loadCore() {
     api("/playback/batches?limit=10"),
   ]);
   Object.assign(state, { me, cred, todos, courses, batches });
+  $("#admin-menu").hidden = !me.is_admin;
   const running = batches.find((b) => b.status === "queued" || b.status === "running");
   state.active = running ? await api(`/playback/batches/${running.id}`) : null;
   if (state.active) startPolling();
@@ -295,7 +299,7 @@ function playbackTimeline() {
     for (const j of state.active.jobs) {
       if (j.status !== "queued" && j.status !== "playing") continue;
       const remaining = j.status === "playing" ? Math.max(0, j.duration - j.progress_seconds) : j.duration;
-      cursor += (remaining + GAP_SECONDS) * 1000;
+      cursor = j.expected_end ? new Date(j.expected_end).getTime() : cursor + (remaining + GAP_SECONDS) * 1000;
       ends.set(j.module_item_id, cursor);
     }
     return { kind: "run", start: now, end: cursor, ends };
@@ -433,7 +437,7 @@ function renderView() {
     if (selected) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
   });
   const views = { dashboard: viewDashboard, todos: viewTodos, assignments: viewAssignments, calendar: () => viewCalendar(), // calendar.js에 있다. 불러오지 못해도 다른 화면은 동작하도록 실행할 때 찾는다
-    courses: viewCourses, announcements: viewAnnouncements, playback: viewPlayback, videos: viewVideos, notifications: viewNotifications, account: viewAccount };
+    courses: viewCourses, announcements: viewAnnouncements, playback: viewPlayback, videos: viewVideos, notifications: viewNotifications, account: viewAccount, admin: viewAdmin };
   (views[state.view] || viewTodos)();
 }
 
@@ -453,8 +457,99 @@ function needCred() {
  */
 function viewDashboard() {
   if (needCred()) return;
-  $("#view").innerHTML = `<div id="week-panel"></div>`;
+  $("#view").innerHTML = `<section id="dashboard-playback" class="panel" aria-label="재생 가능한 강의"></section><div id="week-panel"></div>`;
+  loadDashboardPlayback();
   if (typeof renderWeek === "function") renderWeek();
+}
+
+async function loadDashboardPlayback() {
+  const root = $("#dashboard-playback");
+  if (!root) return;
+  const token = state.token;
+  const valid = () => root.isConnected && state.token === token && state.view === "dashboard";
+  state.dashboardLoading = true;
+  state.dashboardError = null;
+  drawDashboardPlayback();
+  try {
+    const plan = await api("/playback/batches/preview?scope=all");
+    if (valid()) state.dashboardPlan = plan;
+  } catch (err) {
+    if (valid()) state.dashboardError = err.message;
+  } finally {
+    if (valid()) {
+      state.dashboardLoading = false;
+      drawDashboardPlayback();
+    }
+  }
+}
+
+function drawDashboardPlayback() {
+  const root = $("#dashboard-playback");
+  if (!root) return;
+  const plan = state.dashboardPlan;
+  const items = plan?.items || [];
+  const batch = state.active;
+  const jobs = batch?.jobs || [];
+  const done = (batch?.done_count || 0) + (batch?.skipped_count || 0);
+  const progress = batch ? `<div class="dashboard-playback-progress" role="status">
+    <strong>${batch.status === "queued" ? "재생 대기 중" : "강의 재생 중"} · ${done}/${batch.total}개 완료</strong>
+    <progress value="${done}" max="${batch.total || 1}" aria-label="전체 강의 재생 진행률"></progress>
+    <p>${batch.status === "queued" && batch.queue_position != null ? `대기 ${batch.queue_position}번째 · ` : ""}창을 닫아도 서버에서 계속 재생합니다.</p>
+    <button class="btn" id="dashboard-playback-details">재생 현황 보기</button></div>` : "";
+  const list = items.length ? `<ol class="dashboard-lecture-list">${items.map((item) => {
+    const job = jobs.find((j) => j.module_item_id === item.module_item_id && j.lms_course_id === item.lms_course_id);
+    return `<li><div><h3>${esc(item.title)}</h3><p>${esc(item.course_name)} · ${esc(item.module_title)} · ${fmtDuration(item.duration)}</p>
+      <p>마감 ${fmtDate(new Date(item.deadline))}${item.at_risk ? " · 마감 전 완료가 어려울 수 있습니다" : ""}</p></div>
+      ${job ? `<span class="status ${esc(job.status)}">${esc(JOB_STATUS[job.status] || job.status)}</span>` : ""}</li>`;
+  }).join("")}</ol>` : `<p class="dashboard-playback-note">현재 재생 가능한 미수강 강의가 없습니다.</p>`;
+  root.innerHTML = `<div class="panel-body">
+    <div class="view-head"><h2>재생 가능한 강의${plan && !state.dashboardLoading ? ` ${items.length}개` : ""}</h2>
+      <button class="btn" id="dashboard-playback-refresh" ${state.dashboardLoading || state.playbackStarting ? "disabled" : ""}>목록 새로고침</button></div>
+    <p class="dashboard-playback-note">전체 과목에서 지금 열려 있고 마감 전인 미수강 강의입니다. 마지막 동기화 기준이며, 재생 직전에 완료 여부를 다시 확인합니다.</p>
+    ${progress}
+    ${state.dashboardLoading ? '<p role="status">강의 목록을 불러오는 중입니다.</p>'
+      : state.dashboardError ? `<div role="alert"><p>${esc(state.dashboardError)}</p><button class="btn" id="dashboard-playback-retry">다시 시도</button></div>`
+      : `${list}${!batch ? `<button class="btn primary block" id="dashboard-play-all" ${!items.length || state.playbackStarting ? "disabled" : ""}>
+          ${state.playbackStarting ? "재생 요청 중…" : `모두 재생 (${items.length}개)`}</button>
+        ${items.length ? `<p class="dashboard-playback-note">총 ${fmtDuration(items.reduce((sum, item) => sum + item.duration, 0))} 분량 · 1배속으로 순서대로 재생하고 LMS 완료 여부를 확인합니다.</p>` : ""}` : ""}`}
+  </div>`;
+  $("#dashboard-playback-refresh")?.addEventListener("click", loadDashboardPlayback);
+  $("#dashboard-playback-retry")?.addEventListener("click", loadDashboardPlayback);
+  $("#dashboard-playback-details")?.addEventListener("click", () => navigate("playback"));
+  $("#dashboard-play-all")?.addEventListener("click", startDashboardPlayback);
+}
+
+async function startDashboardPlayback() {
+  if (state.playbackStarting || state.active || !state.dashboardPlan?.items.length) return;
+  const token = state.token;
+  state.playbackStarting = true;
+  drawDashboardPlayback();
+  if (typeof drawWeek === "function") drawWeek();
+  try {
+    const batch = await api("/playback/batches", { method: "POST", json: { scope: "all" } });
+    if (state.token !== token) return;
+    // Keep the accepted queue entry even if the subsequent detail request fails.
+    state.active = { ...batch, jobs: [] };
+    startPolling();
+    toast(`강의 ${batch.total}개를 재생 대기열에 등록했습니다`);
+    try {
+      const detail = await api(`/playback/batches/${batch.id}`);
+      if (state.token === token && state.active?.id === batch.id) state.active = detail;
+    } catch { /* 진행 상황은 다음 폴링에서 다시 조회한다. */ }
+  } catch (err) {
+    if (state.token !== token) return;
+    toast(err.message, true);
+    if (err.status === 409) {
+      try { await loadCore(); } catch (refreshError) { toast(refreshError.message, true); }
+    }
+    if (err.status === 404) await loadDashboardPlayback();
+  } finally {
+    if (state.token === token) {
+      state.playbackStarting = false;
+      drawDashboardPlayback();
+      if (typeof drawWeek === "function") drawWeek();
+    }
+  }
 }
 
 /* ---------------- 할 일 ---------------- */
@@ -745,7 +840,7 @@ function planHtml(plan) {
   return `<div class="panel">
     <div class="panel-body"><div class="summary-line">
       <span><b>${plan.items.length}</b>개 영상</span><span><b>${fmtDuration(plan.total_seconds)}</b>예상 소요</span>
-      <span><b>${fmtDate(new Date(plan.expected_end))}</b>예상 종료</span></div>${warn}</div>
+      <span><b>${fmtDate(new Date(plan.expected_end))}</b>예상 종료</span></div><p class="muted small-text">현재 대기열을 반영한 예상입니다. 새 요청·재시도에 따라 달라집니다.</p>${warn}</div>
     <ol class="steps">${steps}</ol>
     <div class="actions"><button class="btn primary" id="start-batch">${plan.items.length}개 영상 재생 시작</button>
       <button class="btn ghost" id="clear-plan">미리보기 닫기</button></div></div>`;
@@ -784,6 +879,11 @@ function activeBatchHtml(b) {
       <div class="summary-line"><span><b>${BATCH_STATUS[b.status]}</b></span>
         <span><b>${b.done_count}</b>완료</span><span><b>${b.failed_count}</b>실패</span><span><b>${b.skipped_count}</b>이미 완료</span>
         <span><b>${b.total}</b>전체</span></div>
+      <p class="muted small-text" role="status">${b.status === "queued" && b.queue_position != null
+        ? `다음 영상 대기 ${b.queue_position}번째 · 약 ${fmtDuration(b.estimated_wait_seconds || 0)} 후 시작` : "현재 영상을 재생하고 있습니다."}
+        ${b.expected_end ? ` · 묶음 예상 종료 ${fmtDate(new Date(b.expected_end))}` : ""}</p>
+      ${b.deadline_at_risk ? '<p class="status failed">대기 시간으로 인해 일부 영상이 마감 전에 끝나지 않을 수 있습니다.</p>' : ""}
+      <p class="muted small-text">사용자별 영상 한 개씩 번갈아 재생합니다. 예상 시간은 현재 대기열 기준이며 새 요청·재시도에 따라 달라집니다.</p>
       <p class="muted small-text">재생은 서버에서 계속됩니다. 이 창을 닫아도 멈추지 않습니다.</p>
     </div>
     <ol class="steps">${steps}</ol>
@@ -833,6 +933,10 @@ async function finishActive() {
   toast(`영상 재생 ${BATCH_STATUS[b.status]}: 완료 ${b.done_count}, 실패 ${b.failed_count}`, b.status === "failed");
   state.active = null;
   [state.todos, state.batches] = await Promise.all([api("/todos"), api("/playback/batches?limit=10")]);
+  if (state.view === "dashboard") {
+    loadDashboardPlayback();
+    if (typeof renderWeek === "function") renderWeek();
+  }
 }
 
 /* ---------------- 강의 영상 내려받기 ---------------- */
@@ -1105,6 +1209,102 @@ async function viewNotifications() {
     try { await api(`/notifications/channels/${b.dataset.del}`, { method: "DELETE" }); toast("삭제했습니다"); viewNotifications(); }
     catch (err) { toast(err.message, true); }
   }));
+}
+
+/* ---------------- 관리자 ---------------- */
+
+async function viewAdmin(query = "", offset = 0) {
+  if (!state.me?.is_admin) {
+    $("#view").innerHTML = `<div class="panel empty" role="alert">관리자 권한이 필요합니다.</div>`;
+    return;
+  }
+  $("#view").innerHTML = `
+    <div class="view-head"><h1>사용자 관리</h1><button class="btn" id="admin-refresh">새로고침</button></div>
+    <p class="admin-note">사이트 로그인에 성공한 기록입니다. 현재 접속 여부를 나타내지는 않습니다. 기존 계정의 기록은 기능 추가 후 로그인부터 집계됩니다.</p>
+    <form id="admin-search" class="admin-search">
+      <label for="admin-query">학번 검색</label>
+      <input id="admin-query" type="search" maxlength="32" value="${esc(query)}" placeholder="학번 전체 또는 일부">
+      <button class="btn" type="submit">검색</button>
+    </form>
+    <div id="admin-content" aria-live="polite"><p class="panel empty" role="status">사용자 정보를 불러오는 중입니다.</p></div>`;
+  const root = $("#admin-content");
+  $("#admin-search").addEventListener("submit", (e) => {
+    e.preventDefault();
+    viewAdmin($("#admin-query").value.trim());
+  });
+  $("#admin-refresh").addEventListener("click", () => viewAdmin(query, offset));
+  try {
+    const data = await api(`/admin/users?${new URLSearchParams({ q: query, offset, limit: 25 })}`);
+    if (!root.isConnected || state.view !== "admin" || !state.me?.is_admin) return;
+    const date = (value) => value ? esc(new Date(value).toLocaleString("ko-KR")) : "기록 없음";
+    const statuses = { ok: "정상", invalid: "재로그인 필요", error: "오류" };
+    root.innerHTML = `<p class="admin-note">${query ? "검색 결과" : "전체 사용자"} ${data.total}명 · 최근 로그인 순</p>
+      ${data.users.length ? `<ul class="admin-users">${data.users.map((u) => `
+        <li class="panel panel-body"><h2>${esc(u.student_id)}</h2><dl class="admin-details">
+          <div><dt>최근 사이트 로그인</dt><dd>${date(u.last_login_at)}</dd></div>
+          <div><dt>가입일</dt><dd>${date(u.created_at)}</dd></div>
+          <div><dt>로그인 횟수</dt><dd>${esc(u.login_count)}회</dd></div>
+          <div><dt>LMS 연결</dt><dd>${esc(statuses[u.lms_status] || "연결 정보 없음")}</dd></div>
+        </dl><details class="admin-settings" data-student-id="${esc(u.student_id)}">
+          <summary>${esc(u.student_id)} 설정 보기</summary>
+          <div class="admin-settings-content" aria-live="polite"></div>
+        </details></li>`).join("")}</ul>` : `<p class="panel empty">해당하는 사용자가 없습니다.</p>`}
+      <div class="admin-pagination"><button class="btn" id="admin-prev" ${offset === 0 ? "disabled" : ""}>이전</button>
+        <span>${data.total ? `${offset + 1}–${offset + data.users.length} / ${data.total}명` : "0명"}</span>
+        <button class="btn" id="admin-next" ${offset + 25 >= data.total ? "disabled" : ""}>다음</button></div>`;
+    root.querySelectorAll(".admin-settings").forEach((details) => {
+      details.addEventListener("toggle", () => {
+        if (details.open && !details.dataset.loaded && !details.dataset.loading) loadAdminSettings(details);
+      });
+    });
+    $("#admin-prev").addEventListener("click", () => viewAdmin(query, Math.max(0, offset - 25)));
+    $("#admin-next").addEventListener("click", () => viewAdmin(query, offset + 25));
+  } catch (err) {
+    if (!root.isConnected || state.view !== "admin" || !state.me?.is_admin) return;
+    root.innerHTML = `<div class="panel empty" role="alert"><p>${esc(err.message)}</p><button class="btn" id="admin-retry">다시 시도</button></div>`;
+    $("#admin-retry").addEventListener("click", () => viewAdmin(query, offset));
+  }
+}
+
+async function loadAdminSettings(details) {
+  const panel = $(".admin-settings-content", details);
+  details.dataset.loading = "true";
+  panel.innerHTML = '<p role="status">설정을 불러오는 중입니다.</p>';
+  try {
+    const data = await api(`/admin/users/${encodeURIComponent(details.dataset.studentId)}/settings`);
+    if (!details.isConnected || state.view !== "admin" || !state.me?.is_admin) return;
+    const date = (value) => value ? esc(new Date(value).toLocaleString("ko-KR")) : "기록 없음";
+    const status = { ok: "정상", invalid: "재로그인 필요", error: "오류" };
+    const kinds = { discord: "Discord", telegram: "Telegram" };
+    panel.innerHTML = `
+      <section><h3>계정 및 LMS 연결</h3><dl class="admin-details">
+        <div><dt>권한</dt><dd>${data.is_admin ? "관리자" : "일반 사용자"}</dd></div>
+        <div><dt>이용 동의</dt><dd>${date(data.consent_at)}</dd></div>
+        <div><dt>LMS 연결 상태</dt><dd>${esc(status[data.lms?.status] || "연결 정보 없음")}</dd></div>
+        <div><dt>마지막 LMS 로그인</dt><dd>${date(data.lms?.last_login_at)}</dd></div>
+        <div><dt>마지막 동기화</dt><dd>${date(data.lms?.last_synced_at)}</dd></div>
+        <div><dt>다음 동기화 예정</dt><dd>${date(data.lms?.next_sync_at)}</dd></div>
+      </dl></section>
+      <section><h3>과목별 자동 재생</h3>
+        ${data.courses.length ? `<ul class="admin-setting-list">${data.courses.map((c) => `<li>
+          <span>${esc(c.name)}${c.active ? "" : " · 비활성 과목"}</span>
+          <strong>자동 재생 ${c.auto_play ? "켜짐" : "꺼짐"}</strong>
+        </li>`).join("")}</ul>` : "<p>동기화된 과목이 없습니다.</p>"}
+      </section>
+      <section><h3>알림 설정</h3>
+        ${data.channels.length ? `<ul class="admin-setting-list">${data.channels.map((c) => `<li>
+          <span>${esc(kinds[c.kind] || c.kind)} · 등록 ${date(c.created_at)}</span>
+          <strong>${c.enabled ? "사용 중" : "사용 안 함"}</strong>
+        </li>`).join("")}</ul>` : "<p>등록된 알림 채널이 없습니다.</p>"}
+      </section>`;
+    details.dataset.loaded = "true";
+  } catch (err) {
+    if (!details.isConnected || state.view !== "admin" || !state.me?.is_admin) return;
+    panel.innerHTML = `<p role="alert">${esc(err.message)}</p><button class="btn admin-settings-retry">다시 시도</button>`;
+    $(".admin-settings-retry", panel).addEventListener("click", () => loadAdminSettings(details));
+  } finally {
+    delete details.dataset.loading;
+  }
 }
 
 /* ---------------- 계정 ---------------- */

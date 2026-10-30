@@ -1,0 +1,101 @@
+# Standalone production stack. Do not merge with the root development compose file.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-app: &app
+  image: ssu-lms:${APP_IMAGE_TAG:-local}
+  platform: linux/amd64
+  restart: unless-stopped
+  init: true
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql+asyncpg://lms:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/lms
+    REDIS_URL: redis://redis:6379/0
+  logging: *logging
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lms
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: lms
+    command: [postgres, -c, shared_buffers=128MB, -c, max_connections=60]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U lms -d lms"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: *logging
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command: [redis-server, --appendonly, "yes", --maxmemory, 128mb, --maxmemory-policy, noeviction]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: *logging
+
+  api:
+    <<: *app
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    command: [uvicorn, app.main:app, --host, 0.0.0.0, --port, "8000", --proxy-headers, --forwarded-allow-ips, "*"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 12
+
+  worker:
+    <<: *app
+    command: [python, -m, app.worker.playback]
+    shm_size: 1gb
+    stop_grace_period: 60s
+    depends_on:
+      api: {condition: service_healthy}
+
+  sync-worker:
+    <<: *app
+    command: [arq, app.worker.main.WorkerSettings]
+    stop_grace_period: 60s
+    depends_on:
+      api: {condition: service_healthy}
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      api: {condition: service_healthy}
+    logging: *logging
+
+volumes:
+  pgdata:
+  redisdata:
+  caddydata:
+  caddyconfig:

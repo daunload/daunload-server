@@ -4,3 +4,8 @@
 __pycache__
 .pytest_cache
 tests/fixtures/player/*.webm
+
+# Production secrets and database exports must never enter the image.
+**/.env
+**/*.dump
+backups/

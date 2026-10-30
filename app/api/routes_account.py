@@ -2,9 +2,10 @@ from datetime import datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Form, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import CurrentUser, Db, JobQueue
+from app.api.deps import CurrentUser, Db, JobQueue, is_admin
 from app.api.schemas import CredentialsOut, TokenOut
 from app.db.base import utcnow
 from app.db.models import LmsCredential, User
@@ -55,6 +56,7 @@ async def login(
     _check_throttle(student_id)
     user = await db.scalar(select(User).where(User.student_id == student_id))
     if user is not None and verify_password(password, user.password_hash):
+        await _record_login(db, user.id)
         return TokenOut(access_token=create_access_token(user.id))
 
     if user is None:
@@ -73,13 +75,21 @@ async def login(
     except LmsError as e:
         await db.rollback()
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"LMS에 로그인하지 못했습니다: {e}") from e
+    await _record_login(db, user.id)
     await queue.enqueue("sync_user_job", user.id, job_id=f"sync:{user.id}")
     return TokenOut(access_token=create_access_token(user.id))
 
 
 @router.get("/me", tags=["auth"])
 async def me(user: CurrentUser):
-    return {"student_id": user.student_id, "consent_at": user.consent_at}
+    return {"student_id": user.student_id, "consent_at": user.consent_at, "is_admin": is_admin(user)}
+
+
+async def _record_login(db: AsyncSession, user_id: int) -> None:
+    await db.execute(update(User).where(User.id == user_id).values(
+        last_login_at=utcnow(), login_count=User.login_count + 1,
+    ))
+    await db.commit()
 
 
 @router.delete("/me", status_code=204, tags=["auth"])
