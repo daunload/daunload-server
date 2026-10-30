@@ -27,7 +27,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://lms:lms@postgres:5432/lms
       REDIS_URL: redis://redis:6379/0
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
-    ports: ["8000:8000"]
+    ports: ["127.0.0.1:8000:8000"]  # 개발용 서버를 같은 네트워크의 다른 기기에 열지 않는다
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_started}

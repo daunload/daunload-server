@@ -49,7 +49,7 @@ brew install ffmpeg                # 호스트에서 API를 띄울 때(전사용
 **Docker (API·Postgres·Redis·동기화 워커)**
 
 ```bash
-docker compose up -d            # API: http://localhost:8000/docs (alembic upgrade 자동 실행)
+docker compose up -d            # API: http://localhost:8000/docs (API_DOCS=true일 때, alembic upgrade 자동 실행)
 ```
 
 **워커**
