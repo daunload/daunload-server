@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
-from playwright.async_api import Browser, BrowserContext, Frame, Page, async_playwright
+from playwright.async_api import Browser, BrowserContext, Dialog, Frame, Page, async_playwright
 
 from app.config import Settings, get_settings
 from app.lms.auth import LmsSession
@@ -39,10 +40,17 @@ PLAY_SELECTORS = [
 CONFIRM_SELECTORS = [
     ".confirm-ok-btn",
     ".vc-confirm-ok-btn",
-    "button:has-text('예')",
-    "button:has-text('확인')",
+    "button:text-is('예')",
+    "button:text-is('확인')",
     "button:has-text('이어')",
+    "input[type=button][value='확인']",
 ]
+RESUME_DIALOG_SELECTORS = "[role=dialog], dialog, .modal, .popup, .ui-dialog, .bootbox"
+RESUME_PROMPT = re.compile(
+    r"이어|(?:이전|마지막|기존).*(?:시청|재생)|(?:시청|재생).*(?:위치|시점)|"
+    r"(?:분|초|\d+:\d+).*(?:보시|재생|시청)",
+    re.DOTALL,
+)
 
 END_GRACE_SECONDS = 15
 
@@ -163,7 +171,7 @@ class VideoPlayer:
         context = await new_session_context(self.browser, session)
         try:
             page = await context.new_page()
-            page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
+            page.on("dialog", _accept_dialog)
             return await self._play_on_page(page, video, on_progress)
         finally:
             await context.close()
@@ -185,6 +193,9 @@ class VideoPlayer:
             if time.monotonic() > hard_limit:
                 raise PlaybackError(f"재생 시간 초과: {video.title}")
             await asyncio.sleep(self.poll_seconds)
+            # The player may create its resume dialog after a video element is found.
+            # Confirm before attempting direct media playback on every poll.
+            await _confirm_resume(page)
             try:
                 state = await _video_state(frame, "play")
             except Exception:  # 프레임이 사라진 경우(플레이어가 iframe을 갈아끼움)
@@ -250,7 +261,7 @@ class VideoPlayer:
         """영상이 들어 있는 프레임을 찾아 재생을 시작하고 그 프레임을 반환한다."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            await _click_first(page, CONFIRM_SELECTORS)
+            await _confirm_resume(page)
             for frame in page.frames:
                 try:
                     state = await _video_state(frame, "play")
@@ -268,6 +279,33 @@ class VideoPlayer:
 async def _video_state(frame: Frame, action: str) -> VideoState | None:
     data = await frame.evaluate(_VIDEO_JS, action)
     return VideoState(**data) if data else None
+
+
+async def _accept_dialog(dialog: Dialog) -> None:
+    # Preserve the player's suggested resume time in native prompt dialogs.
+    await dialog.accept(dialog.default_value if dialog.type == "prompt" else None)
+
+
+async def _confirm_resume(page: Page) -> bool:
+    for frame in page.frames:
+        # Preserve known player-specific controls even without dialog semantics.
+        candidates = [frame.locator(".confirm-ok-btn, .vc-confirm-ok-btn")]
+        dialogs = frame.locator(RESUME_DIALOG_SELECTORS).filter(has_text=RESUME_PROMPT)
+        candidates.append(dialogs.locator(", ".join(CONFIRM_SELECTORS)))
+        for buttons in candidates:
+            try:
+                matches = await buttons.all()
+            except Exception:  # Player frames may be replaced while a dialog opens.
+                continue
+            for button in matches:
+                try:
+                    if await button.is_visible() and await button.is_enabled():
+                        await button.click(timeout=2000)
+                        log.info("이어보기 확인 버튼을 눌렀습니다.")
+                        return True
+                except Exception:
+                    continue
+    return False
 
 
 async def _click_first(page: Page, selectors: list[str]) -> bool:
