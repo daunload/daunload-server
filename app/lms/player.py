@@ -67,7 +67,14 @@ _FORCE_NORMAL_SPEED_JS = """
 # 페이지 안에서 가장 긴 <video>의 상태를 읽고, 필요하면 1배속 음소거 재생을 건다.
 _VIDEO_JS = """
 (action) => {
-  const vids = Array.from(document.querySelectorAll('video'));
+  // Commons inserts a loaded 1-second preloader before the lecture is opened.
+  // Playing it directly bypasses the front-screen button and never starts the lecture.
+  const vids = Array.from(document.querySelectorAll('video')).filter(v => {
+    const src = v.currentSrc || v.src;
+    if (!src) return false;
+    const path = new URL(src, document.baseURI).pathname;
+    return !path.endsWith('/uniplayer/preloader.mp4');
+  });
   if (!vids.length) return null;
   const v = vids.reduce((a, b) => ((b.duration || 0) > (a.duration || 0) ? b : a));
   if (action === 'play') {
@@ -193,10 +200,20 @@ class VideoPlayer:
             # 마지막 1초 안에 들어온 뒤 유예 시간이 지나면 끝난 것으로 본다.
             duration = state.d or video.duration
             if state.ended:
+                if video.duration > 0 and state.d > 0 and state.d < video.duration * 0.5:
+                    raise PlaybackError(
+                        f"강의 길이와 감지한 영상 길이가 다릅니다: {video.title} "
+                        f"(예상 {video.duration:.1f}s, 감지 {state.d:.1f}s, 위치 {state.t:.1f}s)"
+                    )
                 break
             if duration > 0 and state.t >= duration - 1:
                 near_end_since = near_end_since or time.monotonic()
                 if time.monotonic() - near_end_since > END_GRACE_SECONDS:
+                    if video.duration > 0 and state.d > 0 and state.d < video.duration * 0.5:
+                        raise PlaybackError(
+                            f"강의 길이와 감지한 영상 길이가 다릅니다: {video.title} "
+                            f"(예상 {video.duration:.1f}s, 감지 {state.d:.1f}s, 위치 {state.t:.1f}s)"
+                        )
                     break
             else:
                 near_end_since = None
@@ -216,6 +233,10 @@ class VideoPlayer:
 
         # 종료 이벤트와 마지막 진도 전송을 위해 잠시 기다린 뒤 페이지를 정상 종료한다.
         await asyncio.sleep(s.playback_extra_seconds)
+        log.info(
+            "재생 종료: %s (위치 %.1fs / 영상 %.1fs, 예상 %.1fs)",
+            video.title, state.t, state.d, video.duration,
+        )
         await page.close(run_before_unload=True)
         return PlaybackResult(
             module_item_id=video.module_item_id,
