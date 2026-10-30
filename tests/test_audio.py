@@ -2,6 +2,7 @@ import asyncio
 import shutil
 import subprocess
 
+import httpx
 import pytest
 import respx
 
@@ -145,3 +146,61 @@ async def test_client_disconnect_through_starlette_kills_ffmpeg(tmp_path, monkey
             break
         await asyncio.sleep(0.1)
     assert procs[0].returncode is not None
+
+
+@respx.mock
+async def test_concurrent_audio_requests_respect_server_limit(env, monkeypatch):
+    from app.config import get_settings
+
+    api, _ = env
+    h = await _with_course(api)
+    seen = []
+    _fake_stream(monkeypatch, seen)
+    monkeypatch.setattr(get_settings(), "max_audio_streams", 1)
+    url = (await api.post("/courses/45446/videos/11/audio-link", headers=h)).json()["url"]
+
+    async def slow_xml(request):
+        await asyncio.sleep(0.05)
+        return httpx.Response(200, text=XML)
+
+    respx.get(CONTENT_PHP).mock(side_effect=slow_xml)
+    codes = sorted(r.status_code for r in await asyncio.gather(*(api.get(url) for _ in range(3))))
+    assert codes == [200, 429, 429] and len(seen) == 1
+    assert routes_media._active[1] == 0 and routes_media._audio_streams == 0
+
+
+class _BrokenStream(httpx.AsyncByteStream):
+    async def __aiter__(self):
+        yield b"x" * 10
+        raise httpx.ReadTimeout("끊김")
+
+
+@respx.mock
+async def test_download_slot_is_released_when_upstream_breaks(env):
+    api, _ = env
+    h = await _with_course(api)
+    respx.get(CONTENT_PHP).respond(200, text=XML)
+    respx.get(f"{CDN}/a.mp4").mock(return_value=httpx.Response(200, stream=_BrokenStream()))
+    url = (await api.post("/courses/45446/videos/11/download-link", headers=h)).json()["url"]
+    with pytest.raises(httpx.ReadTimeout):
+        await api.get(url)
+    assert routes_media._active[1] == 0
+
+
+def test_ffmpeg_remote_sources_are_limited_to_https():
+    args = audio.ffmpeg_args("ffmpeg", "https://x/a.mp4")
+    assert args[args.index("-protocol_whitelist") + 1] == "https,tls,tcp"
+    assert args.index("-protocol_whitelist") < args.index("-i")
+
+
+@respx.mock
+async def test_redirect_to_unlisted_host_is_never_requested(env):
+    api, _ = env
+    h = await _with_course(api)
+    respx.get(CONTENT_PHP).respond(200, text=XML)
+    respx.get(f"{CDN}/a.mp4").respond(302, headers={"Location": "https://evil.example/steal"})
+    evil = respx.get("https://evil.example/steal").respond(200, content=b"x")
+    url = (await api.post("/courses/45446/videos/11/download-link", headers=h)).json()["url"]
+    assert (await api.get(url)).status_code == 422
+    assert not evil.called
+    assert routes_media._active[1] == 0

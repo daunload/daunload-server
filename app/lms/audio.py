@@ -25,6 +25,8 @@ def ffmpeg_args(ffmpeg: str, source: str, headers: dict[str, str] | None = None)
     args = [ffmpeg, "-nostdin", "-loglevel", "error"]
     if headers:
         args += ["-headers", "".join(f"{k}: {v}\r\n" for k, v in headers.items())]
+    if source.startswith("https://"):  # 응답이 재생 목록이어도 file:, http: 등 다른 프로토콜로 새지 않게
+        args += ["-protocol_whitelist", "https,tls,tcp"]
     return args + ["-i", source, "-vn", "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "s16le", "pipe:1"]
 
 

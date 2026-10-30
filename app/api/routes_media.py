@@ -7,8 +7,10 @@
 """
 
 from collections import defaultdict
+from contextlib import aclosing
 from datetime import datetime
 
+import anyio
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -237,8 +239,14 @@ async def create_saved_audio_link(saved_id: int, user: CurrentUser, db: Db, requ
 RELAY_KINDS = {"video", "commons_file", "canvas_file"}
 
 
+async def _check_hop(request: httpx.Request) -> None:
+    """리다이렉트마다 호스트를 확인한다. 최종 주소만 보면 중간 주소로는 이미 요청이 나간 뒤다."""
+    check_file_host(str(request.url))  # 영상·자료 허용 호스트는 같다(ssu.ac.kr, commonscdn.com)
+
+
 def _relay_client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(30.0, read=120.0))
+    return httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(30.0, read=120.0),
+                             event_hooks={"request": [_check_hop]})
 
 
 async def _canvas_file(user_id: int, course_id: int, file_id: str) -> tuple[str, list[dict]]:
@@ -285,42 +293,70 @@ async def _open_upstream(user_id: int, data: dict, range_header: str | None) -> 
         raise
 
 
+class _Slot:
+    """동시 실행 자리. 검사와 증가 사이에 await가 없어서 동시 요청도 한도를 넘지 못한다.
+    release()는 여러 번 불러도 한 번만 돌려놓는다(스트림 정리와 BackgroundTask 양쪽에서 부른다)."""
+
+    def __init__(self, user_id: int, busy: str, audio: bool = False) -> None:
+        global _audio_streams
+        if _active[user_id] >= MAX_DOWNLOADS_PER_USER:
+            raise HTTPException(429, f"동시에 {MAX_DOWNLOADS_PER_USER}개까지 받을 수 있습니다. {busy}")
+        if audio and _audio_streams >= get_settings().max_audio_streams:
+            raise HTTPException(429, "서버가 바쁩니다. 잠시 뒤 다시 시도하세요.")
+        _active[user_id] += 1
+        if audio:
+            _audio_streams += 1
+        self.user_id, self.audio, self.held = user_id, audio, True
+
+    def release(self) -> None:
+        global _audio_streams
+        if self.held:
+            self.held = False
+            _active[self.user_id] -= 1
+            if self.audio:
+                _audio_streams -= 1
+
+
 @router.get("/downloads/{token}", name="download_video")
 async def download_video(token: str, request: Request):
     decoded = decode_download_token(token)
     if decoded is None or decoded[1].get("kind", "video") not in RELAY_KINDS:
         raise HTTPException(401, "다운로드 링크가 만료되었거나 올바르지 않습니다. 목록에서 다시 받으세요.")
     user_id, data = decoded
-    if _active[user_id] >= MAX_DOWNLOADS_PER_USER:
-        raise HTTPException(429, f"동시에 {MAX_DOWNLOADS_PER_USER}개까지 받을 수 있습니다. 진행 중인 다운로드가 끝난 뒤 다시 시도하세요.")
-
+    slot = _Slot(user_id, "진행 중인 다운로드가 끝난 뒤 다시 시도하세요.")
     try:
-        http, upstream, saved = await _open_upstream(user_id, data, request.headers.get("range"))
-    except MediaError as e:
-        raise HTTPException(422, str(e)) from e
-    except (NoCredentials, InvalidCredentials) as e:
-        raise HTTPException(400, str(e)) from e
-    except LmsError as e:
-        raise HTTPException(502, f"LMS 조회 실패: {e}") from e
-    except httpx.HTTPError as e:
-        raise HTTPException(502, f"학교 서버에 연결하지 못했습니다: {e}") from e
-    if upstream.status_code not in (200, 206):
-        await upstream.aclose()
-        await http.aclose()
-        if saved and upstream.status_code in (403, 404, 410):
-            raise HTTPException(410, "학교 서버가 저장된 주소의 영상을 더 이상 제공하지 않습니다.")
-        raise HTTPException(502, f"학교 서버가 파일을 주지 않았습니다 (HTTP {upstream.status_code}).")
-
-    _active[user_id] += 1
-
-    async def body():
-        async for chunk in upstream.aiter_raw(1 << 16):
-            yield chunk
+        try:
+            http, upstream, saved = await _open_upstream(user_id, data, request.headers.get("range"))
+        except MediaError as e:
+            raise HTTPException(422, str(e)) from e
+        except (NoCredentials, InvalidCredentials) as e:
+            raise HTTPException(400, str(e)) from e
+        except LmsError as e:
+            raise HTTPException(502, f"LMS 조회 실패: {e}") from e
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"학교 서버에 연결하지 못했습니다: {e}") from e
+        if upstream.status_code not in (200, 206):
+            await upstream.aclose()
+            await http.aclose()
+            if saved and upstream.status_code in (403, 404, 410):
+                raise HTTPException(410, "학교 서버가 저장된 주소의 영상을 더 이상 제공하지 않습니다.")
+            raise HTTPException(502, f"학교 서버가 파일을 주지 않았습니다 (HTTP {upstream.status_code}).")
+    except BaseException:
+        slot.release()
+        raise
 
     async def cleanup():
-        _active[user_id] -= 1
-        await upstream.aclose()
-        await http.aclose()
+        slot.release()
+        with anyio.CancelScope(shield=True):
+            await upstream.aclose()
+            await http.aclose()
+
+    async def body():
+        try:
+            async for chunk in upstream.aiter_raw(1 << 16):
+                yield chunk
+        finally:  # 중간에 끊기거나 업스트림 오류가 나면 BackgroundTask가 돌지 않는다
+            await cleanup()
 
     out_headers = {k: upstream.headers[k] for k in ("content-length", "content-range", "accept-ranges") if k in upstream.headers}
     out_headers["Content-Disposition"] = content_disposition(data["file_name"])
@@ -332,38 +368,37 @@ async def download_video(token: str, request: Request):
 
 @router.get("/audio/{token}", name="stream_audio")
 async def stream_audio(token: str):
-    global _audio_streams
     decoded = decode_download_token(token)
     if decoded is None or decoded[1].get("kind") != "audio":
         raise HTTPException(401, "전사 링크가 만료되었거나 올바르지 않습니다. 다시 시도하세요.")
     user_id, data = decoded
     if ffmpeg_path() is None:
         raise HTTPException(503, "서버에 ffmpeg가 설치되어 있지 않습니다.")
-    if _active[user_id] >= MAX_DOWNLOADS_PER_USER:
-        raise HTTPException(429, f"동시에 {MAX_DOWNLOADS_PER_USER}개까지 받을 수 있습니다. 진행 중인 작업이 끝난 뒤 다시 시도하세요.")
-    if _audio_streams >= get_settings().max_audio_streams:
-        raise HTTPException(429, "서버가 바쁩니다. 잠시 뒤 다시 시도하세요.")
+    slot = _Slot(user_id, "진행 중인 작업이 끝난 뒤 다시 시도하세요.", audio=True)
     try:
         if saved_url := data.get("media_url"):
             url = check_media_host(saved_url)
         else:
             async with _relay_client() as http:
                 url = await resolve_media_url(http, data["content_id"])
-    except MediaError as e:
-        raise HTTPException(422, str(e)) from e
-    except httpx.HTTPError as e:
-        raise HTTPException(502, f"학교 서버에 연결하지 못했습니다: {e}") from e
+    except BaseException as e:
+        slot.release()
+        if isinstance(e, MediaError):
+            raise HTTPException(422, str(e)) from e
+        if isinstance(e, httpx.HTTPError):
+            raise HTTPException(502, f"학교 서버에 연결하지 못했습니다: {e}") from e
+        raise
 
-    _active[user_id] += 1
-    _audio_streams += 1
-
-    async def cleanup():
-        global _audio_streams
-        _active[user_id] -= 1
-        _audio_streams -= 1
+    async def body():
+        try:
+            async with aclosing(pcm_stream(url, COMMONS_HEADERS)) as pcm:
+                async for chunk in pcm:
+                    yield chunk
+        finally:
+            slot.release()
 
     headers = {"X-Audio-Sample-Rate": str(SAMPLE_RATE), "Cache-Control": "no-store"}
     if data.get("duration"):
         headers["X-Audio-Duration"] = str(data["duration"])
-    return StreamingResponse(pcm_stream(url, COMMONS_HEADERS), media_type="application/octet-stream",
-                             headers=headers, background=BackgroundTask(cleanup))
+    return StreamingResponse(body(), media_type="application/octet-stream",
+                             headers=headers, background=BackgroundTask(slot.release))
