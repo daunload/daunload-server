@@ -80,8 +80,8 @@ function taskRow(t) {
     side = { playing: `<span class="task-state on">듣는 중 ${pct}%</span>`, done: '<span class="task-state done">완료</span>',
       skipped: '<span class="task-state done">완료</span>', failed: '<span class="task-state bad">실패</span>',
       locked: '<span class="task-state bad">잠김</span>', queued: '<span class="task-state">대기</span>' }[job.status] || "";
-  } else if (t.kind !== "video" && t.url && !t.upcoming) {
-    side = `<a class="btn small" href="${esc(t.url)}" target="_blank" rel="noopener" aria-label="${esc(t.title)} 제출하기 (새 탭)">제출하기</a>`;
+  } else if (t.kind !== "video" && safeUrl(t.url) && !t.upcoming) {
+    side = `<a class="btn small" href="${esc(safeUrl(t.url))}" target="_blank" rel="noopener" aria-label="${esc(t.title)} 제출하기 (새 탭)">제출하기</a>`;
   }
   const sub = t.upcoming ? `${label} · ${whenText(t.upcoming)}에 열려요` : `${label} · ${esc(t.course)}`;
   return `<li class="task"><div class="task-main"><p class="task-title">${esc(t.title)}</p>
@@ -116,9 +116,9 @@ function ctaHtml(d) {
     return `<button class="btn primary block" id="week-play">강의 ${d.videos.length}개 한 번에 듣기</button>
       <p class="cta-note">${fmtDuration(d.video_seconds)} 분량${hasAssignments ? " · 과제·퀴즈는 직접 제출해야 해요" : ""}</p>`;
   }
-  const next = d.assignments.find((x) => x.url && x.status !== "upcoming");
+  const next = d.assignments.find((x) => safeUrl(x.url) && x.status !== "upcoming");
   if (next) {
-    return `<a class="btn primary block" href="${esc(next.url)}" target="_blank" rel="noopener">${esc(next.title)} 제출하러 가기</a>
+    return `<a class="btn primary block" href="${esc(safeUrl(next.url))}" target="_blank" rel="noopener">${esc(next.title)} 제출하러 가기</a>
       <p class="cta-note">학교 LMS에서 제출하면 다음 동기화 때 목록에서 빠져요</p>`;
   }
   return "";

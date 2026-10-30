@@ -312,15 +312,30 @@ Chrome 재생과 ffmpeg 변환이 겹칠 때의 CPU·메모리도 확인한다. 
 
 ## 9. DB 백업과 외부 보관
 
-백업 스크립트는 DB dump, 운영 `.env`, Compose와 Caddy 설정을 하나의 파일로 저장한다.
-암호화 키가 포함되므로 백업도 비밀 정보로 취급한다.
+백업 스크립트는 실행할 때마다 파일 두 개를 만든다.
+
+- `ssu-lms-날짜.tar.gz`: DB dump, Compose·Caddy 설정
+- `ssu-lms-secrets-날짜.env`: 운영 `.env`. 저장된 학교 비밀번호를 복호화하는 `FERNET_KEY`가 들어 있다.
+
+두 파일이 함께 유출되면 모든 사용자의 학교 비밀번호가 드러난다. 외부 사본은 서로 다른 곳에 보관한다
+(예: DB 백업은 외부 저장소, secrets 파일은 비밀번호 관리자).
+
+`/etc/ssu-lms/backup-age-recipients`에 [age](https://github.com/FiloSottile/age) 수신자(공개키)를 넣어 두면
+두 파일을 모두 암호화해 `.age` 파일로만 남긴다. 개인키는 서버에 두지 않는다.
+
+```bash
+age-keygen -o ssu-lms-backup-key.txt   # 로컬 PC에서 실행. 출력된 public key(age1...)를 아래에 넣는다
+sudo apt-get install -y age            # 서버에서
+sudo install -d -m 700 /etc/ssu-lms
+echo 'age1...' | sudo tee /etc/ssu-lms/backup-age-recipients > /dev/null
+```
 
 ```bash
 sudo /opt/ssu-lms/deploy/hetzner/backup.sh
 sudo ls -lh /var/backups/ssu-lms
 ```
 
-백업은 `/var/backups/ssu-lms/ssu-lms-날짜.tar.gz`에 root 전용 권한으로 저장된다.
+백업은 `/var/backups/ssu-lms/`에 root 전용 권한으로 저장된다.
 로컬 백업은 14일간 보관한다. 40GB 디스크이므로 DB 증가 시 보관 기간과 외부 저장 방식을 조정한다.
 `pg_restore --list`로 dump 형식을 확인하지만 실제 복구 가능 여부는 복구 연습으로 확인해야 한다.
 
@@ -342,8 +357,11 @@ sudo chmod 644 /etc/cron.d/ssu-lms-backup
 mkdir -p backups
 chmod 700 backups
 scp root@SERVER_IP:/var/backups/ssu-lms/ssu-lms-실제날짜.tar.gz backups/
-chmod 600 backups/*.tar.gz
+chmod 600 backups/*
 ```
+
+`ssu-lms-secrets-실제날짜.env`는 DB 백업과 같은 곳에 두지 말고 비밀번호 관리자 등 별도 위치에 보관한다.
+age로 암호화했다면 파일명 끝에 `.age`가 붙는다.
 
 이 명령은 수동 복사다. 무인 운영 전에는 외부 백업 전송도 자동화하고 실패 여부를 모니터링한다.
 서버 스냅샷은 추가 복구 수단으로 쓸 수 있지만 DB dump와 암호화 키의 외부 보관도 유지한다.
@@ -403,7 +421,14 @@ sudo docker system df
 기존 데이터가 있다면 먼저 현재 상태를 백업한다. 복구는 dump 시점 이후의 변경을 포함하지 않는다.
 먼저 2~5절대로 Docker와 해당 백업 시점의 소스를 준비한다.
 
-백업 파일을 서버에 업로드한 뒤 아래처럼 해제한다.
+age로 암호화한 백업은 **로컬 PC에서** 먼저 복호화한다.
+
+```bash
+age -d -i ssu-lms-backup-key.txt -o ssu-lms-실제날짜.tar.gz ssu-lms-실제날짜.tar.gz.age
+age -d -i ssu-lms-backup-key.txt -o ssu-lms-secrets-실제날짜.env ssu-lms-secrets-실제날짜.env.age
+```
+
+백업 파일과 secrets 파일을 서버에 업로드한 뒤 아래처럼 해제한다.
 
 ```bash
 sudo install -d -m 700 /root/ssu-lms-restore
@@ -414,7 +439,7 @@ sudo tar -xzf /업로드한경로/ssu-lms-실제날짜.tar.gz -C /root/ssu-lms-r
 정상 운영 중인 서비스가 있다면 `dc stop caddy worker sync-worker api`로 쓰기를 먼저 중지한다.
 
 ```bash
-sudo install -o deploy -g deploy -m 600 /root/ssu-lms-restore/app.env /opt/ssu-lms/deploy/hetzner/.env
+sudo install -o deploy -g deploy -m 600 /업로드한경로/ssu-lms-secrets-실제날짜.env /opt/ssu-lms/deploy/hetzner/.env
 ```
 
 도메인이나 서버 IP가 바뀌면 DNS와 `.env`의 `DOMAIN`을 수정한다.

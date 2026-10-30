@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me"
     jwt_expire_minutes: int = 60 * 24
     admin_student_ids: list[str] = []
+    # /docs, /redoc, /openapi.json 공개 여부. 운영에서는 끈다(개발용 .env에서 켠다).
+    api_docs: bool = False
 
     # "이번 주"(월~일)를 계산할 기준 시간대
     timezone: str = "Asia/Seoul"

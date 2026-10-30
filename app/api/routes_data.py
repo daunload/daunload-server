@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, Db
@@ -169,12 +169,13 @@ def _assignment_sort_key(a: AssignmentOut) -> tuple:
 
 @router.get("/announcements", response_model=list[AnnouncementOut], tags=["announcements"])
 async def list_announcements(
-    user: CurrentUser, db: Db, since: datetime | None = None, course_id: int | None = None, limit: int = 50
+    user: CurrentUser, db: Db, since: datetime | None = None, course_id: int | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
 ):
     stmt = select(AnnouncementRow).where(AnnouncementRow.user_id == user.id)
     if since:
         stmt = stmt.where(AnnouncementRow.posted_at >= since)
     if course_id:
         stmt = stmt.where(AnnouncementRow.lms_course_id == course_id)
-    stmt = stmt.order_by(AnnouncementRow.posted_at.desc()).limit(min(limit, 200))
+    stmt = stmt.order_by(AnnouncementRow.posted_at.desc()).limit(limit)
     return (await db.scalars(stmt)).all()

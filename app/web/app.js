@@ -665,7 +665,8 @@ async function viewAssignments() {
 
 function assignmentItem(a) {
   const kind = a.kind === "quiz" ? "quiz" : "assignment";
-  const title = a.url ? `<a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title)}</a>` : esc(a.title);
+  const url = safeUrl(a.url);
+  const title = url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(a.title)}</a>` : esc(a.title);
   const meta = [`<span>${esc(a.course_name)}</span>`];
   if (a.group_name) meta.push(`<span>${esc(a.group_name)}</span>`);
   const deadline = a.deadline && new Date(a.deadline);
@@ -741,10 +742,11 @@ async function viewAnnouncements() {
   const filters = [`<button data-c="" class="${sel ? "" : "on"}">전체</button>`,
     ...courseIds.map((id) => `<button data-c="${id}" class="${sel === id ? "on" : ""}">${esc(nameOf(id))}</button>`)].join("");
   const items = list.map((a) => {
-    const files = (a.attachments || []).map((f) => `<a href="${esc(f.url)}" target="_blank" rel="noopener">${esc(f.name)}</a>`).join("<br>");
+    const files = (a.attachments || []).map((f) => safeUrl(f.url) ? `<a href="${esc(safeUrl(f.url))}" target="_blank" rel="noopener">${esc(f.name)}</a>` : esc(f.name)).join("<br>");
+    const url = safeUrl(a.url);
     return `<details class="notice"><summary><span class="title">${esc(a.title)}</span>
       <span class="meta row"><span>${esc(a.course_name)}</span>${a.author ? `<span>${esc(a.author)}</span>` : ""}${a.posted_at ? `<span>${fmtDate(new Date(a.posted_at))}</span>` : ""}</span></summary>
-      <div class="notice-body">${esc(textOf(a.message))}${files ? `<p>${files}</p>` : ""}${a.url ? `<p><a href="${esc(a.url)}" target="_blank" rel="noopener">LMS에서 보기</a></p>` : ""}</div></details>`;
+      <div class="notice-body">${esc(textOf(a.message))}${files ? `<p>${files}</p>` : ""}${url ? `<p><a href="${esc(url)}" target="_blank" rel="noopener">LMS에서 보기</a></p>` : ""}</div></details>`;
   }).join("");
   $("#view").innerHTML = `
     <div class="view-head"><h1>공지</h1></div>

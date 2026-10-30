@@ -101,6 +101,8 @@ async def env(tmp_path, monkeypatch):
         return LmsSession(user_id=user_id, bearer_token="B", cookies=[])
 
     monkeypatch.setattr("app.lms.auth.login", fake_login)
+    from app.api import routes_account
+    monkeypatch.setattr(routes_account, "limiter", routes_account.AttemptLimiter())
 
     @asynccontextmanager
     async def no_lifespan(app):
@@ -160,10 +162,9 @@ async def test_next_login_uses_hash_and_password_change_rechecks_lms(env):
     assert (await api.post("/auth/login", data={"username": "20201234", "password": "right"})).status_code == 401
 
 
-async def test_failed_logins_are_throttled(env, monkeypatch):
+async def test_failed_logins_are_throttled(env):
     from app.api import routes_account
 
-    monkeypatch.setattr(routes_account, "_failures", {})
     api, _ = env
     await _signup(api)
     for _ in range(routes_account.MAX_FAILURES):
@@ -342,7 +343,10 @@ async def test_site_login_activity_counts_success_only(env, monkeypatch):
     assert row["login_count"] == 1 and row["last_login_at"] == first["last_login_at"]
     assert (await api.post("/auth/login", data={"username": "20201234", "password": "right"})).status_code == 200
     api.school_password["current"] = "changed"
-    assert (await api.post("/auth/login", data={"username": "20201234", "password": "changed"})).status_code == 200
+    r = await api.post("/auth/login", data={"username": "20201234", "password": "changed"})
+    assert r.status_code == 200
+    assert (await api.get("/admin/users", headers=admin)).status_code == 401  # 비밀번호가 바뀌면 이전 토큰은 폐기
+    admin = {"Authorization": f"Bearer {r.json()['access_token']}"}
     row = (await api.get("/admin/users", headers=admin)).json()["users"][0]
     assert row["login_count"] == 3
     assert row["last_login_at"] >= first["last_login_at"]
@@ -405,3 +409,124 @@ async def test_admin_settings_empty_user(env, monkeypatch):
     r = await api.get("/admin/users/legacy/settings", headers=admin)
     assert r.status_code == 200
     assert r.json()["lms"] is None and r.json()["courses"] == [] and r.json()["channels"] == []
+
+
+async def test_malformed_student_id_is_rejected_without_lms(env):
+    api, _ = env
+    for bad in ("abc", "2020/../1", "2020123", "20201234567", ""):
+        r = await api.post("/auth/login", data={"username": bad, "password": "right", "agree_terms": "true"})
+        assert r.status_code in (401, 422), bad
+    assert api.lms_logins == []
+
+
+async def test_concurrent_failed_logins_cannot_bypass_limit(env, monkeypatch):
+    import asyncio
+
+    from app.api import routes_account
+    from app.lms import auth
+
+    api, _ = env
+    fast_login = auth.login
+
+    async def slow_login(http, user_id, password):
+        await asyncio.sleep(0.05)
+        return await fast_login(http, user_id, password)
+
+    monkeypatch.setattr("app.lms.auth.login", slow_login)
+    data = {"username": "20201234", "password": "bad", "agree_terms": "true"}
+    codes = await asyncio.gather(*(api.post("/auth/login", data=data) for _ in range(20)))
+    assert len(api.lms_logins) == routes_account.MAX_FAILURES
+    assert sorted(r.status_code for r in codes).count(429) == 20 - routes_account.MAX_FAILURES
+
+
+async def test_failures_from_one_ip_across_student_ids_are_throttled(env):
+    from app.api import routes_account
+
+    api, _ = env
+    for i in range(routes_account.MAX_IP_FAILURES):
+        r = await api.post("/auth/login", data={"username": f"2020{i:04d}", "password": "bad", "agree_terms": "true"})
+        assert r.status_code == 401
+    calls = len(api.lms_logins)
+    r = await api.post("/auth/login", data={"username": "20209999", "password": "bad", "agree_terms": "true"})
+    assert r.status_code == 429 and len(api.lms_logins) == calls
+
+
+async def test_successful_lms_login_does_not_count_as_failure(env):
+    from app.api import routes_account
+
+    api, _ = env
+    for i in range(routes_account.MAX_IP_FAILURES + 1):
+        await _signup(api, f"2021{i:04d}")
+
+
+def test_limiter_forgets_expired_keys():
+    from app.api.routes_account import AttemptLimiter
+
+    now = [0.0]
+    lim = AttemptLimiter(clock=lambda: now[0], window=10, max_keys=3)
+    for i in range(3):
+        assert lim.acquire({f"k{i}": 5}) is not None
+    now[0] = 11
+    lim.acquire({"new": 5})
+    assert set(lim._hits) == {"new"}
+
+
+async def test_invalidated_lms_credentials_force_lms_check(env):
+    api, _ = env
+    await _signup(api)
+    async with db_base.sessionmaker()() as db:
+        from app.db.models import LmsCredential
+        cred = (await db.scalars(select(LmsCredential))).one()
+        cred.status = "invalid"
+        await db.commit()
+    api.school_password["current"] = "changed-at-school"
+    calls = len(api.lms_logins)
+    r = await api.post("/auth/login", data={"username": "20201234", "password": "right"})
+    assert r.status_code == 401 and len(api.lms_logins) == calls + 1
+
+
+async def test_password_change_revokes_existing_tokens(env):
+    api, _ = env
+    old = await _signup(api)
+    assert (await api.get("/me", headers=old)).status_code == 200
+    api.school_password["current"] = "new-right"
+    r = await api.post("/auth/login", data={"username": "20201234", "password": "new-right"})
+    new = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    assert (await api.get("/me", headers=old)).status_code == 401
+    assert (await api.get("/me", headers=new)).status_code == 200
+
+
+async def test_security_headers_on_dashboard_and_api(env):
+    api, _ = env
+    for path in ("/", "/health", "/app.js"):
+        r = await api.get(path)
+        csp = r.headers["content-security-policy"]
+        assert "frame-ancestors 'none'" in csp and "object-src 'none'" in csp, path
+        # onnxruntime-web은 wasm 백엔드를 blob: 모듈로 불러오고, 글꼴(Pretendard)은 jsdelivr에서 받는다
+        assert "script-src 'self' https://cdn.jsdelivr.net blob: 'wasm-unsafe-eval'" in csp
+        assert "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net" in csp
+        assert "font-src 'self' https://cdn.jsdelivr.net" in csp
+        assert r.headers["x-content-type-options"] == "nosniff"
+        assert r.headers["referrer-policy"] == "no-referrer"
+        assert r.headers["strict-transport-security"].startswith("max-age=")
+
+
+async def test_api_docs_are_off_unless_enabled(env, monkeypatch):
+    api, _ = env
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert (await api.get(path)).status_code == 404, path
+    monkeypatch.setenv("API_DOCS", "true")
+    get_settings.cache_clear()
+    app = create_app()
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as dev:
+        assert (await dev.get("/openapi.json")).status_code == 200
+        docs = await dev.get("/docs")
+        assert docs.status_code == 200 and "content-security-policy" not in docs.headers  # Swagger UI는 CDN·인라인 스크립트를 쓴다
+
+
+async def test_list_limits_must_be_positive(env):
+    api, _ = env
+    h = await _signup(api)
+    assert (await api.get("/announcements?limit=-1", headers=h)).status_code == 422
+    assert (await api.get("/playback/batches?limit=0", headers=h)).status_code == 422
+    assert (await api.get("/announcements?limit=200", headers=h)).status_code == 200

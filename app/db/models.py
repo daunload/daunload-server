@@ -20,6 +20,8 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     last_login_at: Mapped[datetime | None]
     login_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # 학교 비밀번호가 바뀌면 올린다. 이전 버전으로 발급한 토큰은 쓸 수 없다.
+    token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class LmsCredential(Base):

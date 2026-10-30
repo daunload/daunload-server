@@ -18,19 +18,20 @@ def verify_password(password: str, hashed: str) -> bool:
     return _hasher.verify(password, hashed)
 
 
-def create_access_token(user_id: int) -> str:
+def create_access_token(user_id: int, version: int = 0) -> str:
     s = get_settings()
-    payload = {"sub": str(user_id), "exp": utcnow() + timedelta(minutes=s.jwt_expire_minutes)}
+    payload = {"sub": str(user_id), "ver": version, "exp": utcnow() + timedelta(minutes=s.jwt_expire_minutes)}
     return jwt.encode(payload, s.jwt_secret, algorithm="HS256")
 
 
-def decode_access_token(token: str) -> int | None:
+def decode_access_token(token: str) -> tuple[int, int] | None:
+    """(사용자 ID, 토큰 버전). 버전이 사용자의 token_version과 다르면 폐기된 토큰이다."""
     try:
         payload = jwt.decode(token, get_settings().jwt_secret, algorithms=["HS256"])
         if payload.get("purpose"):  # 다운로드 링크 토큰으로 API에 로그인할 수 없게
             return None
-        return int(payload["sub"])
-    except (jwt.PyJWTError, KeyError, ValueError):
+        return int(payload["sub"]), int(payload.get("ver", 0))
+    except (jwt.PyJWTError, KeyError, ValueError, TypeError):
         return None
 
 

@@ -178,7 +178,7 @@ sudo /opt/ssu-lms/deploy/hetzner/compose.sh up -d --no-build --wait
 ```
 
 이 명령은 DB를 되돌리지 않는다. 호환되지 않으면 배포 전 DB 백업과 이전 코드·설정으로 복구한다.
-환경 설정도 되돌려야 한다면 `.env.previous` 또는 백업의 `app.env`를 복원한다.
+환경 설정도 되돌려야 한다면 `.env.previous` 또는 같은 시각의 `ssu-lms-secrets-*.env`를 복원한다.
 마이그레이션 단계 이후 실패하면 새 `.env`는 유지되며 자동으로 이전 설정을 복원하지 않는다.
 실패 시 `compose.sh ps -a`, `compose.sh logs --tail=100 api worker sync-worker`로 상태를 확인한다.
 디스크 부족을 피하도록 백업과 이미지 용량을 관찰하고, 검증된 이전 이미지는 보존한다.

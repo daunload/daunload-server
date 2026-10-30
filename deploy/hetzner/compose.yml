@@ -52,6 +52,9 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile
+    # api는 호스트 포트를 열지 않아 Caddy(같은 Compose 네트워크)를 거쳐서만 닿는다. Caddy는 신뢰하지 않는
+    # 클라이언트가 보낸 X-Forwarded-For를 실제 접속 IP로 덮어쓰므로, 로그인 IP별 제한에 쓰는 주소를 위조할 수 없다.
+    # api에 ports를 추가하거나 Caddy에 trusted_proxies를 설정하면 이 값을 Caddy 주소로 좁혀야 한다.
     command: [uvicorn, app.main:app, --host, 0.0.0.0, --port, "8000", --proxy-headers, --forwarded-allow-ips, "*"]
     depends_on:
       postgres: {condition: service_healthy}
