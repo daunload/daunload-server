@@ -84,6 +84,11 @@ Secret을 삭제하거나 비워 두면 그 이후부터 서버의 현재 `.env`
 JWT_SECRET 변경은 허용하지만 기존 로그인·다운로드 토큰이 무효화된다.
 성공·실패 시 전송용 임시 `.env`를 정리한다.
 
+`PRODUCTION_ENV has missing or invalid Compose settings`가 나오면 일부 설정만 넣었거나 dotenv 형식이 잘못된 것이다.
+서버의 기존 설정을 유지하려면 `PRODUCTION_ENV` Secret을 삭제한 뒤 실패한 배포를 다시 실행한다.
+특히 `ADMIN_STUDENT_IDS` 한 줄만 `PRODUCTION_ENV`에 넣으면 DOMAIN·POSTGRES_PASSWORD 같은 운영 설정이 빠져 배포가 중단된다.
+이 검증은 기존 `.env` 교체와 서비스 중지 전에 수행된다.
+
 Environment Variables에 방화벽 ID를 반드시 등록한다. 나머지는 필요할 때만 설정한다.
 
 | 이름 | 기본값 |

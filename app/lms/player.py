@@ -17,11 +17,12 @@ import time
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 from playwright.async_api import Browser, BrowserContext, Dialog, Frame, Page, async_playwright
 
 from app.config import Settings, get_settings
-from app.lms.auth import LmsSession
+from app.lms.auth import CANVAS_BASE_URL, LmsSession
 from app.lms.errors import PlaybackError, SessionExpired, VideoNotFound
 from app.lms.todo import VideoTodo
 
@@ -153,6 +154,15 @@ async def new_session_context(browser: Browser, session: LmsSession) -> BrowserC
     return context
 
 
+def playback_entry_url(video: VideoTodo) -> str:
+    """Commons media alone lacks the LMS attendance launch context."""
+    if urlsplit(video.view_url).hostname == "commons.ssu.ac.kr":
+        if video.course_id <= 0 or video.module_item_id <= 0:
+            raise PlaybackError("LMS 출석 연동에 필요한 과목 또는 강의 항목 ID가 없습니다.")
+        return f"{CANVAS_BASE_URL}/courses/{video.course_id}/modules/items/{video.module_item_id}"
+    return video.view_url
+
+
 class VideoPlayer:
     def __init__(self, browser: Browser, settings: Settings | None = None, poll_seconds: float = 5.0) -> None:
         self.browser = browser
@@ -182,7 +192,10 @@ class VideoPlayer:
         hard_limit = started + video.duration * 1.5 + 600
         reloads = 0
 
-        await page.goto(video.view_url, wait_until="domcontentloaded")
+        entry_url = playback_entry_url(video)
+        if entry_url != video.view_url:
+            log.info("LMS 출석 연동 페이지에서 재생 시작: course=%s module_item=%s", video.course_id, video.module_item_id)
+        await page.goto(entry_url, wait_until="domcontentloaded")
         _assert_logged_in(page)
         frame = await self._start_video(page)
 

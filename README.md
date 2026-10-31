@@ -77,6 +77,9 @@ docker compose up -d            # API: http://localhost:8000/docs (API_DOCS=true
   ./scripts/run-worker.sh   # 워커가 종료되면(예: Redis 재시작) 5초 뒤 자동으로 다시 띄운다
   ```
 
+Commons 영상은 LMS 강의 항목 페이지(`/courses/{course_id}/modules/items/{module_item_id}`)에서 출석 연동 프레임을 통해 재생한다.
+`commons.ssu.ac.kr/em/...`을 직접 열면 영상은 재생돼도 LMS 진도 전송에 필요한 정보가 빠질 수 있다.
+
 Playwright 기본 Chromium은 H.264/AAC를 재생하지 못하므로 `PLAYBACK_BROWSER_CHANNEL=chrome`(기본값)을 유지한다.
 
 ## 웹 대시보드

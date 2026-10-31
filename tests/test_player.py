@@ -1,6 +1,7 @@
 """실제 브라우저(Chrome)로 가짜 플레이어 페이지를 재생해 본다. Chrome이 없으면 건너뛴다."""
 
 from contextlib import AsyncExitStack
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -10,7 +11,9 @@ from app.config import Settings
 from app.lms.auth import LmsSession
 from app.lms.errors import PlaybackError
 from app.lms.models import Module
-from app.lms.player import VideoPlayer, _accept_dialog, _confirm_resume, launch_browser, verify_completed
+from app.lms.player import (
+    VideoPlayer, _accept_dialog, _confirm_resume, launch_browser, playback_entry_url, verify_completed,
+)
 from app.lms.todo import VideoTodo
 
 PAGE = (Path(__file__).parent / "fixtures" / "player" / "index.html").resolve().as_uri()
@@ -209,3 +212,67 @@ async def test_verify_completed_gives_up():
     client = _FakeClient(completed_on_call=99)
     assert await verify_completed(client, _video(), SETTINGS) is False
     assert client.calls == SETTINGS.verify_attempts
+
+
+
+def test_commons_playback_launches_lms_attendance_item_instead_of_embed():
+    video = _video("https://commons.ssu.ac.kr/em/content-id?token=private")
+    assert playback_entry_url(video) == "https://canvas.ssu.ac.kr/courses/1/modules/items/10"
+    assert playback_entry_url(_video()) == PAGE
+    assert playback_entry_url(_video("https://player.test/index.html")) == "https://player.test/index.html"
+    with pytest.raises(PlaybackError, match="ID가 없습니다"):
+        playback_entry_url(replace(video, module_item_id=0))
+
+
+@pytest.mark.browser
+async def test_plays_commons_through_attendance_wrapper(browser, monkeypatch):
+    from app.lms import player as player_module
+
+    original_context = player_module.new_session_context
+    clip = Path(__file__).parent / "fixtures" / "player" / "clip.webm"
+    requests = []
+
+    async def new_context(browser, session):
+        context = await original_context(browser, session)
+
+        async def route(request):
+            path = request.request.url
+            requests.append(path)
+            if path == "https://canvas.ssu.ac.kr/courses/1/modules/items/10":
+                await request.fulfill(content_type="text/html", body='''
+                    <iframe src="/attendance-wrapper"></iframe>
+                ''')
+            elif path == "https://canvas.ssu.ac.kr/attendance-wrapper":
+                await request.fulfill(content_type="text/html", body='''
+                    <iframe src="https://commons.ssu.ac.kr/em/content-id"></iframe>
+                    <script>
+                      addEventListener('message', event => {
+                        if (event.origin === 'https://commons.ssu.ac.kr' && event.data === 'ended') {
+                          fetch('/attendance-observed', {method:'POST'});
+                        }
+                      });
+                    </script>
+                ''')
+            elif path == "https://commons.ssu.ac.kr/em/content-id":
+                await request.fulfill(content_type="text/html", body='''
+                    <video muted src="/lecture.webm"></video>
+                    <script>document.querySelector('video').addEventListener('ended', () => {
+                      parent.postMessage('ended', 'https://canvas.ssu.ac.kr');
+                    });</script>
+                ''')
+            elif path.endswith('/lecture.webm'):
+                await request.fulfill(path=str(clip))
+            elif path.endswith('/attendance-observed'):
+                await request.fulfill(status=204)
+            else:
+                await request.abort()
+
+        await context.route("**/*", route)
+        return context
+
+    monkeypatch.setattr(player_module, "new_session_context", new_context)
+    video = _video("https://commons.ssu.ac.kr/em/content-id")
+    result = await VideoPlayer(browser, SETTINGS, poll_seconds=0.2).play(LmsSession("1", "b"), video)
+    assert requests[0] == "https://canvas.ssu.ac.kr/courses/1/modules/items/10"
+    assert "https://canvas.ssu.ac.kr/attendance-observed" in requests
+    assert result.position >= 3.9
