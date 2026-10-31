@@ -48,6 +48,7 @@ async def recover_interrupted() -> int:
             ))).all()
             for job in jobs:
                 job.status = "cancelled" if batch.cancel_requested else "queued"
+                job.progress_updated_at = None
                 job.progress_seconds = 0  # Actual LMS state is refreshed before replay.
                 if batch.cancel_requested:
                     job.finished_at = utcnow()

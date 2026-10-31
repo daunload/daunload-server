@@ -50,6 +50,11 @@
 .dashboard-lecture-list .status { flex-shrink: 0; }
 .dashboard-playback-progress { display: grid; gap: 8px; padding: 16px; border-radius: var(--r-btn); background: var(--fill); }
 .dashboard-playback-progress progress { width: 100%; accent-color: var(--blue); }
+.playback-progress { display: grid; gap: 10px; min-width: 0; overflow-wrap: anywhere; }
+.playback-progress h3 { font-size: 16px; }
+.playback-current { display: grid; gap: 8px; }
+.playback-upcoming { margin: 0; padding-left: 24px; }
+.playback-upcoming li { padding: 8px 0; border-bottom: 1px solid var(--line); }
 #dashboard-playback .btn { min-height: 44px; }
 .admin-settings { border-top: 1px solid var(--line); }
 .admin-settings summary { cursor: pointer; min-height: 44px; padding: 12px 0; font-weight: 600; overflow-wrap: anywhere; }
@@ -505,3 +510,7 @@ details.notice[open] summary::after { content: "⌃"; }
 .dialog-head { display: grid; gap: 2px; }
 .transcript-text { white-space: pre-wrap; word-break: keep-all; font: inherit; margin: 0; padding: 12px; background: var(--fill); border-radius: var(--r-btn); max-height: 60vh; overflow: auto; }
 .dialog-actions { gap: 6px; flex-wrap: wrap; }
+
+.playback-failure { margin-top: 12px; overflow-wrap: anywhere; }
+.playback-failure summary { cursor: pointer; min-height: 44px; padding: 12px 0; color: var(--ink); }
+.playback-failure-content ul { padding-left: 20px; }

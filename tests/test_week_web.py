@@ -210,3 +210,59 @@ async def test_dashboard_repeated_click_only_enqueues_once(page):
     }''')
     await expect(page.locator(".dashboard-playback-progress")).to_contain_text("0/2개 완료")
     assert page.calls == [("POST", "/playback/batches", {"scope": "all"})]
+
+
+async def test_playback_percent_queue_and_live_update(page):
+    batch = page.data["/playback/batches/7"]
+    page.data["/playback/batches"] = [batch]
+    await page.goto("http://dashboard.test/")
+    panel = page.locator("#dashboard-playback")
+    await expect(panel).to_contain_text("전체 재생 진행률 15%")
+    await expect(panel.locator(".playback-current")).to_contain_text("아두이노 소개 · 30%")
+    await expect(panel.locator(".playback-upcoming li")).to_have_count(1)
+    await expect(panel.locator(".playback-upcoming li")).to_contain_text("다음 재생 · 버튼과 LED")
+    batch["jobs"][0].update(status="done", progress_seconds=1800)
+    batch["jobs"][1].update(status="playing", progress_seconds=900)
+    batch["done_count"] = 1
+    await expect(panel).to_contain_text("전체 재생 진행률 75%", timeout=10000)
+    await expect(panel.locator(".playback-current")).to_contain_text("버튼과 LED · 50%")
+    await expect(panel).to_contain_text("다음 재생 예정 영상이 없습니다")
+    await panel.get_by_role("button", name="재생 현황 보기").click()
+    await expect(page.locator(".playback-progress")).to_contain_text("전체 재생 진행률 75%")
+    await page.set_viewport_size({"width": 375, "height": 812})
+    assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+
+
+async def test_playback_queue_excludes_failed_and_cancelled_jobs(page):
+    batch = page.data["/playback/batches/7"]
+    batch["jobs"][0].update(status="skipped", duration=0)
+    batch["jobs"][1].update(status="failed", duration=0)
+    page.data["/playback/batches"] = [batch]
+    await page.goto("http://dashboard.test/")
+    panel = page.locator("#dashboard-playback")
+    await expect(panel).to_contain_text("전체 재생 진행률 0%")
+    await expect(panel).to_contain_text("다음 재생 예정 영상이 없습니다")
+    await expect(panel.locator(".playback-upcoming li")).to_have_count(0)
+    batch["jobs"][1].update(status="queued", duration=1800)
+    batch["cancel_requested"] = True
+    await expect(panel).to_contain_text("중지 요청으로 예정된 영상을 재생하지 않습니다", timeout=10000)
+    await expect(panel.locator(".playback-upcoming li")).to_have_count(0)
+
+
+async def test_reload_shows_saved_progress_and_stale_activity(page):
+    batch = page.data["/playback/batches/7"]
+    page.data["/playback/batches"] = [batch]
+    job = batch["jobs"][0]
+    job["progress_updated_at"] = datetime.now(UTC).isoformat()
+    await page.goto("http://dashboard.test/")
+    current = page.locator("#dashboard-playback .playback-current")
+    await expect(current).to_contain_text("최근 재생 진행이 확인되었습니다")
+    await expect(current).to_contain_text("9분 0초 / 30분 0초")
+    job.update(progress_seconds=900, progress_updated_at=(datetime.now(UTC) - timedelta(minutes=2)).isoformat())
+    await page.reload()
+    await expect(current).to_contain_text("아두이노 소개 · 50%")
+    await expect(current).to_contain_text("재생 확인 필요")
+    await expect(current).to_contain_text("마지막 진행")
+    job.update(progress_updated_at=None)
+    await page.reload()
+    await expect(current).to_contain_text("아직 실제 재생 진행을 확인하지 못했습니다")

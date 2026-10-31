@@ -301,3 +301,26 @@ async def test_lms_links_only_allow_https(dashboard):
     await page.goto("http://dashboard.test/#announcements")
     await page.locator("summary").first.click()
     await expect(page.get_by_role("link", name="정상")).to_have_attribute("href", "https://canvas.ssu.ac.kr/f/1")
+
+
+async def test_playback_history_reveals_item_error_and_retries_loading(dashboard):
+    page, data = dashboard
+    batch = {"id": 12, "status": "failed", "scope": "all", "total": 1,
+             "done_count": 0, "failed_count": 1, "skipped_count": 0,
+             "created_at": datetime.now(UTC).isoformat(), "error": None}
+    data["/playback/batches"] = [batch]
+    await page.goto("http://dashboard.test/#playback")
+    details = page.locator(".playback-failure")
+    await details.locator("summary").click()
+    await expect(details.get_by_role("alert")).to_contain_text("Not found")
+    data["/playback/batches/12"] = {**batch, "jobs": [
+        {"title": "실패 영상 <script>", "status": "failed", "attempts": 2,
+         "progress_seconds": 1, "duration": 1800,
+         "error": "재생은 끝났지만 LMS에서 완료로 바뀌지 않았습니다."}]}
+    await details.get_by_role("button", name="다시 시도").click()
+    await expect(details).to_contain_text("실패 영상 <script>")
+    await expect(details).to_contain_text("재생은 끝났지만 LMS에서 완료로 바뀌지 않았습니다.")
+    await expect(details).to_contain_text("시도 2회")
+    await expect(details.locator("script")).to_have_count(0)
+    await page.set_viewport_size({"width": 375, "height": 844})
+    assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")

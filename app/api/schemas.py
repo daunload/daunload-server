@@ -128,6 +128,7 @@ class JobOut(Orm):
     status: str
     attempts: int
     progress_seconds: float
+    progress_updated_at: datetime | None = None
     error: str | None
     started_at: datetime | None
     finished_at: datetime | None
