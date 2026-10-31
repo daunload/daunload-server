@@ -530,3 +530,48 @@ async def test_list_limits_must_be_positive(env):
     assert (await api.get("/announcements?limit=-1", headers=h)).status_code == 422
     assert (await api.get("/playback/batches?limit=0", headers=h)).status_code == 422
     assert (await api.get("/announcements?limit=200", headers=h)).status_code == 200
+
+
+@respx.mock
+async def test_playback_progress_survives_refresh_and_stall_does_not_refresh_timestamp(env, monkeypatch):
+    from types import SimpleNamespace
+    from app.services import playback
+    from app.services.sync import sync_user
+    from app.db.models import PlaybackJob
+
+    api, _ = env
+    headers = await _signup(api)
+    LmsMock().install()
+    async with db_base.sessionmaker()() as db:
+        await sync_user(db, 1)
+    created = await api.post("/playback/batches", headers=headers, json={"scope": "all"})
+    assert created.status_code == 201
+    batch_id = created.json()["id"]
+    async with db_base.sessionmaker()() as db:
+        job = await db.scalar(select(PlaybackJob).where(PlaybackJob.batch_id == batch_id, PlaybackJob.position == 0))
+        video = playback._video_from_json(job.video)
+    clock = [100.0]
+    monkeypatch.setattr(playback, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    hooks = playback._db_hooks(batch_id)
+    await hooks.on_item_start(0, video)
+    await hooks.on_progress(video, 60, 600)
+    url = f"/playback/batches/{batch_id}"
+    first = (await api.get(url, headers=headers)).json()["jobs"][0]
+    assert first["progress_seconds"] == 60
+    assert first["progress_updated_at"] is not None
+    # A separate HTTP fetch (including after a browser reload) reads persisted progress.
+    reloaded = (await api.get(url, headers=headers)).json()["jobs"][0]
+    assert reloaded["progress_seconds"] == first["progress_seconds"]
+    assert reloaded["progress_updated_at"] == first["progress_updated_at"]
+    clock[0] += 11
+    await hooks.on_progress(video, 60, 600)
+    stalled = (await api.get(url, headers=headers)).json()["jobs"][0]
+    assert stalled["progress_updated_at"] == first["progress_updated_at"]
+    await hooks.on_progress(video, 80, 600)
+    advanced = (await api.get(url, headers=headers)).json()["jobs"][0]
+    assert advanced["progress_seconds"] == 80
+    assert advanced["progress_updated_at"] != first["progress_updated_at"]
+    await hooks.on_item_start(0, video)
+    reset = (await api.get(url, headers=headers)).json()["jobs"][0]
+    assert reset["progress_seconds"] == 0
+    assert reset["progress_updated_at"] is None

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import asdict, replace
 from datetime import datetime, timedelta
 
@@ -239,6 +240,8 @@ def _db_hooks(batch_id: int) -> BatchHooks:
         async with sm() as db:
             j = await job(db, position)
             j.status, j.started_at, j.progress_seconds = "playing", utcnow(), 0
+            j.progress_updated_at = None
+            last_saved.pop((video.course_id, video.module_item_id), None)
             batch = await db.get(PlaybackBatch, batch_id)
             batch.current_position = position
             await db.commit()
@@ -263,19 +266,24 @@ def _db_hooks(batch_id: int) -> BatchHooks:
                 ).values(active=False))
             await db.commit()
 
-    last_saved: dict[int, float] = {}
+    last_saved: dict[tuple[int, int], float] = {}
 
     async def on_progress(video: VideoTodo, t: float, d: float) -> None:
-        # 너무 자주 쓰지 않도록 30초 단위로 저장
-        if t - last_saved.get(video.module_item_id, -999) < 30:
+        # Persist advancing positions at most every ten wall-clock seconds.
+        # A stalled player must not appear healthy just because it still reports.
+        key = (video.course_id, video.module_item_id)
+        now = time.monotonic()
+        if now - last_saved.get(key, float("-inf")) < 10:
             return
-        last_saved[video.module_item_id] = t
         async with sm() as db:
             j = await db.scalar(select(PlaybackJob).where(
-                PlaybackJob.batch_id == batch_id, PlaybackJob.module_item_id == video.module_item_id))
-            if j:
+                PlaybackJob.batch_id == batch_id, PlaybackJob.lms_course_id == video.course_id,
+                PlaybackJob.module_item_id == video.module_item_id))
+            if j and j.status == "playing" and t > j.progress_seconds:
                 j.progress_seconds = t
+                j.progress_updated_at = utcnow()
                 await db.commit()
+                last_saved[key] = now
 
     return BatchHooks(on_item_start=on_item_start, on_item_done=on_item_done, on_progress=on_progress)
 

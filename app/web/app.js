@@ -93,7 +93,7 @@ async function api(path, { method = "GET", json, form } = {}) {
   let body;
   if (json !== undefined) { headers["Content-Type"] = "application/json"; body = JSON.stringify(json); }
   if (form) body = new URLSearchParams(form);
-  const res = await fetch(path, { method, headers, body });
+  const res = await fetch(path, { method, headers, body, ...(path.startsWith("/playback/") ? { cache: "no-store" } : {}) });
   if (res.status === 401 && state.token) { logout(); throw new ApiError(401, "다시 로그인하세요."); }
   if (res.status === 204) return null;
   const data = await res.json().catch(() => null);
@@ -483,6 +483,54 @@ async function loadDashboardPlayback() {
   }
 }
 
+// Playback time includes confirmed completion and the current video's reported time.
+function jobProgressPercent(job) {
+  if (["done", "skipped"].includes(job.status)) return 100;
+  if (job.status !== "playing" || !(job.duration > 0)) return 0;
+  return Math.min(100, Math.max(0, (Number(job.progress_seconds) || 0) / job.duration * 100));
+}
+
+function playbackActivityHtml(job) {
+  const updated = job.progress_updated_at ? new Date(job.progress_updated_at) : null;
+  if (!updated || !Number.isFinite(updated.getTime())) {
+    return '<p class="muted small-text">재생 위치가 갱신되기를 기다리고 있습니다. 아직 실제 재생 진행을 확인하지 못했습니다.</p>';
+  }
+  const age = Math.max(0, Math.floor((Date.now() - updated.getTime()) / 1000));
+  const clock = updated.toLocaleTimeString("ko-KR", { hour12: false });
+  return `<p class="small-text">${age <= 45 ? "최근 재생 진행이 확인되었습니다" : "재생 확인 필요 · 45초 넘게 진행 보고가 없습니다"}
+    · 마지막 진행 ${esc(clock)} (${age}초 전)</p>`;
+}
+
+function playbackPosition(seconds) {
+  const value = Math.max(0, Math.floor(Number(seconds) || 0));
+  return `${Math.floor(value / 60)}분 ${value % 60}초`;
+}
+
+function playbackProgressHtml(batch) {
+  const jobs = [...(batch.jobs || [])].sort((a, b) => a.position - b.position);
+  const duration = jobs.reduce((sum, job) => sum + Math.max(0, job.duration || 0), 0);
+  const played = jobs.reduce((sum, job) => sum + Math.max(0, job.duration || 0) * jobProgressPercent(job) / 100, 0);
+  const percent = duration > 0 ? Math.floor(played / duration * 100) : 0;
+  const current = jobs.find((job) => job.status === "playing");
+  const upcoming = batch.cancel_requested ? [] : jobs.filter((job) => job.status === "queued");
+  const courseName = (job) => state.courses.find((course) => course.lms_course_id === job.lms_course_id)?.name || "";
+  return `<section class="playback-progress" aria-label="재생 진행률과 예정 영상">
+    <p><strong>전체 재생 진행률 ${percent}%</strong> · ${(batch.done_count || 0) + (batch.skipped_count || 0)}/${batch.total}개 완료</p>
+    <progress value="${percent}" max="100" aria-label="전체 재생 진행률"></progress>
+    <p class="muted small-text">영상 길이 기준 · 이미 완료된 영상 포함 · 학습 완료는 LMS 확인 후 반영됩니다.</p>
+    ${current ? `<div class="playback-current"><h3>현재 재생 중</h3><p>${esc(current.title)} · ${Math.floor(jobProgressPercent(current))}%</p>
+      <p class="muted small-text">${esc(courseName(current))} · ${playbackPosition(Math.min(Math.max(0, current.progress_seconds || 0), Math.max(0, current.duration || 0)))} / ${playbackPosition(current.duration)}</p>
+      ${playbackActivityHtml(current)}
+      <progress value="${jobProgressPercent(current)}" max="100" aria-label="현재 영상 재생 진행률"></progress></div>`
+      : `<p>${batch.cancel_requested ? "재생 중지를 요청했습니다." : "다음 영상 재생을 기다리고 있습니다."}</p>`}
+    <h3>다음 재생 예정 영상 ${upcoming.length}개</h3>
+    ${upcoming.length ? `<ol class="playback-upcoming">${upcoming.map((job, index) => `<li>
+      <p><strong>${index === 0 ? "다음 재생 · " : ""}${esc(job.title)}</strong></p>
+      <p class="muted small-text">${esc(courseName(job))} · ${fmtDuration(job.duration)}${job.expected_start ? ` · 예상 시작 ${fmtDate(new Date(job.expected_start))}` : ""}</p>
+    </li>`).join("")}</ol>` : `<p class="muted small-text">${batch.cancel_requested ? "중지 요청으로 예정된 영상을 재생하지 않습니다." : "다음 재생 예정 영상이 없습니다."}</p>`}
+  </section>`;
+}
+
 function drawDashboardPlayback() {
   const root = $("#dashboard-playback");
   if (!root) return;
@@ -490,10 +538,9 @@ function drawDashboardPlayback() {
   const items = plan?.items || [];
   const batch = state.active;
   const jobs = batch?.jobs || [];
-  const done = (batch?.done_count || 0) + (batch?.skipped_count || 0);
   const progress = batch ? `<div class="dashboard-playback-progress" role="status">
-    <strong>${batch.status === "queued" ? "재생 대기 중" : "강의 재생 중"} · ${done}/${batch.total}개 완료</strong>
-    <progress value="${done}" max="${batch.total || 1}" aria-label="전체 강의 재생 진행률"></progress>
+    <strong>${batch.status === "queued" ? "재생 대기 중" : "강의 재생 중"}</strong>
+    ${playbackProgressHtml(batch)}
     <p>${batch.status === "queued" && batch.queue_position != null ? `대기 ${batch.queue_position}번째 · ` : ""}창을 닫아도 서버에서 계속 재생합니다.</p>
     <button class="btn" id="dashboard-playback-details">재생 현황 보기</button></div>` : "";
   const list = items.length ? `<ol class="dashboard-lecture-list">${items.map((item) => {
@@ -768,6 +815,11 @@ function viewPlayback() {
   v.innerHTML = `<div class="view-head"><h1>영상 재생</h1></div>
     ${state.active ? activeBatchHtml(state.active) : planFormHtml()}
     ${historyHtml()}`;
+  document.querySelectorAll(".playback-failure").forEach((details) => {
+    details.addEventListener("toggle", () => {
+      if (details.open && !details.dataset.loaded) loadPlaybackFailure(details);
+    });
+  });
   if (state.active) {
     $("#cancel-batch")?.addEventListener("click", cancelBatch);
   } else {
@@ -867,12 +919,12 @@ function activeBatchHtml(b) {
   const ends = playbackTimeline()?.ends || new Map();
   const steps = b.jobs.map((j) => {
     const late = ends.get(j.module_item_id) > new Date(j.deadline).getTime();
-    const pct = j.status === "playing" ? Math.min(100, (j.progress_seconds / j.duration) * 100) : j.status === "done" ? 100 : 0;
+    const pct = jobProgressPercent(j);
     return `<li class="${late ? "risk" : ""}"><span class="num">${j.position + 1}</span>
       <span><span class="title">${esc(j.title)}</span>
         <span class="meta row small-text"><span>${fmtDuration(j.duration)}</span><span>마감 ${fmtDate(new Date(j.deadline))}</span>
         ${late ? "<span>마감 전에 끝나지 않을 예정</span>" : ""}${j.attempts > 1 ? `<span>${j.attempts}번 시도</span>` : ""}${j.error ? `<span>${esc(j.error)}</span>` : ""}</span>
-        ${j.status === "playing" ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ""}</span>
+        ${j.status === "playing" ? `<p class="small-text">재생 진행률 ${Math.floor(pct)}%</p><progress value="${pct}" max="100" aria-label="${esc(j.title)} 재생 진행률"></progress>` : ""}</span>
       <span class="status ${j.status}">${JOB_STATUS[j.status] || j.status}</span></li>`;
   }).join("");
   const cancelling = b.cancel_requested;
@@ -888,6 +940,7 @@ function activeBatchHtml(b) {
       <p class="muted small-text">사용자별 영상 한 개씩 번갈아 재생합니다. 예상 시간은 현재 대기열 기준이며 새 요청·재시도에 따라 달라집니다.</p>
       <p class="muted small-text">재생은 서버에서 계속됩니다. 이 창을 닫아도 멈추지 않습니다.</p>
     </div>
+    <div class="panel-body">${playbackProgressHtml(b)}</div>
     <ol class="steps">${steps}</ol>
     <div class="actions"><button class="btn danger" id="cancel-batch" ${cancelling ? "disabled" : ""}>${cancelling ? "재생 중지 요청됨" : "재생 중지"}</button></div>
   </div>`;
@@ -910,7 +963,32 @@ function historyHtml() {
   return `<h3>지난 재생</h3><div class="panel"><ul class="list">${past.map((b) => `<li>
     <span class="title">${scopeName[b.scope] || b.scope} ${b.total}개, ${BATCH_STATUS[b.status]}</span>
     <span class="meta row"><span>완료 ${b.done_count}</span><span>실패 ${b.failed_count}</span><span>이미 완료 ${b.skipped_count}</span>
-      <span>${fmtDate(new Date(b.created_at))}</span>${b.error ? `<span>${esc(b.error)}</span>` : ""}</span></li>`).join("")}</ul></div>`;
+      <span>${fmtDate(new Date(b.created_at))}</span>${b.error ? `<span>${esc(b.error)}</span>` : ""}</span>
+    ${b.failed_count || b.status === "failed" || b.status === "partial" ? `<details class="playback-failure" data-batch-id="${b.id}"><summary>실패한 영상과 오류 사유 보기</summary><div class="playback-failure-content" aria-live="polite"></div></details>` : ""}</li>`).join("")}</ul></div>`;
+}
+
+async function loadPlaybackFailure(details) {
+  const content = details.querySelector(".playback-failure-content");
+  if (details.dataset.loading) return;
+  details.dataset.loading = "true";
+  content.innerHTML = '<p role="status">실패 내용을 불러오는 중입니다.</p>';
+  try {
+    const batch = await api(`/playback/batches/${details.dataset.batchId}`);
+    if (!details.isConnected) return;
+    const failed = batch.jobs.filter((job) => ["failed", "locked"].includes(job.status));
+    content.innerHTML = `${batch.error ? `<p>${esc(batch.error)}</p>` : ""}
+      ${failed.length ? `<ul>${failed.map((job) => `<li><strong>${esc(job.title)}</strong>
+        <p>${esc(job.error || batch.error || "오류 사유가 기록되지 않았습니다. 서버의 재생 워커 로그를 확인해야 합니다.")}</p>
+        <p class="muted small-text">시도 ${job.attempts}회 · 마지막 재생 위치 ${fmtDuration(job.progress_seconds || 0)} / ${fmtDuration(job.duration)}</p></li>`).join("")}</ul>`
+        : '<p>영상별 실패 기록이 없습니다.</p>'}`;
+    details.dataset.loaded = "true";
+  } catch (err) {
+    if (!details.isConnected) return;
+    content.innerHTML = `<p role="alert">${esc(err.message)}</p><button class="btn">다시 시도</button>`;
+    content.querySelector("button").addEventListener("click", () => loadPlaybackFailure(details));
+  } finally {
+    delete details.dataset.loading;
+  }
 }
 
 let pollTimer = null;

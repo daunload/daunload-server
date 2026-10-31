@@ -177,6 +177,7 @@ class PlaybackJob(Base):
     status: Mapped[str] = mapped_column(String(16), default="queued")
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     progress_seconds: Mapped[float] = mapped_column(Float, default=0)
+    progress_updated_at: Mapped[datetime | None]
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None]
     finished_at: Mapped[datetime | None]
