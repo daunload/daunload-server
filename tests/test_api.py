@@ -509,6 +509,15 @@ async def test_security_headers_on_dashboard_and_api(env):
         assert r.headers["x-content-type-options"] == "nosniff"
         assert r.headers["referrer-policy"] == "no-referrer"
         assert r.headers["strict-transport-security"].startswith("max-age=")
+        assert "frame-src https://*.googlesyndication.com" in csp
+
+
+async def test_adsense_loader_and_ads_txt_are_served(env):
+    api, _ = env
+    assert "pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1006974862356513" in (await api.get("/")).text
+    r = await api.get("/ads.txt")
+    assert r.status_code == 200
+    assert r.text.strip() == "google.com, pub-1006974862356513, DIRECT, f08c47fec0942fa0"
 
 
 async def test_api_docs_are_off_unless_enabled(env, monkeypatch):
