@@ -35,11 +35,14 @@ async def lifespan(app: FastAPI):
 # 브라우저 Whisper: transformers.js·onnxruntime(cdn.jsdelivr.net, wasm 백엔드는 blob: 모듈로 불러온다),
 # 모델(Hugging Face Hub와 그 CDN). 글꼴(Pretendard)은 jsdelivr에서 받는다.
 # 대시보드 HTML 문자열에 style 속성이 있어 스타일만 인라인을 허용한다. 스크립트는 인라인을 막는다.
+# 광고(Google AdSense 자동 광고): 로더 스크립트와 광고 iframe·측정 요청이 구글 도메인들을 쓴다.
+ADSENSE = "https://*.googlesyndication.com https://*.doubleclick.net https://*.google.com https://*.gstatic.com https://*.adtrafficquality.google"
 CSP = "; ".join([
     "default-src 'self'",
-    "script-src 'self' https://cdn.jsdelivr.net blob: 'wasm-unsafe-eval'",
+    f"script-src 'self' https://cdn.jsdelivr.net blob: 'wasm-unsafe-eval' {ADSENSE}",
     "worker-src 'self' blob:",
-    "connect-src 'self' https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co",
+    f"connect-src 'self' https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co {ADSENSE}",
+    f"frame-src {ADSENSE}",
     "img-src 'self' data: https:",
     "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
     "font-src 'self' https://cdn.jsdelivr.net",
