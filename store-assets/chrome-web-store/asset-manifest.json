@@ -1,0 +1,46 @@
+{
+  "source_extension_version": "1.2.5",
+  "icon": {
+    "file": "store-icon-128.png",
+    "width": 128,
+    "height": 128,
+    "format": "PNG",
+    "color": "RGBA 32-bit",
+    "alpha": true,
+    "artwork_width": 96,
+    "artwork_height": 96,
+    "transparent_padding": 16
+  },
+  "screenshots": [
+    {
+      "file": "screenshots/01-folder-choice.jpg",
+      "width": 1280,
+      "height": 800,
+      "format": "JPEG",
+      "alpha": false
+    },
+    {
+      "file": "screenshots/02-bulk-queue.jpg",
+      "width": 1280,
+      "height": 800,
+      "format": "JPEG",
+      "alpha": false
+    },
+    {
+      "file": "screenshots/03-completed.jpg",
+      "width": 1280,
+      "height": 800,
+      "format": "JPEG",
+      "alpha": false
+    },
+    {
+      "file": "screenshots/04-cancel-and-error.jpg",
+      "width": 1280,
+      "height": 800,
+      "format": "JPEG",
+      "alpha": false
+    }
+  ],
+  "sample_data": true,
+  "note": "Actual extension UI with fictional course names, sizes and states; screenshot disclosure is visible."
+}

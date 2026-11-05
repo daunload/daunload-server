@@ -13,3 +13,7 @@ deploy/hetzner/.deploy.lock
 dist/
 
 .superpowers/
+
+# Local OS metadata and assistant settings
+.DS_Store
+.claude/
