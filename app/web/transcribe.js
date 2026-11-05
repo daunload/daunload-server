@@ -169,17 +169,19 @@ function txStatusOf(courseId, moduleItemId) {
 
 function transcribeButton(v, courseId) {
   const parts = [];
-  if (v.transcript_id) parts.push(`<button class="btn small" data-tx-open="${v.transcript_id}">텍스트 보기</button>`);
+  if (v.transcript_id) parts.push(`<button class="btn small ghost" data-tx-open="${v.transcript_id}">텍스트 보기</button>`);
   if (!v.audioPath) return parts.join("");
   const st = txStatusOf(courseId, v.module_item_id);
   const label = st === "running" ? "변환 중" : st === "queued" ? "대기 중" : v.transcript_id ? "다시 변환" : "텍스트로 변환";
-  parts.push(`<button class="btn small" data-tx="${v.module_item_id}" ${st ? "disabled" : ""}>${label}</button>`);
+  parts.push(`<button class="btn small ghost" data-tx="${v.module_item_id}" ${st ? "disabled" : ""}>${label}</button>`);
   return parts.join("");
 }
 
 function transcribeGroupButton(items, title) {
   const n = items.filter((v) => v.audioPath && !v.transcript_id).length;
-  return n ? `<button class="btn small" data-tx-group="${esc(items[0].module_id)}">${esc(title)} ${n}개 텍스트로 변환</button>` : "";
+  if (n < 2) return "";  // 1개뿐이면 그 줄의 버튼과 같은 동작이다
+  const label = `전체 텍스트로 변환 (${n})`;
+  return `<button class="btn small link" data-tx-group="${esc(items[0].module_id)}" aria-label="${esc(title)} ${label}">${label}</button>`;
 }
 
 function wireTranscribe(box, items, courseId) {

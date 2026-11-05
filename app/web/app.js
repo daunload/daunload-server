@@ -517,15 +517,13 @@ function jobProgressPercent(job) {
   return Math.min(100, Math.max(0, (Number(job.progress_seconds) || 0) / job.duration * 100));
 }
 
+/** 재생이 정상이면 진행률이 말해 주므로 아무것도 쓰지 않는다. 확인이 필요할 때만 한 줄을 보인다. */
 function playbackActivityHtml(job) {
   const updated = job.progress_updated_at ? new Date(job.progress_updated_at) : null;
-  if (!updated || !Number.isFinite(updated.getTime())) {
-    return '<p class="muted small-text">재생 위치가 갱신되기를 기다리고 있습니다. 아직 실제 재생 진행을 확인하지 못했습니다.</p>';
-  }
+  if (!updated || !Number.isFinite(updated.getTime())) return '<p class="muted small-text">재생 위치를 확인하는 중이에요</p>';
   const age = Math.max(0, Math.floor((Date.now() - updated.getTime()) / 1000));
-  const clock = updated.toLocaleTimeString("ko-KR", { hour12: false });
-  return `<p class="small-text">${age <= 45 ? "최근 재생 진행이 확인되었습니다" : "재생 확인 필요 · 45초 넘게 진행 보고가 없습니다"}
-    · 마지막 진행 ${esc(clock)} (${age}초 전)</p>`;
+  if (age <= 45) return "";
+  return `<p class="warning">재생 확인 필요 · 45초 넘게 진행 보고가 없어요 (마지막 ${esc(updated.toLocaleTimeString("ko-KR", { hour12: false }))})</p>`;
 }
 
 function playbackPosition(seconds) {
@@ -533,29 +531,10 @@ function playbackPosition(seconds) {
   return `${Math.floor(value / 60)}분 ${value % 60}초`;
 }
 
-function playbackProgressHtml(batch) {
-  const jobs = [...(batch.jobs || [])].sort((a, b) => a.position - b.position);
+function playbackOverallPercent(jobs) {
   const duration = jobs.reduce((sum, job) => sum + Math.max(0, job.duration || 0), 0);
   const played = jobs.reduce((sum, job) => sum + Math.max(0, job.duration || 0) * jobProgressPercent(job) / 100, 0);
-  const percent = duration > 0 ? Math.floor(played / duration * 100) : 0;
-  const current = jobs.find((job) => job.status === "playing");
-  const upcoming = batch.cancel_requested ? [] : jobs.filter((job) => job.status === "queued");
-  const courseName = (job) => state.courses.find((course) => course.lms_course_id === job.lms_course_id)?.name || "";
-  return `<section class="playback-progress" aria-label="재생 진행률과 예정 영상">
-    <p><strong>전체 재생 진행률 ${percent}%</strong> · ${(batch.done_count || 0) + (batch.skipped_count || 0)}/${batch.total}개 완료</p>
-    <progress value="${percent}" max="100" aria-label="전체 재생 진행률"></progress>
-    <p class="muted small-text">영상 길이 기준 · 이미 완료된 영상 포함 · 학습 완료는 LMS 확인 후 반영됩니다.</p>
-    ${current ? `<div class="playback-current"><h3>현재 재생 중</h3><p>${esc(current.title)} · ${Math.floor(jobProgressPercent(current))}%</p>
-      <p class="muted small-text">${esc(courseName(current))} · ${playbackPosition(Math.min(Math.max(0, current.progress_seconds || 0), Math.max(0, current.duration || 0)))} / ${playbackPosition(current.duration)}</p>
-      ${playbackActivityHtml(current)}
-      <progress value="${jobProgressPercent(current)}" max="100" aria-label="현재 강의 재생 진행률"></progress></div>`
-      : `<p>${batch.cancel_requested ? "재생 중지를 요청했습니다." : "다음 강의 재생을 기다리고 있습니다."}</p>`}
-    <h3>다음 재생 예정 영상 ${upcoming.length}개</h3>
-    ${upcoming.length ? `<ol class="playback-upcoming">${upcoming.map((job, index) => `<li>
-      <p><strong>${index === 0 ? "다음 재생 · " : ""}${esc(job.title)}</strong></p>
-      <p class="muted small-text">${esc(courseName(job))} · ${fmtDuration(job.duration)}${job.expected_start ? ` · 예상 시작 ${fmtDate(new Date(job.expected_start))}` : ""}</p>
-    </li>`).join("")}</ol>` : `<p class="muted small-text">${batch.cancel_requested ? "중지 요청으로 예정된 영상을 재생하지 않습니다." : "다음 재생 예정 영상이 없습니다."}</p>`}
-  </section>`;
+  return duration > 0 ? Math.floor(played / duration * 100) : 0;
 }
 
 function drawDashboardPlayback() {
@@ -837,9 +816,13 @@ async function viewAnnouncements() {
 function viewPlayback() {
   if (needCred()) return;
   const v = $("#view");
+  const helpFocused = document.activeElement?.closest?.(".playback-help") != null;  // 5초마다 다시 그려도 포커스를 잃지 않는다
   v.innerHTML = `<div class="view-head"><h1>강의 재생</h1></div>
     ${state.active ? activeBatchHtml(state.active) : planFormHtml()}
     ${historyHtml()}`;
+  const help = v.querySelector(".playback-help");
+  help?.addEventListener("toggle", () => { state.playbackHelpOpen = help.open; });
+  if (helpFocused) help?.querySelector("summary")?.focus();
   document.querySelectorAll(".playback-failure").forEach((details) => {
     details.addEventListener("toggle", () => {
       if (details.open && !details.dataset.loaded) loadPlaybackFailure(details);
@@ -936,33 +919,74 @@ async function startBatch() {
   } catch (err) { toast(err.message, true); }
 }
 
+const playbackCourseName = (job) => state.courses.find((course) => course.lms_course_id === job.lms_course_id)?.name || "";
+
+/** 지금 강의 한 개가 화면의 주인공이다. 진행률과 제목은 여기서만 크게 보여 준다. */
+function playbackHeroHtml(b, jobs, lateIds) {
+  const current = jobs.find((job) => job.status === "playing");
+  const focus = current || (b.cancel_requested ? null : jobs.find((job) => job.status === "queued"));
+  const waiting = b.status === "queued" && b.queue_position != null
+    ? `다음 영상 대기 ${b.queue_position}번째 · 약 ${fmtDuration(b.estimated_wait_seconds || 0)} 후 시작` : "다음 강의를 기다리는 중";
+  const stateLabel = b.cancel_requested ? "재생 중지 요청됨" : current ? "지금 재생 중" : waiting;
+  const finished = (b.done_count || 0) + (b.skipped_count || 0);
+  const percent = current ? Math.floor(jobProgressPercent(current)) : 0;
+  const extras = [b.failed_count ? `실패 ${b.failed_count}` : "", b.skipped_count ? `이미 완료 ${b.skipped_count}` : "",
+    b.expected_end ? `예상 종료 ${fmtDate(new Date(b.expected_end))}` : ""].filter(Boolean).join(" · ");
+  return `<section class="panel playback-hero" aria-label="지금 재생 상황">
+    <div class="panel-body">
+      <p class="playback-state" role="status">${stateLabel}</p>
+      <h2>${focus ? esc(focus.title) : b.cancel_requested ? "예정된 강의는 재생하지 않아요" : "재생을 준비하고 있어요"}</h2>
+      ${focus ? `<p class="meta">${[esc(playbackCourseName(focus)), current
+        ? `${playbackPosition(Math.min(Math.max(0, current.progress_seconds || 0), Math.max(0, current.duration || 0)))} / ${playbackPosition(current.duration)}`
+        : fmtDuration(focus.duration), `마감 ${fmtDate(new Date(focus.deadline))}`].filter(Boolean).join(" · ")}</p>` : ""}
+      ${current ? `<p class="playback-percent"><strong>${percent}%</strong></p>
+        <progress value="${jobProgressPercent(current)}" max="100" aria-label="현재 강의 재생 진행률"></progress>${playbackActivityHtml(current)}` : ""}
+      ${focus && lateIds.has(focus.module_item_id) ? '<p class="warning">마감 전에 끝나지 않을 예정이에요</p>' : ""}
+      ${focus?.attempts > 1 ? `<p class="meta">${focus.attempts}번째 시도</p>` : ""}
+      ${focus?.error ? `<p class="warning">${esc(focus.error)}</p>` : ""}
+      ${b.deadline_at_risk ? '<p class="warning">대기 시간 때문에 일부 강의가 마감 전에 끝나지 않을 수 있어요</p>' : ""}
+    </div>
+    <div class="panel-body playback-overall">
+      ${b.total > 1 ? `<p><strong>전체 진행률 ${playbackOverallPercent(jobs)}%</strong> · ${finished}/${b.total}개 완료</p>
+        <progress value="${playbackOverallPercent(jobs)}" max="100" aria-label="전체 재생 진행률"></progress>` : ""}
+      ${extras ? `<p class="meta">${extras}</p>` : ""}
+      <p class="meta">창을 닫아도 서버에서 계속돼요</p>
+      <details class="playback-help" ${state.playbackHelpOpen ? "open" : ""}><summary>재생 방식 안내</summary>
+        <ul>
+          <li>사용자별로 강의를 한 개씩 번갈아 재생해요.</li>
+          <li>예상 시간은 현재 대기열 기준이라 새 요청이나 재시도에 따라 달라져요.</li>
+          <li>전체 진행률은 영상 길이 기준이고 이미 완료된 강의도 포함해요.</li>
+          <li>학습 완료는 LMS에서 확인한 뒤 반영돼요.</li>
+        </ul></details>
+    </div>
+  </section>`;
+}
+
+/** 강의가 2개 이상일 때만 목록을 둔다. 진행률은 위에서 보여 주므로 여기서는 순서와 상태만 쓴다. */
+function playbackQueueHtml(b, jobs, lateIds) {
+  if (b.total < 2 || !jobs.length) return "";
+  const manyCourses = new Set(jobs.map((job) => job.lms_course_id)).size > 1;
+  const nextId = b.cancel_requested ? null : jobs.find((job) => job.status === "queued")?.module_item_id;
+  return `<section class="panel playback-queue" aria-labelledby="playback-queue-title">
+    <h2 class="panel-title" id="playback-queue-title">재생 목록 ${b.total}개</h2>
+    <ol class="steps">${jobs.map((j) => {
+      const late = lateIds.has(j.module_item_id);
+      const isNext = j.module_item_id === nextId;
+      const meta = [manyCourses ? esc(playbackCourseName(j)) : "", fmtDuration(j.duration), `마감 ${fmtDate(new Date(j.deadline))}`,
+        j.status === "queued" && !b.cancel_requested && j.expected_start ? `예상 시작 ${fmtDate(new Date(j.expected_start))}` : "",
+        late ? "마감 전에 끝나지 않을 예정" : "", j.attempts > 1 ? `${j.attempts}번 시도` : "", j.error ? esc(j.error) : ""];
+      return `<li class="${[late ? "risk" : "", j.status === "playing" ? "now" : ""].filter(Boolean).join(" ")}"><span class="num">${j.position + 1}</span>
+        <span><span class="title">${esc(j.title)}</span><span class="meta row small-text">${meta.filter(Boolean).map((m) => `<span>${m}</span>`).join("")}</span></span>
+        <span class="status ${esc(j.status)}">${isNext ? "다음 재생" : JOB_STATUS[j.status] || esc(j.status)}</span></li>`;
+    }).join("")}</ol>
+  </section>`;
+}
+
 function activeBatchHtml(b) {
   const ends = playbackTimeline()?.ends || new Map();
-  const steps = b.jobs.map((j) => {
-    const late = ends.get(j.module_item_id) > new Date(j.deadline).getTime();
-    const pct = jobProgressPercent(j);
-    return `<li class="${late ? "risk" : ""}"><span class="num">${j.position + 1}</span>
-      <span><span class="title">${esc(j.title)}</span>
-        <span class="meta row small-text"><span>${fmtDuration(j.duration)}</span><span>마감 ${fmtDate(new Date(j.deadline))}</span>
-        ${late ? "<span>마감 전에 끝나지 않을 예정</span>" : ""}${j.attempts > 1 ? `<span>${j.attempts}번 시도</span>` : ""}${j.error ? `<span>${esc(j.error)}</span>` : ""}</span>
-        ${j.status === "playing" ? `<p class="small-text">재생 진행률 ${Math.floor(pct)}%</p><progress value="${pct}" max="100" aria-label="${esc(j.title)} 재생 진행률"></progress>` : ""}</span>
-      <span class="status ${j.status}">${JOB_STATUS[j.status] || j.status}</span></li>`;
-  }).join("");
-  return `<div class="panel">
-    <div class="panel-body">
-      <div class="summary-line"><span><b>${BATCH_STATUS[b.status]}</b></span>
-        <span><b>${b.done_count}</b>완료</span><span><b>${b.failed_count}</b>실패</span><span><b>${b.skipped_count}</b>이미 완료</span>
-        <span><b>${b.total}</b>전체</span></div>
-      <p class="muted small-text" role="status">${b.status === "queued" && b.queue_position != null
-        ? `다음 영상 대기 ${b.queue_position}번째 · 약 ${fmtDuration(b.estimated_wait_seconds || 0)} 후 시작` : "현재 영상을 재생하고 있습니다."}
-        ${b.expected_end ? ` · 묶음 예상 종료 ${fmtDate(new Date(b.expected_end))}` : ""}</p>
-      ${b.deadline_at_risk ? '<p class="status failed">대기 시간으로 인해 일부 영상이 마감 전에 끝나지 않을 수 있습니다.</p>' : ""}
-      <p class="muted small-text">사용자별 영상 한 개씩 번갈아 재생합니다. 예상 시간은 현재 대기열 기준이며 새 요청·재시도에 따라 달라집니다.</p>
-      <p class="muted small-text">재생은 서버에서 계속됩니다. 이 창을 닫아도 멈추지 않습니다.</p>
-    </div>
-    <div class="panel-body">${playbackProgressHtml(b)}</div>
-    <ol class="steps">${steps}</ol>
-  </div>`;
+  const jobs = [...(b.jobs || [])].sort((x, y) => x.position - y.position);
+  const lateIds = new Set(jobs.filter((j) => ends.get(j.module_item_id) > new Date(j.deadline).getTime()).map((j) => j.module_item_id));
+  return playbackHeroHtml(b, jobs, lateIds) + playbackQueueHtml(b, jobs, lateIds);
 }
 
 /** 확인 창을 거쳐 진행 중인 묶음을 멈춘다. 창이 열린 동안 묶음이 끝나거나 바뀌었으면 아무것도 보내지 않는다. */
@@ -994,11 +1018,19 @@ function historyHtml() {
   const past = state.batches.filter((b) => !["queued", "running"].includes(b.status));
   if (!past.length) return "";
   const scopeName = { item: "영상 하나", module: "주차", course: "과목", all: "모든 과목", auto: "자동 수강" };
-  return `<h3>지난 재생</h3><div class="panel"><ul class="list">${past.map((b) => `<li>
-    <span class="title">${scopeName[b.scope] || b.scope} ${b.total}개, ${BATCH_STATUS[b.status]}</span>
-    <span class="meta row"><span>완료 ${b.done_count}</span><span>실패 ${b.failed_count}</span><span>이미 완료 ${b.skipped_count}</span>
-      <span>${fmtDate(new Date(b.created_at))}</span>${b.error ? `<span>${esc(b.error)}</span>` : ""}</span>
-    ${b.failed_count || b.status === "failed" || b.status === "partial" ? `<details class="playback-failure" data-batch-id="${b.id}"><summary>실패한 영상과 오류 사유 보기</summary><div class="playback-failure-content" aria-live="polite"></div></details>` : ""}</li>`).join("")}</ul></div>`;
+  const counts = (b) => [["완료", b.done_count], ["실패", b.failed_count], ["이미 완료", b.skipped_count]]
+    .filter(([, n]) => n).map(([name, n]) => `<span>${name} ${n}</span>`).join("");
+  return `<section class="panel playback-history" aria-labelledby="playback-history-title">
+    <h2 class="panel-title" id="playback-history-title">지난 재생</h2>
+    <ul class="list">${past.map((b) => {
+      const failed = b.failed_count || b.status === "failed" || b.status === "partial";
+      return `<li>
+      <span class="history-head"><span class="title">${scopeName[b.scope] || esc(b.scope)} ${b.total}개</span>
+        <span class="status ${esc(b.status)}">${BATCH_STATUS[b.status] || esc(b.status)}</span></span>
+      <span class="meta row">${counts(b)}<span>${fmtDate(new Date(b.created_at))}</span>${!failed && b.error ? `<span>${esc(b.error)}</span>` : ""}</span>
+      ${failed ? `<details class="playback-failure" data-batch-id="${b.id}"><summary>실패한 영상과 오류 사유 보기</summary><div class="playback-failure-content" aria-live="polite"></div></details>` : ""}</li>`;
+    }).join("")}</ul>
+  </section>`;
 }
 
 async function loadPlaybackFailure(details) {
@@ -1132,12 +1164,15 @@ function renderCurrentTab() {
   if (state.videoTab === "materials") renderMaterialList(); else renderVideoList();
 }
 
-function bulkButton(items, title) {
-  const label = items.length ? `${esc(title)} ${items.length}개 내려받기` : `${esc(title)} 내려받기`;
-  if (isPhoneDevice()) return `<button class="btn small" data-bulk disabled>${label}</button>`;  // 이유는 화면 위쪽에 한 번만 알린다
+/** 주차 전체 받기. 받을 수 있는 항목이 2개 이상일 때만 보인다. 1개뿐이면 그 줄의 버튼과 같은 동작이다. */
+function bulkButton(items, title, index) {
+  if (items.length < 2) return "";
+  const label = `전체 내려받기 (${items.length})`;
+  const name = `aria-label="${esc(title)} ${label}"`;
+  if (isPhoneDevice()) return `<button class="btn small link" data-bulk="${index}" ${name} disabled>${label}</button>`;  // 이유는 화면 위쪽에 한 번만 알린다
   return (state.videoTab !== "materials" || bulkDownloadSupported())
-    ? `<button class="btn small" data-bulk ${items.length && !state.bulk?.running ? "" : "disabled"}>${label}</button>`
-    : `<button class="btn small" disabled>${label}</button><span class="reason">폴더에 바로 저장하는 기능은 데스크톱 Chrome·Edge에서만 지원해요</span>`;
+    ? `<button class="btn small link" data-bulk="${index}" ${name} ${state.bulk?.running ? "disabled" : ""}>${label}</button>`
+    : `<button class="btn small link" ${name} disabled>${label}</button><span class="reason">폴더에 바로 저장하는 기능은 데스크톱 Chrome·Edge에서만 지원해요</span>`;
 }
 
 /** 여러 개 받기를 시작한다. 진행은 하단 패널에 나오고, 실패한 항목만 다시 시도할 수 있다. */
@@ -1177,7 +1212,7 @@ function reportDownloadError(err) {
 }
 
 function wireBulk(box, groups) {
-  box.querySelectorAll("[data-bulk]").forEach((b, i) => b.addEventListener("click", () => runBulkDownload(groups[i])));
+  box.querySelectorAll("[data-bulk]").forEach((b) => b.addEventListener("click", () => runBulkDownload(groups[Number(b.dataset.bulk)])));
 }
 
 function groupBy(items, key, title) {
@@ -1224,8 +1259,8 @@ function renderVideoList() {
   const thumb = (v) => v.thumbnail_url
     ? `<img class="thumb" src="${esc(v.thumbnail_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : "";
   const button = (v) => v.linkPath && !phone
-    ? `<button class="btn small" data-link="${esc(v.linkPath)}">${icon("download")}내려받기</button>`
-    : `<button class="btn small" disabled>${icon("download")}내려받기</button>`;
+    ? `<button class="btn small ${v.downloaded_at ? "ghost" : "soft"}" data-link="${esc(v.linkPath)}">${icon("download")}내려받기</button>`
+    : `<button class="btn small ghost" disabled>${icon("download")}내려받기</button>`;
   // 내려받을 수 없는 이유는 마우스를 올리지 않아도 보이게 글자로 둔다. 휴대폰은 화면 위쪽 안내 하나로 갈음한다.
   const reason = (v) => v.linkPath || phone ? "" : `<span class="reason">${esc(v.savedRow?.resolve_error || "지금은 내려받을 수 없어요")}</span>`;
   const bulkGroups = groups.map((g) => g.items.filter((v) => v.linkPath).map((v) => ({
@@ -1240,7 +1275,7 @@ function renderVideoList() {
     <p>처음 열린 확장프로그램 창에서 저장 폴더를 선택합니다. 진행 상황과 취소는 그 창에서 확인할 수 있습니다.
     저장이 끝날 때까지 다운로드 창과 이 대시보드 탭을 모두 열어 두세요.</p></details>`;
   box.innerHTML = guide + groups.map((g, i) => `<div class="group-label row">${esc(g.title)}
-      <span class="group-actions">${bulkButton(bulkGroups[i], g.title)}${typeof transcribeGroupButton === "function" ? transcribeGroupButton(g.items, g.title) : ""}</span></div>
+      <span class="group-actions">${bulkButton(bulkGroups[i], g.title, i)}${typeof transcribeGroupButton === "function" ? transcribeGroupButton(g.items, g.title) : ""}</span></div>
     <ul class="list">${g.items.map((v) => `
     <li class="video-row">
       ${thumb(v)}
@@ -1283,13 +1318,13 @@ function renderMaterialList() {
     if (src) src.downloaded_at = new Date().toISOString();
   };
   const bulkGroups = groups.map((g) => g.items.map((m) => ({ linkPath: m.linkPath, label: m.file_name, onDone: () => markMaterial(m.key) })));
-  box.innerHTML = groups.map((g, i) => `<div class="group-label row">${esc(g.title)}<span class="group-actions">${bulkButton(bulkGroups[i], g.title)}</span></div>
+  box.innerHTML = groups.map((g, i) => `<div class="group-label row">${esc(g.title)}<span class="group-actions">${bulkButton(bulkGroups[i], g.title, i)}</span></div>
     <ul class="list">${g.items.map((m) => `
     <li class="video-row">
       <span class="video-info"><span class="title">${esc(m.file_name)}</span><br>
         <span class="meta row"><span>${esc(m.title)}</span><span>${fmtSize(m.size)}</span>
           <span>${m.kind === "canvas_file" ? "위키 첨부" : "자료"}</span>${doneBadge(m.downloaded_at)}</span></span>
-      <button class="btn small" data-link="${esc(m.linkPath)}">${icon("download")}내려받기</button>
+      <button class="btn small ${m.downloaded_at ? "ghost" : "soft"}" data-link="${esc(m.linkPath)}">${icon("download")}내려받기</button>
     </li>`).join("")}</ul>`).join("");
   box.querySelectorAll("[data-link]").forEach((b) => b.addEventListener("click", async () => {
     if (await downloadVideo(b, b.dataset.link)) {

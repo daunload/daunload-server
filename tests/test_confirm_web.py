@@ -112,7 +112,7 @@ async def test_plan_view_start_shows_warning_without_dialog(page):
     await expect(page.locator("#start-batch")).to_have_text("2개 재생 시작")
     await expect(page.locator(".panel .warning")).to_contain_text(WARNING)
     await page.locator("#start-batch").click()
-    await expect(page.locator(".playback-progress")).to_be_visible()
+    await expect(page.locator(".playback-hero")).to_be_visible()
     assert len(page.calls) == 1 and page.calls[0][:2] == ("POST", "/playback/batches")
     assert await page.locator("#confirm-dialog[open]").count() == 0
 

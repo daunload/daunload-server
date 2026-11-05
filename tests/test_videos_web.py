@@ -30,7 +30,7 @@ async def test_video_tab_badges_filter_and_materials_tab(dashboard):
     await expect(rows).to_have_count(2)
     await expect(rows.nth(0).get_by_text("✓ 받음")).to_be_visible()
     await expect(rows.nth(1).get_by_text("✓ 받음")).to_have_count(0)
-    await expect(page.get_by_role("button", name="1주차 2개 내려받기")).to_be_visible()
+    await expect(page.get_by_role("button", name="1주차 전체 내려받기 (2)")).to_be_visible()
 
     await page.get_by_label("안 받은 것만").check()
     await expect(rows).to_have_count(1)
@@ -78,13 +78,15 @@ async def test_bulk_download_waits_out_busy_server(dashboard):
     await page.clock.install()
     data["/saved-videos"] = []
     data["/courses/1/videos"] = []
-    data["/courses/1/materials"] = [{"key": "c21", "kind": "commons_file", "module_id": 1, "module_title": "1주차",
-        "title": "자료", "file_name": "자료.pdf", "size": 1, "downloaded_at": None}]
+    material = {"kind": "commons_file", "module_id": 1, "module_title": "1주차", "size": 1, "downloaded_at": None}
+    data["/courses/1/materials"] = [{**material, "key": "c21", "title": "자료", "file_name": "자료.pdf"},
+                                    {**material, "key": "c22", "title": "자료2", "file_name": "자료2.pdf"}]
     links, busy = [], {"left": 8}
 
     async def link(route):
         links.append(1)
-        await route.fulfill(json={"url": "/downloads/tok", "file_name": "자료.pdf", "expires_in_minutes": 10})
+        name = "자료2.pdf" if "c22" in route.request.url else "자료.pdf"
+        await route.fulfill(json={"url": "/downloads/tok", "file_name": name, "expires_in_minutes": 10})
 
     async def download(route):
         if busy["left"]:
@@ -93,20 +95,21 @@ async def test_bulk_download_waits_out_busy_server(dashboard):
         else:
             await route.fulfill(body=b"mp4", content_type="video/mp4")
 
-    await page.route("**/courses/1/materials/c21/download-link", link)
+    await page.route("**/courses/1/materials/*/download-link", link)
     await page.route("**/downloads/tok", download)
     await page.goto("http://dashboard.test/#videos")
     await page.get_by_role("tab", name="수업자료").click()
-    await page.get_by_role("button", name="1주차 1개 내려받기").click()
-    await expect(page.locator("#task-sheet")).to_contain_text("다운로드 0/1개")
+    await page.get_by_role("button", name="1주차 전체 내려받기 (2)").click()
+    await expect(page.locator("#task-sheet")).to_contain_text("다운로드 0/2개")
     for _ in range(100):  # 완료 토스트(3.2초)가 사라지기 전에 멈추도록 잘게 나눠 진행한다
         if await page.locator("#task-panel").is_hidden():
             break
         await page.clock.run_for(1000)
     await expect(page.locator("#task-panel")).to_be_hidden()
-    await expect(page.locator("#toast")).to_contain_text("1개를 모두 받았어요")
+    await expect(page.locator("#toast")).to_contain_text("2개를 모두 받았어요")
     assert await page.evaluate("window.__saved['자료.pdf']") == 1
-    assert len(links) == 1  # 기다리는 동안 링크를 새로 발급하지 않는다(이력 횟수가 늘지 않게)
+    assert await page.evaluate("window.__saved['자료2.pdf']") == 1
+    assert len(links) == 2  # 기다리는 동안 링크를 새로 발급하지 않는다(이력 횟수가 늘지 않게)
 
 
 FAKE_EXTENSION = """
@@ -181,7 +184,7 @@ async def _bulk_videos(page, data, count=4):
 async def test_bulk_stops_on_closed_manager_and_can_restart(dashboard):
     page, data = dashboard
     await _bulk_videos(page, data)
-    await page.get_by_role('button', name='1주차 4개 내려받기').click()
+    await page.get_by_role('button', name='1주차 전체 내려받기 (4)').click()
     await page.wait_for_function("window.__extensionCalls.filter(x => x === 'start').length === 4")
     # All four videos must be registered before any download has completed.
     sheet = await _open_panel(page)
@@ -202,7 +205,7 @@ async def test_bulk_stops_on_closed_manager_and_can_restart(dashboard):
       window.__extensionCode = undefined;
       window.__extensionCalls = [];
     }""")
-    await page.get_by_role('button', name='1주차 4개 내려받기').click()
+    await page.get_by_role('button', name='1주차 전체 내려받기 (4)').click()
     await expect(page.locator('#toast')).to_contain_text('4개를 모두 받았어요')
     await expect(page.locator('#task-panel')).to_be_hidden()
     assert await page.evaluate("window.__extensionCalls.filter(x => x === 'prepare').length") == 1
@@ -213,7 +216,7 @@ async def test_bulk_progress_note_and_stop_in_panel(dashboard):
     page, data = dashboard
     await page.add_init_script(FAKE_FOLDER)
     await _bulk_videos(page, data)
-    await page.get_by_role('button', name='1주차 4개 내려받기').click()
+    await page.get_by_role('button', name='1주차 전체 내려받기 (4)').click()
     sheet = await _open_panel(page)
     await expect(sheet).to_contain_text('다운로드 0/4개')
     await expect(sheet).to_contain_text('이 탭과 다운로드 창을 열어 두세요')
@@ -230,9 +233,10 @@ async def test_bulk_material_note(dashboard):
     await page.add_init_script(FAKE_FOLDER)
     data['/saved-videos'] = []
     data['/courses/1/videos'] = []
-    data['/courses/1/materials'] = [{"key": "c21", "kind": "commons_file", "module_id": 1, "module_title": "1주차",
-        "title": "자료", "file_name": "자료.pdf", "size": 1, "downloaded_at": None}]
+    material = {"kind": "commons_file", "module_id": 1, "module_title": "1주차", "title": "자료", "size": 1, "downloaded_at": None}
+    data['/courses/1/materials'] = [{**material, "key": "c21", "file_name": "자료.pdf"}, {**material, "key": "c22", "file_name": "자료2.pdf"}]
     data["/courses/1/materials/c21/download-link"] = {"url": "/downloads/tok", "file_name": "자료.pdf", "expires_in_minutes": 10}
+    data["/courses/1/materials/c22/download-link"] = {"url": "/downloads/tok", "file_name": "자료2.pdf", "expires_in_minutes": 10}
 
     async def download(route):  # 응답하지 않고 붙잡아 둔다
         pass
@@ -240,7 +244,7 @@ async def test_bulk_material_note(dashboard):
     await page.route("**/downloads/tok", download)
     await page.goto("http://dashboard.test/#videos")
     await page.get_by_role("tab", name="수업자료").click()
-    await page.get_by_role("button", name="1주차 1개 내려받기").click()
+    await page.get_by_role("button", name="1주차 전체 내려받기 (2)").click()
     sheet = await _open_panel(page)
     await expect(sheet).to_contain_text("이 탭을 열어 두세요")
     await expect(sheet).not_to_contain_text("다운로드 창")
@@ -259,7 +263,7 @@ async def test_bulk_failure_can_retry_only_failed_items(dashboard):
             await route.fulfill(json=data['/courses/1/videos/13/direct-download'])
 
     await page.route('**/courses/1/videos/13/direct-download', link13)
-    await page.get_by_role('button', name='1주차 4개 내려받기').click()
+    await page.get_by_role('button', name='1주차 전체 내려받기 (4)').click()
     sheet = await _open_panel(page)
     await expect(sheet).to_contain_text('다운로드 실패 1개')
     await expect(sheet).to_contain_text('링크 <b>오류</b>')
@@ -278,7 +282,7 @@ async def test_bulk_success_clears_row_and_toasts(dashboard):
     page, data = dashboard
     await _bulk_videos(page, data)
     await page.evaluate("window.__extensionState = 'complete'")
-    await page.get_by_role('button', name='1주차 4개 내려받기').click()
+    await page.get_by_role('button', name='1주차 전체 내려받기 (4)').click()
     await expect(page.locator('#toast')).to_contain_text('4개를 모두 받았어요')
     await expect(page.locator('#task-panel')).to_be_hidden()
 
@@ -307,11 +311,13 @@ async def test_bulk_button_escapes_module_title(dashboard):
     page, data = dashboard
     await page.add_init_script(FAKE_EXTENSION)
     data['/saved-videos'] = []
-    data['/courses/1/videos'] = [{**_video(11, '강의'), 'module_title': '<a href="x">링크</a>'}]
+    title = '<a href="x">링크</a>'
+    data['/courses/1/videos'] = [{**_video(11, '강의'), 'module_title': title}, {**_video(12, '강의 2'), 'module_title': title}]
     await page.goto('http://dashboard.test/#videos')
-    await expect(page.locator('#video-list li.video-row')).to_have_count(1)
+    await expect(page.locator('#video-list li.video-row')).to_have_count(2)
     assert await page.locator('#video-list .group-actions a').count() == 0
-    await expect(page.locator('#video-list [data-bulk]')).to_have_text('<a href="x">링크</a> 1개 내려받기')
+    await expect(page.locator('#video-list [data-bulk]')).to_have_attribute('aria-label', f'{title} 전체 내려받기 (2)')
+    await expect(page.locator('#video-list [data-tx-group]')).to_have_attribute('aria-label', f'{title} 전체 텍스트로 변환 (2)')
 
 
 async def test_materials_bulk_without_folder_support_shows_visible_reason(dashboard):
@@ -319,7 +325,7 @@ async def test_materials_bulk_without_folder_support_shows_visible_reason(dashbo
     await page.add_init_script("delete window.showDirectoryPicker")
     data['/saved-videos'] = []
     data['/courses/1/videos'] = []
-    data['/courses/1/materials'] = [_material()]
+    data['/courses/1/materials'] = [_material(), {**_material(), 'key': 'c22', 'file_name': '2장.pdf'}]
     await page.goto('http://dashboard.test/#videos')
     await page.get_by_role('tab', name='수업자료').click()
     group = page.locator('#video-list .group-actions')
@@ -330,11 +336,68 @@ async def test_materials_bulk_without_folder_support_shows_visible_reason(dashbo
 
 async def test_panel_clears_when_bulk_ends_while_list_is_reloading(dashboard):
     page, data = dashboard
-    await _bulk_videos(page, data, count=1)
-    await page.get_by_role('button', name='1주차 1개 내려받기').click()
-    await page.wait_for_function("window.__extensionCalls.includes('start')")
+    await _bulk_videos(page, data, count=2)
+    await page.get_by_role('button', name='1주차 전체 내려받기 (2)').click()
+    await page.wait_for_function("window.__extensionCalls.filter(x => x === 'start').length === 2")
     await expect(page.locator('#task-panel')).to_be_visible()
     await page.evaluate("state.videoList = null")  # 과목을 바꿔 목록을 다시 불러오는 중
     await page.evaluate("window.__extensionState = 'complete'")
-    await expect(page.locator('#toast')).to_contain_text('1개를 모두 받았어요')
+    await expect(page.locator('#toast')).to_contain_text('2개를 모두 받았어요')
     await expect(page.locator('#task-panel')).to_be_hidden()
+
+
+async def _two_weeks(page, data, week1=1, week2=2):
+    await page.add_init_script(FAKE_EXTENSION)
+    data['/saved-videos'] = []
+    first = [{**_video(100 + i, f'1주 강의 {i}'), 'module_id': 1, 'module_title': '1주차'} for i in range(week1)]
+    second = [{**_video(200 + i, f'2주 강의 {i}'), 'module_id': 2, 'module_title': '2주차'} for i in range(week2)]
+    data['/courses/1/videos'] = first + second
+    await page.goto('http://dashboard.test/#videos')
+    await expect(page.locator('#video-list li.video-row')).to_have_count(week1 + week2)
+
+
+async def test_group_actions_only_appear_when_they_add_something(dashboard):
+    page, data = dashboard
+    await _two_weeks(page, data)
+    groups = page.locator('#video-list .group-label')
+    await expect(groups.nth(0).get_by_role('button')).to_have_count(0)  # 1개뿐이면 줄 버튼과 같은 동작이다
+    await expect(groups.nth(1).get_by_role('button', name='2주차 전체 내려받기 (2)')).to_have_text('전체 내려받기 (2)')
+    await expect(groups.nth(1).get_by_role('button', name='2주차 전체 텍스트로 변환 (2)')).to_have_text('전체 텍스트로 변환 (2)')
+
+
+async def test_group_transcribe_hides_when_one_video_is_left(dashboard):
+    page, data = dashboard
+    await page.add_init_script(FAKE_EXTENSION)
+    data['/saved-videos'] = []
+    data['/courses/1/videos'] = [_video(11, '변환 끝', transcript=5), _video(12, '남은 강의')]
+    await page.goto('http://dashboard.test/#videos')
+    await expect(page.get_by_role('button', name='1주차 전체 내려받기 (2)')).to_be_visible()
+    await expect(page.locator('#video-list [data-tx-group]')).to_have_count(0)
+
+
+async def test_group_bulk_starts_its_own_week_after_a_hidden_one(dashboard):
+    page, data = dashboard
+    data['/downloads/complete'] = {}
+    for mid in (200, 201):
+        data[f'/courses/1/videos/{mid}/direct-download'] = {
+            'url': f'https://ssuin-object.commonscdn.com/{mid}.mp4', 'file_name': f'{mid}.mp4', 'receipt': 'receipt'}
+    await _two_weeks(page, data)
+    await page.get_by_role('button', name='2주차 전체 내려받기 (2)').click()
+    await page.wait_for_function("window.__extensionCalls.filter(x => x === 'start').length === 2")
+    sheet = await _open_panel(page)
+    await expect(sheet).to_contain_text('다운로드 0/2개')
+
+
+async def test_row_buttons_keep_weight_only_on_work_left_to_do(dashboard):
+    page, data = dashboard
+    await page.add_init_script(FAKE_EXTENSION)
+    data['/saved-videos'] = []
+    data['/courses/1/videos'] = [_video(11, '받은 강의', downloaded=True), _video(12, '안 받은 강의')]
+    await page.goto('http://dashboard.test/#videos')
+    rows = page.locator('#video-list li.video-row')
+    await expect(rows).to_have_count(2)
+    await expect(rows.nth(0).get_by_role('button', name='내려받기', exact=True)).to_have_class('btn small ghost')
+    await expect(rows.nth(1).get_by_role('button', name='내려받기', exact=True)).to_have_class('btn small soft')
+    await expect(rows.nth(1).get_by_role('button', name='텍스트로 변환', exact=True)).to_have_class('btn small ghost')
+    for button in await page.locator('#video-list .btn').all():
+        assert (await button.bounding_box())['height'] >= 44

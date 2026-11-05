@@ -227,16 +227,19 @@ async def test_playback_percent_queue_and_live_update(page):
     page.data["/playback/batches"] = [batch]
     await page.goto("http://dashboard.test/#playback")
     panel = page.locator("#view")
-    await expect(panel).to_contain_text("전체 재생 진행률 15%")
-    await expect(panel.locator(".playback-current")).to_contain_text("아두이노 소개 · 30%")
-    await expect(panel.locator(".playback-upcoming li")).to_have_count(1)
-    await expect(panel.locator(".playback-upcoming li")).to_contain_text("다음 재생 · 버튼과 LED")
+    hero = panel.locator(".playback-hero")
+    await expect(hero).to_contain_text("전체 진행률 15%")
+    await expect(hero.get_by_role("heading")).to_have_text("아두이노 소개")
+    await expect(hero.locator(".playback-percent")).to_have_text("30%")
+    await expect(panel.locator(".steps li").nth(1)).to_contain_text("버튼과 LED")
+    await expect(panel.locator(".steps li").nth(1)).to_contain_text("다음 재생")
     batch["jobs"][0].update(status="done", progress_seconds=1800)
     batch["jobs"][1].update(status="playing", progress_seconds=900)
     batch["done_count"] = 1
-    await expect(panel).to_contain_text("전체 재생 진행률 75%", timeout=10000)
-    await expect(panel.locator(".playback-current")).to_contain_text("버튼과 LED · 50%")
-    await expect(panel).to_contain_text("다음 재생 예정 영상이 없습니다")
+    await expect(hero).to_contain_text("전체 진행률 75%", timeout=10000)
+    await expect(hero.get_by_role("heading")).to_have_text("버튼과 LED")
+    await expect(hero.locator(".playback-percent")).to_have_text("50%")
+    await expect(panel.locator(".steps .status.done")).to_have_count(1)
     await page.set_viewport_size({"width": 375, "height": 812})
     assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
 
@@ -248,13 +251,15 @@ async def test_playback_queue_excludes_failed_and_cancelled_jobs(page):
     page.data["/playback/batches"] = [batch]
     await page.goto("http://dashboard.test/#playback")
     panel = page.locator("#view")
-    await expect(panel).to_contain_text("전체 재생 진행률 0%")
-    await expect(panel).to_contain_text("다음 재생 예정 영상이 없습니다")
-    await expect(panel.locator(".playback-upcoming li")).to_have_count(0)
+    hero = panel.locator(".playback-hero")
+    await expect(hero).to_contain_text("전체 진행률 0%")
+    await expect(hero.get_by_role("heading")).to_have_text("재생을 준비하고 있어요")
+    await expect(panel.get_by_text("다음 재생", exact=True)).to_have_count(0)
     batch["jobs"][1].update(status="queued", duration=1800)
     batch["cancel_requested"] = True
-    await expect(panel).to_contain_text("중지 요청으로 예정된 영상을 재생하지 않습니다", timeout=10000)
-    await expect(panel.locator(".playback-upcoming li")).to_have_count(0)
+    await expect(hero.get_by_role("heading")).to_have_text("예정된 강의는 재생하지 않아요", timeout=10000)
+    await expect(hero).to_contain_text("재생 중지 요청됨")
+    await expect(panel.get_by_text("다음 재생", exact=True)).to_have_count(0)
 
 
 async def test_reload_shows_saved_progress_and_stale_activity(page):
@@ -263,17 +268,17 @@ async def test_reload_shows_saved_progress_and_stale_activity(page):
     job = batch["jobs"][0]
     job["progress_updated_at"] = datetime.now(UTC).isoformat()
     await page.goto("http://dashboard.test/#playback")
-    current = page.locator("#view .playback-current")
-    await expect(current).to_contain_text("최근 재생 진행이 확인되었습니다")
-    await expect(current).to_contain_text("9분 0초 / 30분 0초")
+    hero = page.locator("#view .playback-hero")
+    await expect(hero).to_contain_text("9분 0초 / 30분 0초")
+    await expect(hero.locator(".warning")).to_have_count(0)  # 정상일 때는 따로 말하지 않는다
     job.update(progress_seconds=900, progress_updated_at=(datetime.now(UTC) - timedelta(minutes=2)).isoformat())
     await page.reload()
-    await expect(current).to_contain_text("아두이노 소개 · 50%")
-    await expect(current).to_contain_text("재생 확인 필요")
-    await expect(current).to_contain_text("마지막 진행")
+    await expect(hero.locator(".playback-percent")).to_have_text("50%")
+    await expect(hero.locator(".warning")).to_contain_text("재생 확인 필요")
+    await expect(hero.locator(".warning")).to_contain_text("마지막")
     job.update(progress_updated_at=None)
     await page.reload()
-    await expect(current).to_contain_text("아직 실제 재생 진행을 확인하지 못했습니다")
+    await expect(hero).to_contain_text("재생 위치를 확인하는 중이에요")
 
 
 async def test_external_buttons_show_new_tab_icon(page):
@@ -290,3 +295,53 @@ async def test_dashboard_has_one_primary_button(page):
     await expect(play_all).to_have_text("전체 강의 2개 재생")
     await expect(play_all).not_to_have_class(re.compile(r"\bprimary\b"))
     await expect(page.locator(".btn.primary:visible")).to_have_count(1)
+
+
+async def test_playback_view_says_each_fact_once(page):
+    batch = page.data["/playback/batches/7"]
+    page.data["/playback/batches"] = [batch]
+    await page.goto("http://dashboard.test/#playback")
+    panel = page.locator("#view")
+    hero = panel.locator(".playback-hero")
+    await expect(hero.get_by_role("heading", name="아두이노 소개")).to_be_visible()
+    await expect(panel.locator("progress")).to_have_count(2)  # 지금 강의와 전체, 두 개뿐이다
+    await expect(panel.get_by_text("아두이노 소개", exact=True)).to_have_count(2)  # 지금 강의 제목과 목록 한 줄
+    await expect(hero).not_to_contain_text("0 실패")
+    await expect(panel.locator(".steps .progress, .steps progress")).to_have_count(0)
+
+
+async def test_playback_view_with_one_lecture_has_no_duplicate_list(page):
+    batch = page.data["/playback/batches/7"]
+    batch["jobs"] = batch["jobs"][:1]
+    batch["total"] = 1
+    page.data["/playback/batches"] = [batch]
+    await page.goto("http://dashboard.test/#playback")
+    panel = page.locator("#view")
+    await expect(panel.locator(".playback-hero")).to_contain_text("아두이노 소개")
+    await expect(panel.locator(".steps")).to_have_count(0)
+    await expect(panel.locator("progress")).to_have_count(1)
+
+
+async def test_playback_guide_is_folded_and_stays_open_across_polls(page):
+    batch = page.data["/playback/batches/7"]
+    page.data["/playback/batches"] = [batch]
+    await page.goto("http://dashboard.test/#playback")
+    panel = page.locator("#view")
+    guide = panel.locator(".playback-help")
+    await expect(guide.get_by_text("번갈아")).to_be_hidden()
+    await guide.locator("summary").click()
+    await expect(guide.get_by_text("번갈아")).to_be_visible()
+    batch["jobs"][0]["progress_seconds"] = 1200
+    await expect(panel.locator(".playback-hero")).to_contain_text("66%", timeout=10000)
+    await expect(panel.locator(".playback-help").get_by_text("번갈아")).to_be_visible()
+
+
+async def test_playback_history_hides_zero_counts(page):
+    batch = page.data["/playback/batches/7"]
+    page.data["/playback/batches"] = [{**batch, "id": 8, "status": "failed", "scope": "all", "total": 1, "done_count": 0,
+                                       "failed_count": 1, "skipped_count": 0, "error": None, "created_at": "2026-10-30T11:58:00Z"}]
+    page.data.pop("/playback/batches/7", None)
+    await page.goto("http://dashboard.test/#playback")
+    row = page.locator("#view .playback-history li")
+    await expect(row).to_contain_text("실패 1")
+    await expect(row).not_to_contain_text("완료 0")

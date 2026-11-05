@@ -27,9 +27,11 @@ async def mobile_page():
             {"id": 5, "lms_course_id": 1, "course_name": "컴퓨터프로그래밍", "module_item_id": 99, "module_id": 1,
              "module_title": "1주차", "title": "만료 영상", "saved": False, "resolve_error": "주소가 만료됐어요",
              "downloaded_at": None, "transcript_id": None, "duration": 60, "size": 1}],
-        "/courses/1/videos": [_video(11, "받을 영상")],
+        "/courses/1/videos": [_video(11, "받을 영상"), _video(12, "받을 영상 2")],
         "/courses/1/materials": [{"key": "c21", "kind": "commons_file", "module_id": 1, "module_title": "1주차",
-                                  "title": "1장", "file_name": "1장.pptx", "size": 2, "downloaded_at": None}],
+                                  "title": "1장", "file_name": "1장.pptx", "size": 2, "downloaded_at": None},
+                                 {"key": "c22", "kind": "commons_file", "module_id": 1, "module_title": "1주차",
+                                  "title": "2장", "file_name": "2장.pptx", "size": 2, "downloaded_at": None}],
     }
     errors = []
     async with async_playwright() as p:
@@ -94,6 +96,12 @@ async def _one_video(dashboard):
     return page, data
 
 
+async def _two_videos(dashboard):
+    page, data = await _one_video(dashboard)
+    data["/courses/1/videos"].append(_video(12, "직접 받기 2"))
+    return page, data
+
+
 async def test_missing_extension_opens_guide(dashboard):
     page, _ = await _one_video(dashboard)
     await page.goto("http://dashboard.test/#videos")
@@ -120,26 +128,27 @@ async def test_missing_extension_toasts_when_guide_is_not_on_the_page(dashboard)
 
 
 async def test_missing_extension_on_bulk_opens_guide(dashboard):
-    page, _ = await _one_video(dashboard)
+    page, _ = await _two_videos(dashboard)
     await page.goto("http://dashboard.test/#videos")
-    await page.get_by_role("button", name="1주차 1개 내려받기").click()
+    await page.get_by_role("button", name="1주차 전체 내려받기 (2)").click()
     await expect(page.locator("#video-list details")).to_have_attribute("open", "")
     await expect(page.locator("#video-list details")).to_contain_text("확장프로그램에 연결하지 못했습니다")
     await expect(page.locator("#toast > *")).to_have_count(0)
 
 
 async def test_bulk_does_not_rerender_after_leaving_videos(dashboard):
-    page, data = await _one_video(dashboard)
+    page, data = await _two_videos(dashboard)
     await page.add_init_script(FAKE_EXTENSION)
     data["/courses/1/videos/11/direct-download"] = {"url": "https://x.test/a.mp4", "file_name": "a.mp4", "receipt": "r"}
+    data["/courses/1/videos/12/direct-download"] = {"url": "https://x.test/b.mp4", "file_name": "b.mp4", "receipt": "r"}
     await page.route("**/downloads/complete", lambda r: r.fulfill(status=204))
     await page.goto("http://dashboard.test/#videos")
-    await page.get_by_role("button", name="1주차 1개 내려받기").click()
-    await page.wait_for_function("window.__extensionCalls.includes('start')")
+    await page.get_by_role("button", name="1주차 전체 내려받기 (2)").click()
+    await page.wait_for_function("window.__extensionCalls.filter(x => x === 'start').length === 2")
     await page.evaluate("location.hash = '#todos'")
     await expect(page.locator("#todo-count")).to_be_visible()
     await page.evaluate("window.__extensionState = 'complete'")
-    await expect(page.locator("#toast")).to_contain_text("1개를 모두 받았어요")
+    await expect(page.locator("#toast")).to_contain_text("2개를 모두 받았어요")
     await expect(page.locator("#todo-count")).to_be_visible()  # 영상 목록이 할 일 화면을 덮어쓰지 않는다
 
 
@@ -184,7 +193,7 @@ async def test_phone_disables_download_with_one_notice(mobile_page):
     await expect(page.locator("#video-list").get_by_text("지금은 내려받을 수 없어요")).to_have_count(0)
     await page.get_by_role("tab", name="수업자료").click()
     await expect(page.locator("#video-list [data-bulk]").first).to_be_disabled()
-    await expect(page.locator("#video-list [data-link]")).to_be_enabled()
+    await expect(page.locator("#video-list [data-link]").first).to_be_enabled()
     await expect(page.get_by_text(NOTICE)).to_have_count(1)
 
 

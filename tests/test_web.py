@@ -201,7 +201,7 @@ async def test_playback_queue_shows_wait_and_deadline_risk(dashboard):
     data["/playback/batches/5"] = batch
     await page.goto("http://dashboard.test/#playback")
     await expect(page.get_by_text("다음 영상 대기 3번째", exact=False)).to_be_visible()
-    await expect(page.get_by_text("대기 시간으로 인해 일부 영상이 마감 전에 끝나지 않을 수 있습니다.")).to_be_visible()
+    await expect(page.get_by_text("대기 시간 때문에 일부 강의가 마감 전에 끝나지 않을 수 있어요")).to_be_visible()
     await expect(page.locator("#task-bar")).to_contain_text("작업 1개 진행 중")
     await page.locator("#task-bar").click()
     await expect(page.locator("#task-sheet").get_by_role("button", name="재생 중지", exact=True)).to_be_visible()
