@@ -191,12 +191,12 @@ progress::-moz-progress-bar { background: var(--blue); }
 .navigation { position: sticky; top: 56px; height: calc(100dvh - 56px); align-self: start; }
 .mobile-menu { display: none; }
 .side { display: flex; flex-direction: column; gap: 2px; padding: 16px 12px; height: 100%; overflow-y: auto; }
-.side button {
+.side :is(button, .privacy-link) {
   display: flex; align-items: center; gap: 10px; min-height: var(--touch); padding: 0 12px;
   font: 500 var(--text-sm)/1 var(--font); color: var(--ink-2); text-align: left;
   border: 0; background: none; border-radius: 10px; cursor: pointer;
 }
-.side button:hover { background: var(--fill-hover); }
+.side :is(button, .privacy-link):hover { background: var(--fill-hover); }
 .side button.on { color: var(--ink); background: var(--surface); font-weight: 700; }
 .icon { width: 18px; height: 18px; flex: 0 0 18px; color: var(--ink-3); }
 .side button.on .icon { color: var(--blue); }
@@ -495,7 +495,7 @@ details.notice[open] summary::after { content: "⌃"; }
   #current-view { color: var(--ink); font-weight: 700; }
   .side { display: none; height: auto; padding: 4px 12px 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; background: var(--bg); }
   .navigation.expanded .side { display: grid; max-height: calc(100dvh - 100px); overflow-y: auto; }
-  .side button { flex-direction: column; justify-content: center; gap: 4px; min-height: 60px; padding: 8px 4px; font-size: var(--text-xs); text-align: center; background: var(--surface); border-radius: var(--r-btn); }
+  .side :is(button, .privacy-link) { flex-direction: column; justify-content: center; gap: 4px; min-height: 60px; padding: 8px 4px; font-size: var(--text-xs); text-align: center; background: var(--surface); border-radius: var(--r-btn); }
   .nav-label { display: none; }
   .workspace { padding: 8px 12px 32px; gap: 12px; }
   .overview-heading { align-items: center; }
@@ -604,7 +604,7 @@ progress { border: 2px solid var(--ink); border-radius: 6px; height: 12px; }
 .consent { border: 2px solid var(--ink); background: var(--pink-soft); color: var(--ink); }
 
 .topbar { border-bottom: 3px solid var(--ink); }
-.side button:hover { background: rgb(255 255 255 / .6); }
+.side :is(button, .privacy-link):hover { background: rgb(255 255 255 / .6); }
 .side button.on { background: var(--pink); box-shadow: inset 0 0 0 2px var(--ink); }
 .side button.on .icon { color: var(--ink); }
 .nav-label, .icon { color: var(--ink-2); }
@@ -632,7 +632,7 @@ progress { border: 2px solid var(--ink); border-radius: 6px; height: 12px; }
   .topbar { gap: 6px; padding: 0 10px; }
   .topbar .btn.small { padding: 0 8px; font-size: var(--text-sm); }
   .mobile-menu { border: 0; border-bottom: 2px solid var(--ink); }
-  .side button { border: 2px solid var(--ink); }
+  .side :is(button, .privacy-link) { border: 2px solid var(--ink); }
   .auth-box { box-shadow: 4px 4px 0 var(--ink); }
   .today-photo { width: 84px; height: 84px; }
 }
@@ -695,3 +695,6 @@ body.has-task-bar .toast-stack { bottom: calc(72px + var(--ad-inset)); }
 @media (max-width: 760px) {
   #task-panel { left: 8px; right: 8px; width: auto; }
 }
+
+/* 법적 안내 링크도 설정 메뉴와 같은 크기와 키보드 접근성을 유지한다. */
+.side .privacy-link { text-decoration: none; }
