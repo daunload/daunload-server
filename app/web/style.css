@@ -170,7 +170,7 @@ progress::-moz-progress-bar { background: var(--blue); }
 .brand { font-weight: 700; font-size: var(--text-md); letter-spacing: -0.02em; }
 .brand-mark { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: var(--blue); color: #fff; font: 700 var(--text-md)/1 var(--font); flex-shrink: 0; }
 .auth-brand, .home-link { display: flex; align-items: center; gap: 8px; }
-.home-link { color: var(--ink); flex-shrink: 0; }
+.home-link { color: var(--ink); flex-shrink: 0; min-height: var(--touch); }
 .home-link:hover { text-decoration: none; }
 .brand-caption, .sidebar-note, .workspace-footer { display: none; }
 .sync { margin-left: auto; font-size: var(--text-sm); color: var(--ink-3); }
@@ -226,6 +226,7 @@ progress::-moz-progress-bar { background: var(--blue); }
 /* ---------- 카드, 목록 ---------- */
 .panel { background: var(--surface); border-radius: var(--r-card); }
 .panel-body { padding: 20px; display: grid; gap: 12px; }
+details.panel-body > summary { display: flex; align-items: center; min-height: var(--touch); cursor: pointer; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 12px 20px 20px; }
 .list { list-style: none; margin: 0; padding: 4px 0; }
 .list > li { padding: 14px 20px; display: grid; gap: 2px; }

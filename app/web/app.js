@@ -197,6 +197,7 @@ function logout() {
     videoCourse: null, videoList: null, savedVideos: null, materialList: null, bulk: null,
   assignments: null, assignmentFilter: "unsubmitted", noticeCourse: null, todoSearch: "", todoFilter: "all", todoDeadline: "all" });
   closeConfirmDialog();
+  $("#transcript-dialog")?.close();
   clearToasts();
   state.extensionMissing = null;
   renderTaskPanel();
@@ -970,7 +971,7 @@ async function cancelActivePlayback() {
   if (id == null) return;
   const ok = await confirmDialog({
     title: "재생을 중지할까요?",
-    body: ["지금 재생 중인 강의가 끝나는 대로 멈춰요."],
+    body: ["지금 재생 중인 강의도 바로 멈춰요. 끝까지 듣지 않은 강의는 완료되지 않아요."],
     confirmLabel: "재생 중지",
     danger: true,
   });
@@ -979,7 +980,7 @@ async function cancelActivePlayback() {
     await api(`/playback/batches/${id}`, { method: "DELETE" });
     if (state.active?.id !== id) return;
     state.active = { ...state.active, cancel_requested: true };
-    toast("지금 듣는 강의가 끝나는 대로 멈출게요");
+    toast("재생을 중지했어요.");
     try {
       const detail = await api(`/playback/batches/${id}`);
       if (state.active?.id === id) state.active = detail;
@@ -1132,11 +1133,11 @@ function renderCurrentTab() {
 }
 
 function bulkButton(items, title) {
-  const label = items.length ? `${title} ${items.length}개 내려받기` : `${title} 내려받기`;
+  const label = items.length ? `${esc(title)} ${items.length}개 내려받기` : `${esc(title)} 내려받기`;
   if (isPhoneDevice()) return `<button class="btn small" data-bulk disabled>${label}</button>`;  // 이유는 화면 위쪽에 한 번만 알린다
   return (state.videoTab !== "materials" || bulkDownloadSupported())
     ? `<button class="btn small" data-bulk ${items.length && !state.bulk?.running ? "" : "disabled"}>${label}</button>`
-    : `<button class="btn small" disabled title="폴더에 바로 저장하는 기능은 데스크톱 Chrome·Edge에서만 지원합니다.">${label}</button>`;
+    : `<button class="btn small" disabled>${label}</button><span class="reason">폴더에 바로 저장하는 기능은 데스크톱 Chrome·Edge에서만 지원해요</span>`;
 }
 
 /** 여러 개 받기를 시작한다. 진행은 하단 패널에 나오고, 실패한 항목만 다시 시도할 수 있다. */
@@ -1146,13 +1147,17 @@ async function runBulkDownload(items) {
     await startBulkDownload(items, (stat) => {
       if (state.token !== token) return;  // 로그아웃 뒤에 늦게 온 갱신은 버린다
       state.bulk = stat;
-      if (!stat.running) {
-        if (stat.stopped) toast(`${stat.done}/${stat.total}개 받고 중지했어요`);
-        else if (!stat.failedItems.length) toast(`${stat.done}개를 모두 받았어요`);
-        if (!stat.failedItems.length) state.bulk = null;
-        if (state.view === "videos") renderCurrentTab();  // 다른 화면으로 옮겼다면 덮어쓰지 않는다
+      try {
+        if (!stat.running) {
+          if (stat.stopped) toast(`${stat.done}/${stat.total}개 받고 중지했어요`);
+          else if (!stat.failedItems.length) toast(`${stat.done}개를 모두 받았어요`);
+          if (!stat.failedItems.length) state.bulk = null;
+          // 다른 화면으로 옮겼거나 목록을 다시 불러오는 중이면 덮어쓰지 않는다
+          if (state.view === "videos" && (state.videoTab === "materials" ? state.materialList : state.videoList)) renderCurrentTab();
+        }
+      } finally {
+        renderTaskPanel();
       }
-      renderTaskPanel();
     });
   } catch (err) {
     if (err.name !== "AbortError") reportDownloadError(err);  // 폴더 선택 취소는 조용히
@@ -1163,10 +1168,10 @@ async function runBulkDownload(items) {
 function reportDownloadError(err) {
   if (err.code !== "EXTENSION_MISSING") { toast(err.message, true); return; }
   state.extensionMissing = err.message;
-  if (state.view !== "videos" || !state.videoList) { toast(err.message, true); return; }
+  if (state.view !== "videos" || !state.videoList) { state.extensionMissing = null; toast(err.message, true); return; }
   renderCurrentTab();
   const summary = document.querySelector("#video-list details summary");
-  if (!summary) { toast(err.message, true); return; }  // 안내가 그려지지 않는 화면(빈 목록·휴대폰)에서도 오류는 보인다
+  if (!summary) { state.extensionMissing = null; toast(err.message, true); return; }  // 안내가 그려지지 않는 화면(빈 목록·휴대폰)에서도 오류는 보인다
   summary.scrollIntoView({ block: "center" });
   summary.focus({ preventScroll: true });
 }
@@ -1257,7 +1262,7 @@ function renderVideoList() {
 
 function markDownloaded(v) {
   // 다시 그려도 표시가 남도록 원본 목록에도 반영한다
-  const src = state.videoList.items.find((x) => x.module_item_id === v.module_item_id);
+  const src = state.videoList?.items.find((x) => x.module_item_id === v.module_item_id);
   if (src) src.downloaded_at = v.downloaded_at;
   if (v.savedRow) v.savedRow.downloaded_at = v.downloaded_at;
 }
@@ -1297,6 +1302,7 @@ function renderMaterialList() {
 }
 
 async function downloadVideo(btn, linkPath) {
+  const token = state.token;
   btn.disabled = true;
   btn.textContent = "준비 중";
   try {
@@ -1304,10 +1310,12 @@ async function downloadVideo(btn, linkPath) {
       await requireDownloadExtension();
       btn.textContent = "다운로드 중";
       await downloadDirectVideo({ linkPath }, new AbortController().signal);
+      if (state.token !== token) return false;  // 로그아웃 뒤에 늦게 온 결과는 알리지 않는다
       toast("영상 저장이 완료되었습니다.");
       return true;
     }
     const link = await api(linkPath, { method: "POST" });
+    if (state.token !== token) return false;
     const a = document.createElement("a");
     a.href = link.url;
     a.download = link.file_name;
@@ -1317,7 +1325,7 @@ async function downloadVideo(btn, linkPath) {
     toast(`${link.file_name} 내려받기를 시작했습니다. 브라우저 다운로드 목록에서 진행 상황을 볼 수 있습니다.`);
     return true;
   } catch (err) {
-    reportDownloadError(err);
+    if (state.token === token) reportDownloadError(err);
     return false;
   } finally {
     btn.disabled = false;
@@ -1501,8 +1509,8 @@ function viewAccount() {
     if (!ok) return;
     try {
       await withPending($("#delete-me"), "처리 중", () => api("/me", { method: "DELETE" }));
-      toast("계정과 저장된 정보를 모두 지웠습니다");
       logout();
+      toast("계정과 저장된 정보를 모두 지웠습니다");
     } catch (err) { toast(err.message, true); }
   });
 }

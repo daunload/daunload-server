@@ -78,6 +78,13 @@ async def test_error_toast_stays_until_closed_success_expires(page):
     await expect(page.locator("#toast")).not_to_contain_text("같은 오류")
     await expect(page.locator("#toast")).to_contain_text("넷째")
 
+    # 넘칠 때는 사라질 알림부터 지우고, 오류는 남긴다
+    await page.evaluate("clearToasts(); toast('오류 하나', true); toast('성공 알림'); toast('오류 둘', true); toast('오류 셋', true)")
+    await expect(items).to_have_count(3)
+    await expect(page.locator("#toast")).not_to_contain_text("성공 알림")
+    await expect(page.locator("#toast")).to_contain_text("오류 하나")
+    await expect(page.locator("#toast")).to_contain_text("오류 셋")
+
 
 async def _one_video(dashboard):
     page, data = dashboard

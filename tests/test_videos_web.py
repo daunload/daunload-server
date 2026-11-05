@@ -296,3 +296,45 @@ async def test_single_material_not_in_panel(dashboard):
     await page.get_by_role("button", name="내려받기", exact=True).click()
     await expect(page.locator("#video-list").get_by_text("✓ 받음")).to_be_visible()
     await expect(page.locator("#task-panel")).to_be_hidden()
+
+
+def _material(title="자료"):
+    return {"key": "c21", "kind": "commons_file", "module_id": 1, "module_title": title,
+            "title": "1장", "file_name": "1장.pdf", "size": 1, "downloaded_at": None}
+
+
+async def test_bulk_button_escapes_module_title(dashboard):
+    page, data = dashboard
+    await page.add_init_script(FAKE_EXTENSION)
+    data['/saved-videos'] = []
+    data['/courses/1/videos'] = [{**_video(11, '강의'), 'module_title': '<a href="x">링크</a>'}]
+    await page.goto('http://dashboard.test/#videos')
+    await expect(page.locator('#video-list li.video-row')).to_have_count(1)
+    assert await page.locator('#video-list .group-actions a').count() == 0
+    await expect(page.locator('#video-list [data-bulk]')).to_have_text('<a href="x">링크</a> 1개 내려받기')
+
+
+async def test_materials_bulk_without_folder_support_shows_visible_reason(dashboard):
+    page, data = dashboard
+    await page.add_init_script("delete window.showDirectoryPicker")
+    data['/saved-videos'] = []
+    data['/courses/1/videos'] = []
+    data['/courses/1/materials'] = [_material()]
+    await page.goto('http://dashboard.test/#videos')
+    await page.get_by_role('tab', name='수업자료').click()
+    group = page.locator('#video-list .group-actions')
+    await expect(group.get_by_role('button')).to_be_disabled()
+    await expect(group.locator('.reason')).to_be_visible()
+    await expect(group.locator('.reason')).to_contain_text('데스크톱 Chrome')
+
+
+async def test_panel_clears_when_bulk_ends_while_list_is_reloading(dashboard):
+    page, data = dashboard
+    await _bulk_videos(page, data, count=1)
+    await page.get_by_role('button', name='1주차 1개 내려받기').click()
+    await page.wait_for_function("window.__extensionCalls.includes('start')")
+    await expect(page.locator('#task-panel')).to_be_visible()
+    await page.evaluate("state.videoList = null")  # 과목을 바꿔 목록을 다시 불러오는 중
+    await page.evaluate("window.__extensionState = 'complete'")
+    await expect(page.locator('#toast')).to_contain_text('1개를 모두 받았어요')
+    await expect(page.locator('#task-panel')).to_be_hidden()

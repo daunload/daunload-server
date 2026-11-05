@@ -43,7 +43,7 @@ async def test_mobile_touch_targets_and_type(dashboard):
             }""")
             assert (title, meta) == ("16px", "14px")
         await page.locator("#menu-toggle").click()  # opens the mobile menu so .side buttons are measured
-        sizes += await page.evaluate("""[...document.querySelectorAll('.btn,.side button,.cal-nav')]
+        sizes += await page.evaluate("""[...document.querySelectorAll('.btn,.side button,.cal-nav,summary,.brand,label.check')]
           .filter(e => e.offsetParent).map(e => e.getBoundingClientRect().height)""")
         await page.locator("#menu-toggle").click()
     assert sizes and min(sizes) >= 44, min(sizes)

@@ -101,7 +101,7 @@ async function runNext() {
       segments: job.segments, model: `whisper-small/${tx.device || "unknown"}`, duration: job.totalSeconds,
     } });
     job.status = "done";
-    onTranscriptSaved(job, saved.id);
+    if (job.epoch === tx.epoch) onTranscriptSaved(job, saved.id);  // 로그아웃 전의 작업은 다음 사용자에게 알리지 않는다
   } catch (err) {
     if (job.status !== "cancelled") { job.status = "failed"; job.error = err.message; }
   } finally {

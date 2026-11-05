@@ -122,14 +122,17 @@ function bindWeek() {
   on("week-missed", () => { state.assignmentFilter = "overdue"; navigate("assignments"); });
   on("week-play", async (e) => {
     if (week.busy) return;
+    const token = state.token;
     const btn = e.currentTarget;
     week.busy = true;
     btn.disabled = true;
     try {
       const plan = await api("/playback/batches/preview?scope=week");
+      if (state.token !== token) return;  // 미리보기를 기다리는 사이 로그아웃했다
       btn.disabled = false;
       btn.focus();
       if (!(await confirmPlayback(plan, "이번 주"))) return;
+      if (state.token !== token) return;
       btn.disabled = true;
       const batch = await api("/playback/batches", { method: "POST", json: { scope: "week" } });
       state.active = await api(`/playback/batches/${batch.id}`);
@@ -137,7 +140,13 @@ function bindWeek() {
       toast(`강의 ${batch.total}개를 듣기 시작했어요`);
       startPolling();
     } catch (err) {
-      toast(err.message, true);
+      if (state.token === token) {
+        toast(err.message, true);
+        if (err.status === 409) {
+          try { await loadCore(); } catch (refreshError) { toast(refreshError.message, true); }
+          renderWeek();
+        }
+      }
     } finally {
       week.busy = false;
     }

@@ -20,7 +20,7 @@ function icon(name) {
 
 /* ---------------- 알림 토스트 ----------------
  * #toast는 메시지 묶음이다. 성공은 3200ms 뒤 사라지고, 오류는 닫기 전까지 남는다.
- * 같은 오류가 이미 떠 있으면 늘리지 않고, 최대 3개까지만 두며 넘치면 가장 오래된 것부터 지운다.
+ * 같은 오류가 이미 떠 있으면 늘리지 않고, 최대 3개까지만 둔다. 넘치면 오류가 아닌 알림부터 지우고, 모두 오류일 때만 가장 오래된 것을 지운다.
  */
 
 const TOAST_MS = 3200;
@@ -47,7 +47,10 @@ function toast(msg, bad = false) {
     setTimeout(() => item.remove(), TOAST_MS);
   }
   box.append(item);
-  while (box.children.length > TOAST_MAX) box.firstElementChild.remove();
+  while (box.children.length > TOAST_MAX) {
+    const victim = [...box.children].find((n) => !n.classList.contains("bad")) || box.firstElementChild;
+    victim.remove();
+  }
 }
 
 function clearToasts() {
@@ -85,14 +88,14 @@ function isPhoneDevice() {
 
 /* ---------------- 공통 확인 창 ----------------
  * confirmDialog({ title, body?: string[], warnings?: string[], confirmLabel, danger?, requireText?, requireLabel? })
- *   -> Promise<boolean>. 모든 문자열은 textContent로 넣는다. 이미 열려 있으면 같은 Promise를 돌려준다.
+ *   -> Promise<boolean>. 모든 문자열은 textContent로 넣는다. 이미 다른 확인 창이 열려 있으면 열지 않고 false로 끝낸다.
  * closeConfirmDialog(): 열린 창을 false로 닫는다(logout에서 호출).
  */
 
 let openConfirm = null;
 
 function confirmDialog({ title, body = [], warnings = [], confirmLabel, danger = false, requireText, requireLabel }) {
-  if (openConfirm) return openConfirm.promise;
+  if (openConfirm) return Promise.resolve(false);
   const dlg = document.getElementById("confirm-dialog");
   const opener = document.activeElement;
   const openerId = opener && opener.id;

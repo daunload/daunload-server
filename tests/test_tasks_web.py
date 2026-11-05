@@ -73,12 +73,13 @@ async def test_bar_summarizes_and_sheet_controls_playback(page):
     await sheet.get_by_role("button", name="재생 중지").click()
     dialog = page.locator("#confirm-dialog")
     await expect(dialog).to_contain_text("재생을 중지할까요?")
-    await expect(dialog).to_contain_text("지금 재생 중인 강의가 끝나는 대로 멈춰요.")
+    await expect(dialog).to_contain_text("지금 재생 중인 강의도 바로 멈춰요. 끝까지 듣지 않은 강의는 완료되지 않아요.")
     assert page.calls == []
     await dialog.get_by_role("button", name="재생 중지").click()
-    await expect(page.get_by_text("지금 듣는 강의가 끝나는 대로 멈출게요")).to_be_visible()
+    await expect(page.locator("#toast")).to_contain_text("재생을 중지했어요.")
     assert page.calls == [("DELETE", "/playback/batches/7", None)]
     await expect(sheet).to_contain_text("중지하는 중이에요")
+    await expect(sheet).not_to_contain_text("끝나는 대로")
     await expect(sheet.get_by_role("button", name="재생 중지")).to_have_count(0)
 
 

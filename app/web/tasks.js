@@ -45,7 +45,7 @@ function playbackTask(a) {
     kind: "playback",
     title: `강의 재생 ${done}/${a.total}개`,
     pct: a.total ? Math.round((done / a.total) * 100) : 0,
-    note: a.cancel_requested ? "중지하는 중이에요. 지금 재생 중인 강의가 끝나는 대로 멈춰요."
+    note: a.cancel_requested ? "중지하는 중이에요"
       : [wait, "창을 닫아도 서버에서 계속돼요"].filter(Boolean).join(" · "),
     failed: false,
     actions: a.cancel_requested ? [] : [{ label: "재생 중지", cls: "btn small danger", run: cancelActivePlayback }],

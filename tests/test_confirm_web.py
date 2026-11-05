@@ -1,5 +1,7 @@
 """공통 확인 창: 위험한 동작은 한 곳에서 확인하고, 확인 전에는 서버를 건드리지 않는다."""
 
+import asyncio
+
 import pytest
 from playwright.async_api import expect
 
@@ -50,6 +52,7 @@ async def test_dialog_focus_escape_and_return(page):
 
 async def test_double_open_shows_one_dialog(page):
     await page.goto("http://dashboard.test/")
+    await expect(page.locator("#week-play")).to_be_visible()
     await page.evaluate('''() => {
       const b = document.getElementById("week-play");
       b.click(); b.click();
@@ -89,6 +92,7 @@ async def test_account_delete_requires_student_id(page):
     assert page.calls == []
     await confirm.click()
     await expect(page.locator("#auth")).to_be_visible()
+    await expect(page.locator("#toast")).to_contain_text("계정과 저장된 정보를 모두 지웠습니다")
     assert page.calls == [("DELETE", "/me", None)]
 
 
@@ -146,3 +150,45 @@ async def test_transcript_delete_confirms_over_transcript_dialog(dashboard):  # 
     await dialog.get_by_role("button", name="텍스트 삭제").click()
     await expect(transcript).not_to_be_visible()
     assert len(calls) == 1
+
+
+async def test_second_dialog_while_preview_is_slow_does_not_start_playback(page):
+    release = asyncio.Event()
+
+    async def slow_preview(route):
+        await release.wait()
+        await route.fulfill(json=page.data["/playback/batches/preview"])
+
+    await page.route("**/playback/batches/preview*", slow_preview)
+    page.data["/notifications/channels"] = [{"id": 5, "kind": "discord", "enabled": True, "created_at": page.now.isoformat()}]
+    await page.goto("http://dashboard.test/")
+    await page.get_by_role("button", name="이번 주 강의 2개 재생").click()
+    await page.evaluate("location.hash = '#notifications'")
+    await page.get_by_role("button", name="삭제", exact=True).click()
+    dialog = page.locator("#confirm-dialog")
+    await expect(dialog).to_contain_text("이 알림 채널을 삭제할까요?")
+    release.set()
+    await page.wait_for_timeout(300)  # 늦게 도착한 미리보기가 열린 창을 가로채지 않는다
+    await expect(dialog).to_contain_text("이 알림 채널을 삭제할까요?")
+    await dialog.get_by_role("button", name="알림 채널 삭제").click()
+    await expect(dialog).not_to_be_visible()
+    await page.wait_for_timeout(300)
+    assert page.calls == [("DELETE", "/notifications/channels/5", None)]
+
+
+async def test_logout_closes_transcript_dialog(dashboard):  # noqa: F811
+    page, data = dashboard
+    data["/saved-videos"] = []
+    data["/courses/1/videos"] = [{
+        "module_item_id": 12, "module_id": 1, "module_title": "1주차", "title": "2강 재귀", "content_type": "movie",
+        "duration": 2, "size": 1, "completed": False, "available": True, "thumbnail_url": None,
+        "downloaded_at": None, "transcript_id": 9}]
+    data["/transcripts/9"] = {"id": 9, "lms_course_id": 1, "module_item_id": 12, "course_name": "컴퓨터프로그래밍",
+                              "title": "2강 재귀", "model": "whisper-small/wasm", "duration": 70,
+                              "updated_at": "2026-10-29T00:00:00Z", "text": "안녕하세요", "segments": []}
+    await page.goto("http://dashboard.test/#videos")
+    await page.get_by_role("button", name="텍스트 보기").click()
+    await expect(page.locator("#transcript-dialog")).to_be_visible()
+    await page.evaluate("logout()")
+    await expect(page.locator("#auth")).to_be_visible()
+    await expect(page.locator("#transcript-dialog")).not_to_be_visible()
