@@ -21,6 +21,7 @@ const store = {
   del(k) { try { localStorage.removeItem(k); } catch { /* 저장 불가 환경 */ } },
 };
 
+const PRIVACY_NOTICE_KEY = "privacy-notice-2026-11";
 const VIEW_NAMES = { dashboard: "학습 현황", todos: "할 일", assignments: "미제출 과제", calendar: "캘린더", courses: "과목", announcements: "공지", playback: "강의 재생", videos: "내려받기·텍스트 변환", notifications: "알림", account: "계정", admin: "사용자 관리" };
 const initialView = location.hash.slice(1) || "dashboard";
 
@@ -254,7 +255,13 @@ async function boot() {
   $("#app").hidden = false;
   history.replaceState(null, "", `#${state.view}`);
   renderAll();
+  $("#privacy-notice").hidden = store.get(PRIVACY_NOTICE_KEY) === "1";
 }
+
+$("#privacy-notice-close").addEventListener("click", () => {
+  store.set(PRIVACY_NOTICE_KEY, "1");
+  $("#privacy-notice").hidden = true;
+});
 
 function renderAll() {
   renderSync();

@@ -365,3 +365,16 @@ async def test_admin_activity_filter_retry_pagination_and_mobile(dashboard):
     data[url]["total"] = 0
     await panel.get_by_role("button", name="내역 새로고침").click()
     await expect(panel).to_contain_text("저장된 작업 내역이 없습니다.")
+
+
+async def test_privacy_notice_shows_once(dashboard):
+    page, _ = dashboard
+    await page.goto("http://dashboard.test/#todos")
+    notice = page.locator("#privacy-notice")
+    await expect(notice).to_contain_text("개인정보처리방침")
+    await expect(notice.get_by_role("link")).to_have_attribute("href", "/privacy.html")
+    await notice.get_by_role("button", name="닫기").click()
+    await expect(notice).to_be_hidden()
+    await page.reload()
+    await expect(page.locator("#view")).not_to_be_empty()
+    await expect(notice).to_be_hidden()

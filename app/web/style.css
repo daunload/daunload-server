@@ -276,6 +276,10 @@ progress::-moz-progress-bar { background: var(--blue); }
 .section-caption { font-size: var(--text-sm); color: var(--ink-3); font-weight: 400; margin-left: 6px; }
 .warning { padding: 12px 14px; border-radius: var(--r-btn); background: var(--red-soft); color: var(--red); font-size: var(--text-sm); }
 .notice-inline { padding: 12px 14px; border-radius: var(--r-btn); background: var(--surface); color: var(--ink-2); font-size: var(--text-sm); }
+.privacy-notice { display: grid; gap: 8px; }
+.privacy-notice[hidden] { display: none; }
+.privacy-notice p { margin: 0; }
+.privacy-notice-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .summary-line { display: flex; gap: 4px 16px; flex-wrap: wrap; font-size: var(--text-sm); color: var(--ink-3); }
 .summary-line b { font-size: var(--text-lg); font-weight: 700; color: var(--ink); margin-right: 3px; }
 
