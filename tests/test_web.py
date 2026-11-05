@@ -326,3 +326,42 @@ async def test_playback_history_reveals_item_error_and_retries_loading(dashboard
     await expect(details.locator("script")).to_have_count(0)
     await page.set_viewport_size({"width": 375, "height": 844})
     assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+
+
+async def test_admin_activity_filter_retry_pagination_and_mobile(dashboard):
+    page, data = dashboard
+    now = datetime.now(UTC).isoformat()
+    data["/me"]["is_admin"] = True
+    data["/admin/users"] = {"total": 1, "users": [{
+        "student_id": "20209999", "created_at": now, "last_login_at": now,
+        "login_count": 2, "lms_status": "ok",
+    }]}
+    url = "/admin/users/20209999/activities"
+    activity = {"id": 1, "kind": "download", "title": "<img src=x>" + "긴 제목 " * 30,
+                "course_name": "사용자 과목", "status": "link_issued", "count": 3,
+                "recorded_at": now, "started_at": None, "finished_at": None}
+    data[url] = {"total": 21, "counts": {"playback": 20, "download": 1, "transcript": 0},
+                 "activities": [activity]}
+    await page.route("**" + url + "?*", lambda route: route.fulfill(status=503, json={"detail": "조회 실패"}))
+    await page.goto("http://dashboard.test/#admin")
+    await page.get_by_text("20209999 작업 내역 보기", exact=True).click()
+    panel = page.locator(".admin-activity")
+    await expect(panel.get_by_role("alert")).to_contain_text("조회 실패")
+    await page.unroute("**" + url + "?*")
+    await panel.get_by_role("button", name="다시 시도").click()
+    await expect(panel).to_contain_text("발급 3회")
+    await expect(panel.locator("img")).to_have_count(0)
+    async with page.expect_request(lambda r: "offset=20" in r.url):
+        await panel.get_by_role("button", name="다음 내역").click()
+    await expect(panel.get_by_role("button", name="이전 내역")).to_be_enabled()
+    data[url] = {"total": 1, "counts": {"playback": 20, "download": 1, "transcript": 0}, "activities": [activity]}
+    async with page.expect_request(lambda r: "kind=download" in r.url and "offset=0" in r.url):
+        await panel.get_by_label("작업 종류").select_option("download")
+    await expect(panel.get_by_role("button", name="다음 내역")).to_be_disabled()
+    for width in (1440, 375):
+        await page.set_viewport_size({"width": width, "height": 900})
+        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    data[url]["activities"] = []
+    data[url]["total"] = 0
+    await panel.get_by_role("button", name="내역 새로고침").click()
+    await expect(panel).to_contain_text("저장된 작업 내역이 없습니다.")

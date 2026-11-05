@@ -586,3 +586,55 @@ async def test_playback_progress_survives_refresh_and_stall_does_not_refresh_tim
     reset = (await api.get(url, headers=headers)).json()["jobs"][0]
     assert reset["progress_seconds"] == 0
     assert reset["progress_updated_at"] is None
+
+
+async def test_admin_activity_history_access_filters_pagination_and_privacy(env, monkeypatch):
+    from app.db.models import CourseRow, DownloadRecord, PlaybackBatch, PlaybackJob, Transcript
+    api, _ = env
+    monkeypatch.setattr(get_settings(), "admin_student_ids", ["20201234"])
+    admin = await _signup(api)
+    other = await _signup(api, "20209999")
+    now = datetime.now(UTC)
+    async with db_base.sessionmaker()() as db:
+        db.add_all([
+            CourseRow(user_id=1, lms_course_id=1, name="관리자 과목"),
+            CourseRow(user_id=2, lms_course_id=1, name="사용자 과목"),
+        ])
+        batch = PlaybackBatch(user_id=2, scope="all", status="done", created_at=now - timedelta(days=2))
+        db.add(batch)
+        await db.flush()
+        db.add_all([
+            PlaybackJob(user_id=2, batch_id=batch.id, position=0, lms_course_id=1,
+                        module_item_id=1, title="재생 영상", duration=60, deadline=now,
+                        video={"url": "PRIVATE-URL"}, error="PRIVATE-ERROR", status="done",
+                        started_at=now - timedelta(days=2), finished_at=now - timedelta(days=1)),
+            DownloadRecord(user_id=2, lms_course_id=1, item_key="v1", kind="video",
+                           title="다운로드 영상", count=3, last_at=now - timedelta(days=1)),
+            DownloadRecord(user_id=1, lms_course_id=1, item_key="v1", kind="video", title="다른 사용자 기록"),
+            Transcript(user_id=2, lms_course_id=1, module_item_id=1, title="전사 영상",
+                       course_name="사용자 과목", text="PRIVATE-TEXT", segments=[], model="test", updated_at=now),
+        ])
+        await db.commit()
+    url = "/admin/users/20209999/activities"
+    assert (await api.get(url)).status_code == 401
+    assert (await api.get(url, headers=other)).status_code == 403
+    r = await api.get(url, headers=admin)
+    assert r.status_code == 200, r.text
+    assert r.headers["cache-control"] == "no-store"
+    body = r.json()
+    assert body["total"] == 3
+    assert body["counts"] == {"playback": 1, "download": 1, "transcript": 1}
+    assert [a["kind"] for a in body["activities"]] == ["transcript", "download", "playback"]
+    assert all(a["course_name"] == "사용자 과목" for a in body["activities"])
+    assert body["activities"][2]["finished_at"]
+    assert "PRIVATE" not in r.text and "다른 사용자 기록" not in r.text
+    page = (await api.get(url + "?limit=1&offset=1", headers=admin)).json()
+    assert len(page["activities"]) == 1 and page["activities"][0]["count"] == 3
+    filtered = (await api.get(url + "?kind=playback", headers=admin)).json()
+    assert filtered["total"] == 1 and filtered["activities"][0]["status"] == "done"
+    assert (await api.get(url + "?offset=10", headers=admin)).json()["activities"] == []
+    for query in ("kind=unknown", "limit=101", "offset=-1"):
+        assert (await api.get(url + "?" + query, headers=admin)).status_code == 422
+    assert (await api.get("/admin/users/missing/activities", headers=admin)).status_code == 404
+    empty = (await api.get("/admin/users/20201234/activities?kind=playback", headers=admin)).json()
+    assert empty["total"] == 0 and empty["activities"] == []

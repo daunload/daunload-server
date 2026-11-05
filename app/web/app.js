@@ -1517,7 +1517,7 @@ async function viewAdmin(query = "", offset = 0) {
         </dl><details class="admin-settings" data-student-id="${esc(u.student_id)}">
           <summary>${esc(u.student_id)} 설정 보기</summary>
           <div class="admin-settings-content" aria-live="polite"></div>
-        </details><details class="admin-settings admin-activity" data-student-id="${esc(u.student_id)}">
+        </details><details class="admin-activity" data-student-id="${esc(u.student_id)}">
           <summary>${esc(u.student_id)} 작업 내역 보기</summary>
           <div class="admin-activity-content" aria-live="polite"></div>
         </details></li>`).join("")}</ul>` : `<p class="panel empty">해당하는 사용자가 없습니다.</p>`}

@@ -1,11 +1,13 @@
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, literal, select, union_all
 
 from app.api.deps import AdminUser, Db, is_admin
-from app.db.models import CourseRow, LmsCredential, NotificationChannel, User
+from app.db.models import (CourseRow, DownloadRecord, LmsCredential, NotificationChannel,
+                           PlaybackBatch, PlaybackJob, Transcript, User)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -95,4 +97,71 @@ async def user_settings(student_id: str, admin: AdminUser, db: Db, response: Res
         lms=AdminLmsSettingsOut(**lms) if lms is not None else None,
         courses=[AdminCourseSettingsOut(**row) for row in courses],
         channels=[AdminChannelSettingsOut(**row) for row in channels],
+    )
+
+
+class AdminActivityOut(BaseModel):
+    id: int
+    kind: str
+    title: str
+    course_name: str | None
+    status: str
+    recorded_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    count: int
+
+
+class AdminActivitiesOut(BaseModel):
+    total: int
+    counts: dict[str, int]
+    activities: list[AdminActivityOut]
+
+
+@router.get("/users/{student_id}/activities", response_model=AdminActivitiesOut)
+async def user_activities(
+    student_id: str, admin: AdminUser, db: Db, response: Response,
+    kind: Literal["all", "playback", "download", "transcript"] = "all",
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    response.headers["Cache-Control"] = "no-store"
+    user_id = await db.scalar(select(User.id).where(User.student_id == student_id))
+    if user_id is None:
+        raise HTTPException(404, "사용자를 찾을 수 없습니다.")
+    # Only metadata is selected: no media URLs, raw errors, or transcript contents.
+    playback = select(
+        PlaybackJob.id.label("id"), literal("playback").label("kind"),
+        PlaybackJob.title.label("title"), CourseRow.name.label("course_name"),
+        PlaybackJob.status.label("status"), PlaybackBatch.created_at.label("recorded_at"),
+        PlaybackJob.started_at.label("started_at"), PlaybackJob.finished_at.label("finished_at"),
+        literal(1).label("count"),
+    ).join(PlaybackBatch, PlaybackBatch.id == PlaybackJob.batch_id).outerjoin(
+        CourseRow, (CourseRow.user_id == PlaybackJob.user_id)
+        & (CourseRow.lms_course_id == PlaybackJob.lms_course_id),
+    ).where(PlaybackJob.user_id == user_id)
+    downloads = select(
+        DownloadRecord.id, literal("download"), DownloadRecord.title, CourseRow.name,
+        literal("link_issued"), DownloadRecord.last_at, literal(None), literal(None), DownloadRecord.count,
+    ).outerjoin(CourseRow, (CourseRow.user_id == DownloadRecord.user_id)
+                & (CourseRow.lms_course_id == DownloadRecord.lms_course_id)
+    ).where(DownloadRecord.user_id == user_id)
+    transcripts = select(
+        Transcript.id, literal("transcript"), Transcript.title, Transcript.course_name,
+        literal("saved"), Transcript.updated_at, literal(None), literal(None), literal(1),
+    ).where(Transcript.user_id == user_id)
+    activities = union_all(playback, downloads, transcripts).subquery()
+    counts = {"playback": 0, "download": 0, "transcript": 0}
+    counts.update(dict((await db.execute(
+        select(activities.c.kind, func.count()).group_by(activities.c.kind)
+    )).all()))
+    query = select(activities)
+    if kind != "all":
+        query = query.where(activities.c.kind == kind)
+    rows = (await db.execute(query.order_by(
+        activities.c.recorded_at.desc(), activities.c.kind, activities.c.id.desc(),
+    ).offset(offset).limit(limit))).mappings().all()
+    return AdminActivitiesOut(
+        total=sum(counts.values()) if kind == "all" else counts[kind], counts=counts,
+        activities=[AdminActivityOut(**row) for row in rows],
     )
