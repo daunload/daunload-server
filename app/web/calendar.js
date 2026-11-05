@@ -41,7 +41,7 @@ function calendarItems() {
     items.push({ kind: a.kind === "quiz" ? "quiz" : "assignment", title: a.title, course: a.course_name, date: new Date(when),
       status, url: a.url, submittedAt: a.submitted_at, unlockAt: a.status === "upcoming" ? a.unlock_at : null });
   }
-  for (const t of state.todos.filter((x) => x.kind === "video")) {
+  for (const t of state.todos.filter((x) => x.kind === "video" && x.deadline)) {  // 마감 없는 영상은 놓을 날짜가 없다
     items.push({ kind: "video", title: t.title, course: t.course_name, date: new Date(t.deadline), status: "todo", sub: t.module_title });
   }
   return items;

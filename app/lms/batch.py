@@ -64,7 +64,12 @@ def order_videos(videos: list[VideoTodo]) -> list[VideoTodo]:
     by_course: dict[int, list[VideoTodo]] = {}
     for v in videos:
         by_course.setdefault(v.course_id, []).append(v)
-    courses = sorted(by_course.values(), key=lambda vs: (min(v.deadline for v in vs), vs[0].course_id))
+    # 마감이 이른 과목부터, 마감이 하나도 없는 과목은 맨 뒤
+    def course_key(vs: list[VideoTodo]) -> tuple[bool, datetime | None, int]:
+        first_deadline = min((v.deadline for v in vs if v.deadline), default=None)
+        return (first_deadline is None, first_deadline or datetime.min.replace(tzinfo=UTC), vs[0].course_id)
+
+    courses = sorted(by_course.values(), key=course_key)
     return [v for vs in courses for v in sorted(vs, key=lambda v: v.order_key)]
 
 
@@ -78,7 +83,7 @@ class PlannedItem:
     @property
     def at_risk(self) -> bool:
         """예상 종료가 마감보다 늦으면 마감 전에 끝낼 수 없다."""
-        return self.expected_end > self.video.deadline
+        return self.video.deadline is not None and self.expected_end > self.video.deadline
 
 
 @dataclass(frozen=True)
@@ -336,7 +341,7 @@ async def _main(argv: list[str]) -> None:
             v = item.video
             flag = " ⚠" if item.at_risk else ""
             print(f"{item.position + 1:2}. [{v.course_name}] {v.module_title} / {v.title} "
-                  f"({v.duration / 60:.0f}분, 마감 {v.deadline.astimezone():%m/%d %H:%M}){flag}")
+                  f"({v.duration / 60:.0f}분, {f"마감 {v.deadline.astimezone():%m/%d %H:%M}" if v.deadline else "마감 없음"}){flag}")
         print(f"총 {len(plan.items)}개, 약 {plan.total_seconds / 60:.0f}분")
         for w in plan.warnings:
             print("경고:", w)

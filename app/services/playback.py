@@ -8,7 +8,7 @@ import time
 from dataclasses import asdict, replace
 from datetime import datetime, timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
@@ -44,7 +44,8 @@ async def pending_videos_from_db(
 ) -> list[VideoTodo]:
     now = now or utcnow()
     stmt = select(TodoRow).where(
-        TodoRow.user_id == user_id, TodoRow.kind == "video", TodoRow.active, TodoRow.deadline > now
+        TodoRow.user_id == user_id, TodoRow.kind == "video", TodoRow.active,
+        or_(TodoRow.deadline.is_(None), TodoRow.deadline > now),
     )
     if course_ids is not None:
         stmt = stmt.where(TodoRow.lms_course_id.in_(course_ids))
@@ -352,14 +353,14 @@ async def queue_estimates(db: AsyncSession, proposed: list[VideoTodo] | None = N
         position, duration, deadline, progress = grouped[key].popleft()
         start = cursor
         # 이미 마감된 영상은 워커가 건너뛰므로 재생 시간은 잡지 않는다.
-        seconds = max(0, duration - progress) + overhead if deadline > start else 0
+        seconds = max(0, duration - progress) + overhead if deadline is None or deadline > start else 0
         end = start + timedelta(seconds=seconds)
         info = result[key]
         if info["estimated_start"] is None:
             info["estimated_start"] = start
             info["estimated_wait_seconds"] = max(0, (start - now).total_seconds())
         info["expected_end"] = end
-        info["deadline_at_risk"] |= end > deadline
+        info["deadline_at_risk"] |= deadline is not None and end > deadline
         info["job_estimates"][position] = {"expected_start": start, "expected_end": end}
         cursor = end + timedelta(seconds=gap)
         if grouped[key]:

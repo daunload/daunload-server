@@ -65,6 +65,10 @@ function fmtDuration(sec) {
   return m % 60 ? `${h}시간 ${m % 60}분` : `${h}시간`;
 }
 
+/** 마감 없는 할 일(영상)은 어떤 시각보다 뒤로 보낸다. new Date(null)은 1970년이 되므로 직접 쓰지 않는다. */
+const dueTime = (t) => t.deadline ? new Date(t.deadline).getTime() : Infinity;
+const dueText = (iso) => iso ? `마감 ${fmtDate(new Date(iso))}` : "마감 없음";
+
 function timeLeft(deadline) {
   const ms = deadline - Date.now();
   if (ms <= 0) return { text: "마감 지남", cls: "urgent" };
@@ -378,7 +382,7 @@ function renderRail() {
     const left = Math.max(0, (timeline.start - today.getTime()) / span) * 100;
     const right = Math.min(1, (timeline.end - today.getTime()) / span) * 100;
     band = `<div class="band${timeline.kind === "plan" ? " plan" : ""}" style="left:${left}%;width:${Math.max(0.5, right - left)}%"></div>`;
-    const risky = state.todos.filter((t) => t.kind === "video" && timeline.ends.get(t.lms_item_id) > new Date(t.deadline).getTime()).length;
+    const risky = state.todos.filter((t) => t.kind === "video" && timeline.ends.get(t.lms_item_id) > dueTime(t)).length;
     const finish = fmtDate(new Date(timeline.end));
     if (timeline.kind === "run") {
       const a = state.active;
@@ -547,13 +551,13 @@ function drawDashboardPlayback() {
   const list = items.length ? `<ol class="dashboard-lecture-list">${items.map((item) => {
     const job = jobs.find((j) => j.module_item_id === item.module_item_id && j.lms_course_id === item.lms_course_id);
     return `<li><div><h3>${esc(item.title)}</h3><p>${esc(item.course_name)} · ${esc(item.module_title)} · ${fmtDuration(item.duration)}</p>
-      <p>마감 ${fmtDate(new Date(item.deadline))}${item.at_risk ? " · 마감 전 완료가 어려울 수 있습니다" : ""}</p></div>
+      <p>${dueText(item.deadline)}${item.at_risk ? " · 마감 전 완료가 어려울 수 있습니다" : ""}</p></div>
       ${job ? `<span class="status ${esc(job.status)}">${esc(JOB_STATUS[job.status] || job.status)}</span>` : ""}</li>`;
   }).join("")}</ol>` : `<p class="dashboard-playback-note">현재 재생 가능한 미수강 강의가 없습니다.</p>`;
   root.innerHTML = `<div class="panel-body">
     <div class="view-head"><h2>재생 가능한 강의${plan && !state.dashboardLoading ? ` ${items.length}개` : ""}</h2>
       <button class="btn" id="dashboard-playback-refresh" ${state.dashboardLoading || state.playbackStarting ? "disabled" : ""}>목록 다시 불러오기</button></div>
-    <p class="dashboard-playback-note">전체 과목에서 지금 열려 있고 마감 전인 미수강 강의입니다. 마지막 동기화 기준이며, 재생 직전에 완료 여부를 다시 확인합니다.</p>
+    <p class="dashboard-playback-note">전체 과목에서 지금 열려 있고 마감이 지나지 않은 미수강 강의입니다. 마지막 동기화 기준이며, 재생 직전에 완료 여부를 다시 확인합니다.</p>
     ${state.dashboardLoading ? `<p role="status">강의 목록을 불러오는 중입니다.</p>${skeletonRows(3)}`
       : state.dashboardError ? `<div role="alert"><p>${esc(state.dashboardError)}</p><button class="btn" id="dashboard-playback-retry">다시 시도</button></div>`
       : `${list}${!batch ? `<button class="btn block" id="dashboard-play-all" ${!items.length || state.playbackStarting ? "disabled" : ""}>
@@ -633,12 +637,12 @@ function renderTodoResults() {
     return (state.todoFilter === "all" || t.kind === state.todoFilter)
       && (!query || `${t.title} ${t.course_name}`.toLocaleLowerCase().includes(query))
       && (state.todoDeadline !== "soon" || (ms > 0 && ms <= DAY));
-  }).sort((a, b) => new Date(a.deadline) - new Date(b.deadline) || a.title.localeCompare(b.title, "ko"));
+  }).sort((a, b) => (dueTime(a) === dueTime(b) ? 0 : dueTime(a) - dueTime(b)) || a.title.localeCompare(b.title, "ko"));
   const groups = new Map();
   for (const t of todos) {
-    const d = new Date(t.deadline);
-    const key = startOfDay(d).getTime();
-    if (!groups.has(key)) groups.set(key, { label: dayName(d), items: [] });
+    const d = t.deadline ? new Date(t.deadline) : null;
+    const key = d ? startOfDay(d).getTime() : "none";
+    if (!groups.has(key)) groups.set(key, { label: d ? dayName(d) : "마감 없음", items: [] });
     groups.get(key).items.push(t);
   }
   $("#todo-count").textContent = `${todos.length}개`;
@@ -651,15 +655,14 @@ function renderTodoResults() {
 }
 
 function todoItem(t) {
-  const d = new Date(t.deadline);
-  const left = timeLeft(d);
+  const left = t.deadline ? timeLeft(new Date(t.deadline)) : { text: "마감 없음", cls: "" };
   const where = t.kind === "video" ? [t.module_title, t.duration && fmtDuration(t.duration)].filter(Boolean).join(" · ") : "";
   const url = safeUrl(t.url);
   const title = url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(t.title)} <span class="todo-link" aria-label="새 탭에서 열기">${icon("external")}</span></a>` : esc(t.title);
   return `<li><div class="todo-title-row">
     <span class="title"><span class="kind ${esc(t.kind)}">${KIND[t.kind] || "할 일"}</span>${title}</span>
     <span class="left ${left.cls}">${left.text}</span></div>
-    <span class="meta row"><span>${esc(t.course_name)}</span>${where ? `<span>${esc(where)}</span>` : ""}<span>마감 ${fmtDate(d)}</span></span>
+    <span class="meta row"><span>${esc(t.course_name)}</span>${where ? `<span>${esc(where)}</span>` : ""}${t.deadline ? `<span>${dueText(t.deadline)}</span>` : ""}</span>
   </li>`;
 }
 
@@ -891,7 +894,7 @@ function planHtml(plan) {
       <span class="num">${i.position + 1}</span>
       <span><span class="title">${esc(i.title)}</span><br>
         <span class="meta row small-text"><span>${esc(i.course_name)} ${esc(i.module_title)}</span><span>${fmtDuration(i.duration)}</span>
-        <span>예상 종료 ${fmtDate(new Date(i.expected_end))}</span><span>마감 ${fmtDate(new Date(i.deadline))}</span></span></span>
+        <span>예상 종료 ${fmtDate(new Date(i.expected_end))}</span><span>${dueText(i.deadline)}</span></span></span>
       <span class="status ${i.at_risk ? "failed" : "queued"}">${i.at_risk ? "마감 초과" : ""}</span></li>`).join("");
   const warn = plan.warnings.length
     ? `<p class="warning">${plan.warnings.length}개 영상은 순서대로 재생하면 마감 전에 끝나지 않습니다. 마감이 이른 과목부터 재생하니, 필요하면 범위를 줄이세요.</p>` : "";
@@ -938,7 +941,7 @@ function playbackHeroHtml(b, jobs, lateIds) {
       <h2>${focus ? esc(focus.title) : b.cancel_requested ? "예정된 강의는 재생하지 않아요" : "재생을 준비하고 있어요"}</h2>
       ${focus ? `<p class="meta">${[esc(playbackCourseName(focus)), current
         ? `${playbackPosition(Math.min(Math.max(0, current.progress_seconds || 0), Math.max(0, current.duration || 0)))} / ${playbackPosition(current.duration)}`
-        : fmtDuration(focus.duration), `마감 ${fmtDate(new Date(focus.deadline))}`].filter(Boolean).join(" · ")}</p>` : ""}
+        : fmtDuration(focus.duration), dueText(focus.deadline)].filter(Boolean).join(" · ")}</p>` : ""}
       ${current ? `<p class="playback-percent"><strong>${percent}%</strong></p>
         <progress value="${jobProgressPercent(current)}" max="100" aria-label="현재 강의 재생 진행률"></progress>${playbackActivityHtml(current)}` : ""}
       ${focus && lateIds.has(focus.module_item_id) ? '<p class="warning">마감 전에 끝나지 않을 예정이에요</p>' : ""}
@@ -972,7 +975,7 @@ function playbackQueueHtml(b, jobs, lateIds) {
     <ol class="steps">${jobs.map((j) => {
       const late = lateIds.has(j.module_item_id);
       const isNext = j.module_item_id === nextId;
-      const meta = [manyCourses ? esc(playbackCourseName(j)) : "", fmtDuration(j.duration), `마감 ${fmtDate(new Date(j.deadline))}`,
+      const meta = [manyCourses ? esc(playbackCourseName(j)) : "", fmtDuration(j.duration), dueText(j.deadline),
         j.status === "queued" && !b.cancel_requested && j.expected_start ? `예상 시작 ${fmtDate(new Date(j.expected_start))}` : "",
         late ? "마감 전에 끝나지 않을 예정" : "", j.attempts > 1 ? `${j.attempts}번 시도` : "", j.error ? esc(j.error) : ""];
       return `<li class="${[late ? "risk" : "", j.status === "playing" ? "now" : ""].filter(Boolean).join(" ")}"><span class="num">${j.position + 1}</span>
@@ -985,7 +988,7 @@ function playbackQueueHtml(b, jobs, lateIds) {
 function activeBatchHtml(b) {
   const ends = playbackTimeline()?.ends || new Map();
   const jobs = [...(b.jobs || [])].sort((x, y) => x.position - y.position);
-  const lateIds = new Set(jobs.filter((j) => ends.get(j.module_item_id) > new Date(j.deadline).getTime()).map((j) => j.module_item_id));
+  const lateIds = new Set(jobs.filter((j) => ends.get(j.module_item_id) > dueTime(j)).map((j) => j.module_item_id));
   return playbackHeroHtml(b, jobs, lateIds) + playbackQueueHtml(b, jobs, lateIds);
 }
 

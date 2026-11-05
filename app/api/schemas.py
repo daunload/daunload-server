@@ -40,7 +40,7 @@ class TodoOut(Orm):
     course_name: str
     lms_item_id: int
     title: str
-    deadline: datetime
+    deadline: datetime | None
     due_at: datetime | None
     url: str | None
     module_id: int | None
@@ -97,7 +97,7 @@ class PlanItemOut(BaseModel):
     module_item_id: int
     title: str
     duration: float
-    deadline: datetime
+    deadline: datetime | None
     expected_start: datetime
     expected_end: datetime
     at_risk: bool
@@ -124,7 +124,7 @@ class JobOut(Orm):
     module_item_id: int
     title: str
     duration: float
-    deadline: datetime
+    deadline: datetime | None
     status: str
     attempts: int
     progress_seconds: float

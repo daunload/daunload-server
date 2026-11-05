@@ -68,7 +68,7 @@ class TodoRow(Base):
     kind: Mapped[str] = mapped_column(String(16))  # video / assignment / quiz
     lms_item_id: Mapped[int] = mapped_column(Integer)  # 영상은 module_item_id, 과제는 assignment_id
     title: Mapped[str] = mapped_column(String(500))
-    deadline: Mapped[datetime]
+    deadline: Mapped[datetime | None]  # 영상은 마감이 없을 수 있다
     due_at: Mapped[datetime | None]
     unlock_at: Mapped[datetime | None]
     url: Mapped[str | None] = mapped_column(Text)
@@ -171,7 +171,7 @@ class PlaybackJob(Base):
     module_item_id: Mapped[int] = mapped_column(Integer)
     title: Mapped[str] = mapped_column(String(500))
     duration: Mapped[float] = mapped_column(Float)
-    deadline: Mapped[datetime]
+    deadline: Mapped[datetime | None]  # 영상은 마감이 없을 수 있다
     video: Mapped[dict[str, Any]] = mapped_column(JSON)  # VideoTodo 직렬화
     # queued / playing / done / failed / skipped / locked / cancelled
     status: Mapped[str] = mapped_column(String(16), default="queued")

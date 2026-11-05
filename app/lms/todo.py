@@ -51,7 +51,7 @@ class VideoTodo:
     duration: float
     view_url: str
     due_at: datetime | None
-    deadline: datetime
+    deadline: datetime | None  # None이면 마감 없음
     unlock_at: datetime | None
 
     @property
@@ -92,8 +92,11 @@ def pending_videos(course: Course, modules: list[Module], now: datetime) -> list
             if data.use_attendance is False or item.completed is True:
                 continue
             deadline_raw = data.late_at if data.late_at and data.late_at.strip() else data.due_at
-            deadline = _parse_or_none(deadline_raw)
-            if deadline is None or deadline <= now:
+            try:
+                deadline = parse_dt(deadline_raw)
+            except ValueError:  # 값이 있는데 읽을 수 없으면 기간을 알 수 없으므로 넣지 않는다
+                continue
+            if deadline is not None and deadline <= now:
                 continue
             if not _is_unlocked(data.unlock_at, now):
                 continue
@@ -250,12 +253,12 @@ def collect_todos(
     now: datetime,
 ) -> list[Todo]:
     todos: list[Todo] = [*pending_videos(course, modules, now), *pending_assignments(course, groups, submissions, now)]
-    todos.sort(key=lambda t: t.deadline)
+    todos.sort(key=lambda t: (t.deadline is None, t.deadline or now))
     return todos
 
 
 def format_todo(todo: Todo) -> str:
-    deadline = todo.deadline.astimezone().strftime("%m/%d %H:%M")
+    deadline = todo.deadline.astimezone().strftime("%m/%d %H:%M") if todo.deadline else "마감 없음"
     if isinstance(todo, VideoTodo):
         minutes = int(todo.duration // 60)
         return f"[영상] {todo.module_title} / {todo.title} ({minutes}분) ~{deadline}"

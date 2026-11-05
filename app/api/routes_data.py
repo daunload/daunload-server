@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.api.deps import CurrentUser, Db
 from app.api.schemas import (
@@ -70,12 +70,14 @@ async def set_auto_play(course_id: int, body: AutoPlayIn, user: CurrentUser, db:
 async def list_todos(
     user: CurrentUser, db: Db, kind: Literal["video", "assignment", "quiz"] | None = None, course_id: int | None = None
 ):
-    stmt = select(TodoRow).where(TodoRow.user_id == user.id, TodoRow.active, TodoRow.deadline > utcnow())
+    stmt = select(TodoRow).where(
+        TodoRow.user_id == user.id, TodoRow.active, or_(TodoRow.deadline.is_(None), TodoRow.deadline > utcnow())
+    )
     if kind:
         stmt = stmt.where(TodoRow.kind == kind)
     if course_id:
         stmt = stmt.where(TodoRow.lms_course_id == course_id)
-    return (await db.scalars(stmt.order_by(TodoRow.deadline))).all()
+    return (await db.scalars(stmt.order_by(TodoRow.deadline.is_(None), TodoRow.deadline))).all()
 
 
 AssignmentFilter = Literal["unsubmitted", "open", "overdue", "upcoming", "locked", "no_due", "submitted", "all"]
