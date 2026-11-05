@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import JSON, BigInteger, Boolean, Float, ForeignKey, Integer, String, Text, UniqueConstraint, Index, text
@@ -33,9 +33,21 @@ class LmsCredential(Base):
     session_enc: Mapped[str | None] = mapped_column(Text)  # Fernet(JSON LmsSession) 캐시
     status: Mapped[str] = mapped_column(String(16), default="ok")  # ok / invalid / error
     last_error: Mapped[str | None] = mapped_column(Text)
+    last_error_at: Mapped[datetime | None]
     last_login_at: Mapped[datetime | None]
     last_synced_at: Mapped[datetime | None]
     next_sync_at: Mapped[datetime | None] = mapped_column(index=True)
+
+
+class UserDailyActivity(Base):
+    """사용자별 하루 로그인·다운로드 횟수(한국 시간 기준 날짜). 오래된 줄은 주기적으로 지운다."""
+
+    __tablename__ = "user_daily_activity"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    day: Mapped[date] = mapped_column(primary_key=True, index=True)
+    logins: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    downloads: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class CourseRow(Base):
@@ -228,6 +240,7 @@ class SavedVideo(Base):
     size: Mapped[int | None] = mapped_column(BigInteger)  # 2GB를 넘을 수 있다
     resolve_error: Mapped[str | None] = mapped_column(Text)  # 주소를 찾지 못한 이유(지원하지 않는 형식 등)
     resolved_at: Mapped[datetime | None]
+    resolve_failed_at: Mapped[datetime | None]  # 주소를 찾지 못한 시각
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 

@@ -49,6 +49,7 @@ async def save_course_videos(
             rows[v.module_item_id] = row
         elif row.content_id != v.content_id:  # 교수가 영상을 바꿨다
             row.content_id, row.media_url, row.resolve_error, row.resolved_at = v.content_id, None, None, None
+            row.resolve_failed_at = None
         row.course_name, row.module_title, row.title = v.course_name, v.module_title, v.title
         row.module_position, row.item_position = v.module_position, v.item_position
         row.file_name, row.duration, row.size = v.file_name, v.duration, v.size
@@ -59,8 +60,8 @@ async def save_course_videos(
         budget.left -= 1
         try:
             row.media_url = await resolve_media_url(http, row.content_id)
-            row.resolved_at = utcnow()
+            row.resolved_at, row.resolve_failed_at = utcnow(), None
         except MediaError as e:  # 지원하지 않는 형식: 다시 시도하지 않는다
-            row.resolve_error = str(e)
+            row.resolve_error, row.resolve_failed_at = str(e), utcnow()
         except httpx.HTTPError as e:  # 일시 오류: 다음 동기화에서 다시
             log.warning("영상 주소 저장 실패 %s/%s: %s", course.id, row.module_item_id, e)

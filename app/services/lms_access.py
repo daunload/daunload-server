@@ -33,7 +33,7 @@ async def save_credentials(db: AsyncSession, user_id: int, student_id: str, pass
     cred.password_enc = encrypt(password)
     cred.session_enc = encrypt(json.dumps(session.to_dict()))
     cred.status = "ok"
-    cred.last_error = None
+    cred.last_error, cred.last_error_at = None, None
     cred.last_login_at = utcnow()
     cred.next_sync_at = utcnow()
     await db.commit()
@@ -73,13 +73,14 @@ async def lms_client_for(db: AsyncSession, user_id: int) -> AsyncIterator[LmsCli
     if client.session is not before:
         cred.session_enc = encrypt(json.dumps(client.session.to_dict()))
         cred.last_login_at = utcnow()
-    cred.status, cred.last_error = "ok", None
+    cred.status, cred.last_error, cred.last_error_at = "ok", None, None
     await db.commit()
 
 
 async def _mark(db: AsyncSession, cred: LmsCredential, status: str, error: str) -> None:
     cred.status = status
     cred.last_error = error
+    cred.last_error_at = utcnow()
     if status == "invalid":
         cred.session_enc = None
     await db.commit()

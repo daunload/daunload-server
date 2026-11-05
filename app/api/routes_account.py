@@ -14,6 +14,7 @@ from app.db.base import utcnow
 from app.db.models import LmsCredential, User
 from app.lms.errors import InvalidCredentials, LmsError
 from app.security import create_access_token, hash_password, verify_password
+from app.services.activity import bump_daily
 from app.services.lms_access import save_credentials
 
 router = APIRouter()
@@ -143,6 +144,7 @@ async def _record_login(db: AsyncSession, user_id: int) -> None:
     await db.execute(update(User).where(User.id == user_id).values(
         last_login_at=utcnow(), login_count=User.login_count + 1,
     ))
+    await bump_daily(db, user_id, logins=1)
     await db.commit()
 
 

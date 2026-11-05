@@ -23,6 +23,7 @@ from app.db.base import init_engine, sessionmaker, utcnow
 from app.db.models import CourseRow, LmsCredential, PlaybackJob
 from app.lms.errors import InvalidCredentials, LmsError
 from app.services import playback
+from app.services.activity import prune_daily
 from app.services.notify import notify_announcements, notify_deadlines, notify_user
 from app.services.sync import sync_user
 
@@ -43,7 +44,7 @@ async def sync_user_job(ctx, user_id: int) -> str:
             log.warning("동기화 실패 user=%s: %s", user_id, e)
             cred = await db.get(LmsCredential, user_id)
             if cred:
-                cred.status, cred.last_error = "error", str(e)
+                cred.status, cred.last_error, cred.last_error_at = "error", str(e), utcnow()
                 cred.next_sync_at = utcnow() + timedelta(minutes=15)
                 await db.commit()
             return "error"
@@ -98,6 +99,11 @@ async def deadline_reminders(ctx) -> int:
         return sum([await notify_deadlines(db, uid) for uid in user_ids])
 
 
+async def prune_daily_activity(ctx) -> int:
+    async with sessionmaker()() as db:
+        return await prune_daily(db)
+
+
 async def startup(ctx) -> None:
     logging.basicConfig(level=logging.INFO)
     init_engine()
@@ -111,6 +117,7 @@ class WorkerSettings:
     cron_jobs = [
         cron(schedule_syncs, minute=set(range(0, 60, 5)), run_at_startup=True),
         cron(deadline_reminders, minute=set(range(2, 60, 10))),
+        cron(prune_daily_activity, hour=4, minute=10),
     ]
     on_startup = startup
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)

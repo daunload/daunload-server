@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import utcnow
 from app.db.models import DownloadRecord
+from app.services.activity import bump_daily
 
 
 def video_key(module_item_id: int) -> str:
@@ -24,6 +25,7 @@ async def record_download(db: AsyncSession, user_id: int, course_id: int, item_k
                               count=1, first_at=now, last_at=now))
     else:
         row.count, row.last_at, row.title = row.count + 1, now, title
+    await bump_daily(db, user_id, downloads=1)
     await db.commit()
 
 
