@@ -80,6 +80,8 @@ class LmsMock:
 
 @pytest.fixture
 async def env(tmp_path, monkeypatch):
+    # Legacy relay tests opt in; production defaults to direct extension downloads.
+    monkeypatch.setenv("ALLOW_VIDEO_RELAY", "true")
     monkeypatch.setenv("FERNET_KEY", Fernet.generate_key().decode())
     monkeypatch.setenv("JWT_SECRET", "test-secret-test-secret-test-secret!")
     monkeypatch.setenv("VERIFY_INTERVAL_SECONDS", "0")

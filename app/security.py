@@ -38,10 +38,10 @@ def decode_access_token(token: str) -> tuple[int, int] | None:
 DOWNLOAD_LINK_MINUTES = 10
 
 
-def create_download_token(user_id: int, data: dict) -> str:
+def create_download_token(user_id: int, data: dict, *, minutes: int = DOWNLOAD_LINK_MINUTES) -> str:
     """브라우저가 헤더 없이 여는 다운로드 주소용 짧은 서명 토큰. 확인을 마친 항목 정보만 담는다."""
     payload = {"sub": str(user_id), "purpose": "download", "data": data,
-               "exp": utcnow() + timedelta(minutes=DOWNLOAD_LINK_MINUTES)}
+               "exp": utcnow() + timedelta(minutes=minutes)}
     return jwt.encode(payload, get_settings().jwt_secret, algorithm="HS256")
 
 

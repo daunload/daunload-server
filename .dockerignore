@@ -12,3 +12,5 @@ tests/fixtures/player/*.webm
 backups/
 **/.release.env*
 **/.deploy.lock
+
+dist/

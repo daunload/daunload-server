@@ -97,8 +97,9 @@ API 서버 주소(`http://localhost:8000/`)로 접속하면 대시보드가 열�
 - 할 일(종류 필터), 과목(주차별 출석표, 자동 수강 켜기), 공지(과목 필터, 본문은 텍스트로만 표시),
   영상 재생(범위 선택 → 미리보기 → 시작, 진행률 5초마다 갱신, 중지), 알림 채널, LMS 계정 등록.
 - **강의 영상·수업자료**: 영상 탭과 수업자료 탭(commons 파일 + 위키 페이지 첨부)을 주차별로 보여준다. 받은 항목에는 "✓ 받음"이 붙고 "안 받은 것만"으로 거를 수 있다.
-  기록은 서버가 다운로드 링크를 발급할 때 남기므로, 브라우저에서 저장을 취소해도 받은 것으로 표시된다.
-  "전체 받기"는 고른 폴더에 2개씩 바로 저장한다(데스크톱 Chrome·Edge 전용, File System Access API).
+  영상은 **크롬 확장프로그램으로 학교 CDN에서 PC에 직접 저장**하며 서버가 중계하지 않는다. 확장 설치와 배포는 [설치 가이드](docs/chrome-download-extension.md)를 따른다.
+  영상은 확장프로그램의 저장 완료를 확인한 뒤 받은 것으로 기록한다. 전체 받기는 2개씩 처리하며 대시보드와 다운로드 창을 열어 두어야 한다.
+  수업자료는 기존 서버 중계와 링크 발급 기준 이력을 유지하고, 전체 받기는 고른 폴더에 저장한다(데스크톱 Chrome·Edge의 File System Access API).
 - **강의 전사(Whisper)**: 전사는 서버가 아니라 **사용자 브라우저**에서 한다. 서버는 ffmpeg로 오디오만 16kHz PCM으로 바꿔 스트리밍하고(저장하지 않음), 결과 텍스트만 보관한다.
   처음 한 번 Whisper small 모델(수백 MB)을 내려받아 브라우저에 캐시한다. WebGPU가 있으면 GPU로, 없으면 CPU로 돌며 CPU는 강의 길이보다 오래 걸릴 수 있다.
   전사하는 동안 탭을 열어 두어야 하고, 한 번에 하나씩 처리한다. 결과는 다른 기기에서도 보고 .txt로 받을 수 있다.
@@ -134,7 +135,7 @@ API 서버 주소(`http://localhost:8000/`)로 접속하면 대시보드가 열�
 | `GET /playback/batches/preview?scope=module\|course\|all\|week&course_id=&module_id=` | 묶일 영상, 순서, 예상 시각, 마감 경고 |
 | `POST /playback/batches` · `POST /playback/items/{module_item_id}` | 일괄 / 단일 재생 시작 (사용자당 동시에 1개) |
 | `GET /playback/batches/{id}` · `DELETE /playback/batches/{id}` | 진행 상황 / 취소(재생 중 영상도 중단) |
-| `GET /courses/{id}/videos` · `POST /courses/{id}/videos/{module_item_id}/download-link` · `GET /downloads/{token}` | 강의 영상 목록(실시간) / 본인 과목·확인된 영상만 10분 링크 발급 / 서버 저장 없이 학교 CDN에서 중계(Range 이어받기, 사용자당 동시 2개) |
+| `GET /courses/{id}/videos` · `POST /courses/{id}/videos/{module_item_id}/direct-download` · `POST /saved-videos/{id}/direct-download` · `POST /downloads/complete` | 영상 목록 / 본인 영상의 CDN 주소 발급 / 확장프로그램으로 PC 직접 다운로드 / 완료 보고. 기존 영상 중계는 기본 차단(`ALLOW_VIDEO_RELAY=false`) |
 | `POST /notifications/channels` `{kind: discord\|telegram, ...}` · `POST .../{id}/test` | 알림 채널 |
 | `GET /courses/{id}/materials` · `POST /courses/{id}/materials/{key}/download-link` | 수업자료 목록(commons 파일 + 위키 첨부) / 10분 링크 발급(같은 `/downloads/{token}`으로 중계) |
 | `POST /courses/{id}/videos/{item}/audio-link` · `POST /saved-videos/{id}/audio-link` · `GET /audio/{token}` | 전사용 16kHz 모노 PCM 스트림(ffmpeg, 서버 전체 `MAX_AUDIO_STREAMS`개) |
@@ -162,7 +163,7 @@ uv run pytest -m "not browser"
 - 선수 조건 잠김은 API로 알 수 없어 "같은 과목에서 실패 후 다음 항목의 영상을 찾지 못함"으로 판단한다.
 - 로그인은 HTML 문자열(`iframe.src`, `loginCryption`) 파싱에 의존한다. 바뀌면 `LmsParseError`가 난다.
 - 위키 첨부는 Canvas가 주는 서명된 파일 주소로 받는다. 그 주소가 허용 호스트(`ALLOWED_FILE_HOSTS`) 밖이면 받지 않는다(실계정으로 확인한 호스트만 추가).
-- 다운로드 이력은 링크 발급 기준이다. 실제 저장 완료 여부는 알 수 없다.
+- 영상 다운로드 이력은 클라이언트의 완료 보고 기준이며 탭을 닫으면 누락될 수 있다. 수업자료와 과거 영상 이력은 링크 발급 기준이다.
 - 전사는 브라우저 성능에 달려 있다. 탭을 닫으면 진행 중인 전사는 사라지고, 부분 결과는 저장하지 않는다.
 
 ### 재생 대기열 검증
