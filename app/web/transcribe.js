@@ -7,13 +7,14 @@
 const WHISPER_RATE = 16000;
 const READ_AHEAD_SECONDS = 60;  // Worker보다 이만큼만 앞서 받는다(메모리 일정)
 const MIN_AUDIO_RATIO = 0.97;   // LMS의 영상 길이와 실제 오디오 길이의 오차 허용
+const ASSET_QUERY = document.currentScript?.src ? new URL(document.currentScript.src).search : "";  // 서버가 붙인 버전을 워커 주소에도 쓴다
 const tx = { worker: null, device: null, modelPercent: null, queue: [], current: null, finished: [], nextId: 1, epoch: 0 };
 
 function txKey(courseId, moduleItemId) { return `${courseId}:${moduleItemId}`; }
 
 function ensureWorker() {
   if (tx.worker) return tx.worker;
-  const w = new Worker("/whisper.worker.js", { type: "module" });
+  const w = new Worker(`/whisper.worker.js${ASSET_QUERY}`, { type: "module" });
   w.addEventListener("message", onWorkerMessage);
   w.addEventListener("error", (e) => failAll(`Whisper를 불러오지 못했습니다: ${e.message || "네트워크를 확인하세요"}`));
   tx.worker = w;

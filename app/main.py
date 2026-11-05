@@ -1,7 +1,10 @@
+import hashlib
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import MutableHeaders
 
@@ -84,6 +87,24 @@ class SecurityHeaders:
         await self.app(scope, receive, send_with_headers)
 
 
+WEB_DIR = Path(__file__).parent / "web"
+LOCAL_ASSET = re.compile(r'((?:src|href)="/[\w.-]+\.(?:js|css))"')
+
+
+def asset_version(web_dir: Path = WEB_DIR) -> str:
+    """JS·CSS 내용으로 만든 버전. 파일 하나만 바뀌어도 전부 새로 받아 예전 파일과 섞이지 않는다."""
+    digest = hashlib.sha256()
+    for path in sorted((*web_dir.glob("*.js"), *web_dir.glob("*.css"))):
+        digest.update(path.name.encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
+
+
+def versioned_index(web_dir: Path = WEB_DIR) -> str:
+    html = (web_dir / "index.html").read_text(encoding="utf-8")
+    return LOCAL_ASSET.sub(rf'\1?v={asset_version(web_dir)}"', html)
+
+
 def create_app(lifespan_=lifespan) -> FastAPI:
     docs = get_settings().api_docs
     app = FastAPI(title="SSU LMS 서버", version="0.1.0", lifespan=lifespan_,
@@ -102,8 +123,16 @@ def create_app(lifespan_=lifespan) -> FastAPI:
     async def health():
         return {"ok": True}
 
+    # HTML은 항상 서버에 확인해 새 버전 주소를 받게 한다. 파일은 배포 때 이미지와 함께 고정되므로 시작할 때 한 번만 읽는다.
+    index_html = versioned_index()
+
+    @app.get("/", include_in_schema=False)
+    @app.get("/index.html", include_in_schema=False)
+    async def dashboard():
+        return HTMLResponse(index_html, headers={"Cache-Control": "no-cache"})
+
     # 대시보드(정적 파일). API 라우트가 먼저 등록되어 있으므로 우선권은 API에 있다.
-    app.mount("/", StaticFiles(directory=Path(__file__).parent / "web", html=True), name="web")
+    app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
     return app
 
 
