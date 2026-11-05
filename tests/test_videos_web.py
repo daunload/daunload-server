@@ -30,7 +30,7 @@ async def test_video_tab_badges_filter_and_materials_tab(dashboard):
     await expect(rows).to_have_count(2)
     await expect(rows.nth(0).get_by_text("✓ 받음")).to_be_visible()
     await expect(rows.nth(1).get_by_text("✓ 받음")).to_have_count(0)
-    await expect(page.get_by_role("button", name="전체 받기 (2)")).to_be_visible()
+    await expect(page.get_by_role("button", name="1주차 2개 내려받기")).to_be_visible()
 
     await page.get_by_label("안 받은 것만").check()
     await expect(rows).to_have_count(1)
@@ -72,7 +72,7 @@ window.showDirectoryPicker = async () => ({
 
 
 async def test_bulk_download_waits_out_busy_server(dashboard):
-    """전사가 사용자 자리 하나를 쓰고 있어도 여러 개 받기는 자리가 날 때까지 기다렸다 받는다."""
+    """텍스트 변환이 사용자 자리 하나를 쓰고 있어도 여러 개 받기는 자리가 날 때까지 기다렸다 받는다."""
     page, data = dashboard
     await page.add_init_script(FAKE_FOLDER)
     await page.clock.install()
@@ -97,7 +97,7 @@ async def test_bulk_download_waits_out_busy_server(dashboard):
     await page.route("**/downloads/tok", download)
     await page.goto("http://dashboard.test/#videos")
     await page.get_by_role("tab", name="수업자료").click()
-    await page.get_by_role("button", name="전체 받기 (1)").click()
+    await page.get_by_role("button", name="1주차 1개 내려받기").click()
     status = page.locator("#bulk-status")
     for _ in range(20):
         if "다 받았습니다" in (await status.text_content() or ""):
@@ -168,7 +168,7 @@ async def test_bulk_stops_on_closed_manager_and_can_restart(dashboard):
         data[f'/courses/1/videos/{mid}/direct-download'] = {
             'url': f'https://ssuin-object.commonscdn.com/{mid}.mp4', 'file_name': f'{mid}.mp4', 'receipt': 'receipt'}
     await page.goto('http://dashboard.test/#videos')
-    await page.get_by_role('button', name='전체 받기 (4)').click()
+    await page.get_by_role('button', name='1주차 4개 내려받기').click()
     await page.wait_for_function("window.__extensionCalls.filter(x => x === 'start').length === 4")
     # All four videos must be registered before any download has completed.
     await expect(page.locator('#bulk-status')).to_contain_text('여러 개 받는 중: 0/4')
@@ -187,7 +187,7 @@ async def test_bulk_stops_on_closed_manager_and_can_restart(dashboard):
       window.__extensionCode = undefined;
       window.__extensionCalls = [];
     }""")
-    await page.get_by_role('button', name='전체 받기 (4)').click()
+    await page.get_by_role('button', name='1주차 4개 내려받기').click()
     await expect(page.locator('#bulk-status')).to_contain_text('다 받았습니다: 4/4 완료')
     assert await page.evaluate("window.__extensionCalls.filter(x => x === 'prepare').length") == 1
     assert await page.evaluate("window.__extensionCalls.filter(x => x === 'start').length") == 4

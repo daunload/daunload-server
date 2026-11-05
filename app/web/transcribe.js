@@ -1,7 +1,7 @@
 "use strict";
 
-/* ---------------- 브라우저 Whisper 전사 ----------------
- * 서버의 16kHz PCM 스트림을 Worker로 넘겨 전사하고, 끝나면 결과를 서버에 저장한다.
+/* ---------------- 브라우저 Whisper 텍스트 변환 ----------------
+ * 서버의 16kHz PCM 스트림을 Worker로 넘겨 텍스트로 변환하고, 끝나면 결과를 서버에 저장한다.
  * 한 번에 하나씩 처리한다. 탭을 닫으면 진행 중인 작업은 사라진다. */
 
 const WHISPER_RATE = 16000;
@@ -26,7 +26,7 @@ function onWorkerMessage({ data: m }) {
     tx.device = m.device;
     tx.modelPercent = null;
     if (m.device === "wasm" && !store.get("whisper-cpu-notice")) {
-      toast("이 브라우저는 WebGPU를 지원하지 않아 CPU로 전사합니다. 강의 길이보다 오래 걸릴 수 있습니다.");
+      toast("이 브라우저는 WebGPU를 지원하지 않아 CPU로 텍스트 변환합니다. 강의 길이보다 오래 걸릴 수 있습니다.");
       store.set("whisper-cpu-notice", "1");
     }
     renderTxPanel();
@@ -153,7 +153,7 @@ function onTranscriptSaved(job, id) {
     if (row) row.transcript_id = id;
   }
   if (state.view === "videos" && state.videoTab === "videos" && state.videoList?.courseId === job.courseId) renderVideoList();
-  if (id) toast(`「${job.title}」 전사를 마쳤습니다.`);  // id가 null이면 삭제
+  if (id) toast(`「${job.title}」 텍스트 변환을 마쳤습니다.`);  // id가 null이면 삭제
 }
 
 /* ---------- 목록에 붙는 버튼 (app.js의 renderVideoList가 호출) ---------- */
@@ -167,17 +167,17 @@ function txStatusOf(courseId, moduleItemId) {
 
 function transcribeButton(v, courseId) {
   const parts = [];
-  if (v.transcript_id) parts.push(`<button class="btn small" data-tx-open="${v.transcript_id}"><span class="badge transcribed">전사됨</span> 보기</button>`);
+  if (v.transcript_id) parts.push(`<button class="btn small" data-tx-open="${v.transcript_id}">텍스트 보기</button>`);
   if (!v.audioPath) return parts.join("");
   const st = txStatusOf(courseId, v.module_item_id);
-  const label = st === "running" ? "전사 중" : st === "queued" ? "대기 중" : v.transcript_id ? "다시 전사" : "전사";
+  const label = st === "running" ? "변환 중" : st === "queued" ? "대기 중" : v.transcript_id ? "다시 변환" : "텍스트로 변환";
   parts.push(`<button class="btn small" data-tx="${v.module_item_id}" ${st ? "disabled" : ""}>${label}</button>`);
   return parts.join("");
 }
 
-function transcribeGroupButton(items) {
+function transcribeGroupButton(items, title) {
   const n = items.filter((v) => v.audioPath && !v.transcript_id).length;
-  return n ? `<button class="btn small" data-tx-group="${esc(items[0].module_id)}">전체 전사 (${n})</button>` : "";
+  return n ? `<button class="btn small" data-tx-group="${esc(items[0].module_id)}">${esc(title)} ${n}개 텍스트로 변환</button>` : "";
 }
 
 function wireTranscribe(box, items, courseId) {
@@ -206,7 +206,7 @@ function renderTxPanel() {
   const pct = job?.duration ? Math.min(100, Math.round((job.seconds / job.duration) * 100)) : null;
   const model = tx.modelPercent !== null && tx.modelPercent !== undefined ? `<p class="meta">Whisper 모델 받는 중 ${tx.modelPercent}% (처음 한 번만)</p>` : "";
   panel.innerHTML = `
-    <strong>강의 전사</strong>
+    <strong>텍스트 변환</strong>
     ${job ? `<p class="title">${esc(job.title)}</p>
       <progress max="100" ${pct === null ? "" : `value="${pct}"`}></progress>
       <p class="meta">${pct === null ? fmtDuration(job.seconds || 0) + " 처리" : `${pct}%`}${tx.device ? ` · ${tx.device === "webgpu" ? "GPU" : "CPU"}` : ""}</p>
@@ -227,7 +227,7 @@ window.addEventListener("beforeunload", (e) => {
   if (tx.current || tx.queue.length) { e.preventDefault(); e.returnValue = ""; }
 });
 
-/* ---------- 전사 결과 대화상자 ---------- */
+/* ---------- 텍스트 변환 결과 대화상자 ---------- */
 
 function fmtStamp(sec) {
   const s = Math.floor(sec);

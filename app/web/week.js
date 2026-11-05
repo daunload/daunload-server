@@ -2,7 +2,7 @@
 
 /* ---------------- 첫 화면: 이번 주 할 일 ----------------
  * 이번 주(월~일, 한국 시간)에 남은 강의와 과제만 짧게 보여 주고, 버튼 하나로 끝낸다.
- *  - 강의가 있으면: "강의 N개 한 번에 듣기" → 확인 → 순서대로 재생하고 학습 완료까지 확인
+ *  - 강의가 있으면: "이번 주 강의 N개 재생" → 확인 → 순서대로 재생하고 학습 완료까지 확인
  *  - 과제만 남았으면: 마감이 가장 빠른 과제의 제출 화면을 연다(과제는 직접 제출해야 한다)
  * app.js의 전역(state, api, esc, fmtTime, fmtDuration, dayName, WEEKDAY, toast, startPolling, navigate)을 쓴다.
  */
@@ -86,7 +86,7 @@ function taskRow(t) {
       skipped: '<span class="task-state done">완료</span>', failed: '<span class="task-state bad">실패</span>',
       locked: '<span class="task-state bad">잠김</span>', queued: '<span class="task-state">대기</span>' }[job.status] || "";
   } else if (t.kind !== "video" && safeUrl(t.url) && !t.upcoming) {
-    side = `<a class="btn small" href="${esc(safeUrl(t.url))}" target="_blank" rel="noopener" aria-label="${esc(t.title)} 제출하기 (새 탭)">제출하기</a>`;
+    side = `<a class="btn small" href="${esc(safeUrl(t.url))}" target="_blank" rel="noopener" aria-label="${esc(t.title)} LMS에서 제출 (새 탭)">LMS에서 제출 ${icon("external")}</a>`;
   }
   const sub = t.upcoming ? `${label} · ${whenText(t.upcoming)}에 열려요` : `${label} · ${esc(t.course)}`;
   return `<li class="task"><div class="task-main"><p class="task-title">${esc(t.title)}</p>
@@ -118,12 +118,12 @@ function ctaHtml(d) {
   }
   if (d.videos.length) {
     const hasAssignments = d.assignments.length > 0;
-    return `<button class="btn primary block" id="week-play">강의 ${d.videos.length}개 한 번에 듣기</button>
+    return `<button class="btn primary block" id="week-play">이번 주 강의 ${d.videos.length}개 재생</button>
       <p class="cta-note">${fmtDuration(d.video_seconds)} 분량${hasAssignments ? " · 과제·퀴즈는 직접 제출해야 해요" : ""}</p>`;
   }
   const next = d.assignments.find((x) => safeUrl(x.url) && x.status !== "upcoming");
   if (next) {
-    return `<a class="btn primary block" href="${esc(safeUrl(next.url))}" target="_blank" rel="noopener">${esc(next.title)} 제출하러 가기</a>
+    return `<a class="btn primary block" href="${esc(safeUrl(next.url))}" target="_blank" rel="noopener">${esc(next.title)} LMS에서 제출 ${icon("external")}</a>
       <p class="cta-note">학교 LMS에서 제출하면 다음 동기화 때 목록에서 빠져요</p>`;
   }
   return "";

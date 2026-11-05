@@ -43,7 +43,7 @@ CX23의 서버 생성·HTTPS·환경변수·백업·업데이트·복구는
 cp .env.example .env    # FERNET_KEY, JWT_SECRET 채우기
 uv sync
 uv run playwright install chrome   # Chrome이 이미 설치돼 있으면 생략 가능
-brew install ffmpeg                # 호스트에서 API를 띄울 때(전사용 오디오 변환). Docker 이미지에는 들어 있다
+brew install ffmpeg                # 호스트에서 API를 띄울 때(텍스트 변환용 오디오 변환). Docker 이미지에는 들어 있다
 ```
 
 **Docker (API·Postgres·Redis·동기화 워커)**
@@ -92,17 +92,17 @@ API 서버 주소(`http://localhost:8000/`)로 접속하면 대시보드가 열�
 - **학습 요약**: 24시간 내 마감, 남은 할 일, 미수강 영상, 수강 과목을 카드로 확인한다.
 - **할 일 탐색**: 종류·24시간 내 마감 필터와 제목·과목명 검색. 요약 카드를 누르면 해당 필터로 바로 이동한다. 모바일에서는 **전체 메뉴**를 펼쳐 화면을 선택한다. 화면 주소(`#todos`, `#courses` 등)와 브라우저 뒤로 가기를 지원한다.
 - **반응형 화면**: 할 일을 일정표보다 먼저 보여주고, 과목·설정에서는 요약을 숨긴다. 모바일 일정은 접힌 상태로 시작하며, 펼치면 긴 제목까지 읽을 수 있는 날짜별 목록으로 표시한다.
-- **앞으로 7일 레일**: 날짜별 마감(영상·과제·퀴즈). 재생 중이거나 미리보기한 재생 계획이 있으면 예상 구간을 띠로 겹쳐 그리고,
+- **앞으로 7일 레일**: 날짜별 마감(영상·과제·퀴즈). 재생 중이거나 재생 계획을 본 상태면 있으면 예상 구간을 띠로 겹쳐 그리고,
   마감 전에 끝나지 않을 영상은 빨간 테두리로 표시한다.
 - 할 일(종류 필터), 과목(주차별 출석표, 자동 수강 켜기), 공지(과목 필터, 본문은 텍스트로만 표시),
-  영상 재생(범위 선택 → 미리보기 → 시작, 진행률 5초마다 갱신, 중지), 알림 채널, LMS 계정 등록.
-- **강의 영상·수업자료**: 영상 탭과 수업자료 탭(commons 파일 + 위키 페이지 첨부)을 주차별로 보여준다. 받은 항목에는 "✓ 받음"이 붙고 "안 받은 것만"으로 거를 수 있다.
+  강의 재생(범위 선택 → 재생 계획 보기 → 재생 시작, 진행률 5초마다 갱신, 중지), 알림 채널, LMS 계정 등록.
+- **내려받기·텍스트 변환(강의 영상·수업자료)**: 영상 탭과 수업자료 탭(commons 파일 + 위키 페이지 첨부)을 주차별로 보여준다. 받은 항목에는 "✓ 받음"이 붙고 "안 받은 것만"으로 거를 수 있다.
   영상은 **크롬 확장프로그램으로 학교 CDN에서 PC에 직접 저장**하며 서버가 중계하지 않는다. 확장 설치와 배포는 [설치 가이드](docs/chrome-download-extension.md)를 따른다.
-  영상은 확장프로그램의 저장 완료를 확인한 뒤 받은 것으로 기록한다. 전체 받기는 2개씩 처리하며 대시보드와 다운로드 창을 열어 두어야 한다.
-  수업자료는 기존 서버 중계와 링크 발급 기준 이력을 유지하고, 전체 받기는 고른 폴더에 저장한다(데스크톱 Chrome·Edge의 File System Access API).
-- **강의 전사(Whisper)**: 전사는 서버가 아니라 **사용자 브라우저**에서 한다. 서버는 ffmpeg로 오디오만 16kHz PCM으로 바꿔 스트리밍하고(저장하지 않음), 결과 텍스트만 보관한다.
+  영상은 확장프로그램의 저장 완료를 확인한 뒤 받은 것으로 기록한다. `{주차} N개 내려받기`는 2개씩 처리하며 대시보드와 다운로드 창을 열어 두어야 한다.
+  수업자료는 기존 서버 중계와 링크 발급 기준 이력을 유지하고, `{주차} N개 내려받기`는 고른 폴더에 저장한다(데스크톱 Chrome·Edge의 File System Access API).
+- **강의 텍스트 변환(Whisper)**: 텍스트 변환은 서버가 아니라 **사용자 브라우저**에서 한다. 서버는 ffmpeg로 오디오만 16kHz PCM으로 바꿔 스트리밍하고(저장하지 않음), 결과 텍스트만 보관한다.
   처음 한 번 Whisper small 모델(수백 MB)을 내려받아 브라우저에 캐시한다. WebGPU가 있으면 GPU로, 없으면 CPU로 돌며 CPU는 강의 길이보다 오래 걸릴 수 있다.
-  전사하는 동안 탭을 열어 두어야 하고, 한 번에 하나씩 처리한다. 결과는 다른 기기에서도 보고 .txt로 받을 수 있다.
+  변환하는 동안 탭을 열어 두어야 하고, 한 번에 하나씩 처리한다. 결과는 다른 기기에서도 보고 .txt로 받을 수 있다.
 
 ## 실계정 확인 (개발용 CLI, `.env`의 `LMS_ID`/`LMS_PASSWORD` 사용)
 
@@ -138,8 +138,8 @@ API 서버 주소(`http://localhost:8000/`)로 접속하면 대시보드가 열�
 | `GET /courses/{id}/videos` · `POST /courses/{id}/videos/{module_item_id}/direct-download` · `POST /saved-videos/{id}/direct-download` · `POST /downloads/complete` | 영상 목록 / 본인 영상의 CDN 주소 발급 / 확장프로그램으로 PC 직접 다운로드 / 완료 보고. 기존 영상 중계는 기본 차단(`ALLOW_VIDEO_RELAY=false`) |
 | `POST /notifications/channels` `{kind: discord\|telegram, ...}` · `POST .../{id}/test` | 알림 채널 |
 | `GET /courses/{id}/materials` · `POST /courses/{id}/materials/{key}/download-link` | 수업자료 목록(commons 파일 + 위키 첨부) / 10분 링크 발급(같은 `/downloads/{token}`으로 중계) |
-| `POST /courses/{id}/videos/{item}/audio-link` · `POST /saved-videos/{id}/audio-link` · `GET /audio/{token}` | 전사용 16kHz 모노 PCM 스트림(ffmpeg, 서버 전체 `MAX_AUDIO_STREAMS`개) |
-| `PUT /courses/{id}/videos/{item}/transcript` · `GET /transcripts` · `GET/DELETE /transcripts/{id}` | 브라우저 전사 결과 저장(최대 2MB, 다시 하면 덮어씀)·조회·삭제 |
+| `POST /courses/{id}/videos/{item}/audio-link` · `POST /saved-videos/{id}/audio-link` · `GET /audio/{token}` | 텍스트 변환용 16kHz 모노 PCM 스트림(ffmpeg, 서버 전체 `MAX_AUDIO_STREAMS`개) |
+| `PUT /courses/{id}/videos/{item}/transcript` · `GET /transcripts` · `GET/DELETE /transcripts/{id}` | 브라우저 텍스트 변환 결과 저장(최대 2MB, 다시 하면 덮어씀)·조회·삭제 |
 
 알림: 새 공지, 마감 24시간·3시간 전, 일괄 재생 결과, LMS 로그인 실패. 첫 동기화 때 기존 공지는 알리지 않는다.
 
@@ -164,7 +164,7 @@ uv run pytest -m "not browser"
 - 로그인은 HTML 문자열(`iframe.src`, `loginCryption`) 파싱에 의존한다. 바뀌면 `LmsParseError`가 난다.
 - 위키 첨부는 Canvas가 주는 서명된 파일 주소로 받는다. 그 주소가 허용 호스트(`ALLOWED_FILE_HOSTS`) 밖이면 받지 않는다(실계정으로 확인한 호스트만 추가).
 - 영상 다운로드 이력은 클라이언트의 완료 보고 기준이며 탭을 닫으면 누락될 수 있다. 수업자료와 과거 영상 이력은 링크 발급 기준이다.
-- 전사는 브라우저 성능에 달려 있다. 탭을 닫으면 진행 중인 전사는 사라지고, 부분 결과는 저장하지 않는다.
+- 텍스트 변환은 브라우저 성능에 달려 있다. 탭을 닫으면 진행 중인 변환은 사라지고, 부분 결과는 저장하지 않는다.
 
 ### 재생 대기열 검증
 
@@ -187,7 +187,7 @@ uv run pytest tests/test_queue_postgres.py -q
 ### 대시보드 일괄 재생
 
 대시보드의 **재생 가능한 강의**는 현재 열려 있고 마감 전인 전체 미수강 영상 목록이다.
-**모두 재생**을 한 번 누르면 로그인한 사용자의 영상이 기존 재생 큐에 등록된다.
+**전체 강의 N개 재생**을 한 번 누르면 로그인한 사용자의 영상이 기존 재생 큐에 등록된다.
 재생 진행 상황은 대시보드에 표시되고, **재생 현황 보기**에서 상세 상태와 중지를 확인한다.
 목록은 마지막 동기화 기준이며 워커가 재생 직전에 LMS 상태를 다시 확인한다.
 완료가 확인된 영상은 미수강 목록에서 제외한다.

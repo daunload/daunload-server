@@ -1,4 +1,4 @@
-"""브라우저 전사 흐름. 실제 Whisper 대신 가짜 Worker로 PCM 스트림 → Worker → 서버 저장 경로를 확인한다."""
+"""브라우저 텍스트 변환 흐름. 실제 Whisper 대신 가짜 Worker로 PCM 스트림 → Worker → 서버 저장 경로를 확인한다."""
 
 import json
 
@@ -56,8 +56,8 @@ async def test_transcribe_streams_pcm_to_worker_and_saves(dashboard):
     await page.route("**/audio/tok", audio)
     await page.route("**/courses/1/videos/12/transcript", transcript)
     await page.goto("http://dashboard.test/#videos")
-    await page.get_by_role("button", name="전사", exact=True).click()
-    await expect(page.locator("#video-list").get_by_text("전사됨")).to_be_visible()
+    await page.get_by_role("button", name="텍스트로 변환", exact=True).click()
+    await expect(page.locator("#video-list").get_by_role("button", name="텍스트 보기")).to_be_visible()
     assert await page.evaluate("window.__samples") == 32001  # 홀수 바이트 경계 없이 모든 샘플 전달
     body = saved[0]
     assert body["text"] == "안녕하세요\n강의를 시작합니다"
@@ -74,14 +74,14 @@ async def test_transcript_dialog_toggle_and_delete(dashboard):
                               "text": "안녕하세요\n끝", "segments": [{"start": 0, "end": 1, "text": "안녕하세요"},
                                                                   {"start": 65, "end": 70, "text": "끝"}]}
     await page.goto("http://dashboard.test/#videos")
-    await page.get_by_role("button", name="전사됨 보기").click()
+    await page.get_by_role("button", name="텍스트 보기").click()
     text = page.locator("#tx-text")
     await expect(text).to_have_text("안녕하세요\n끝")
     await page.get_by_label("시간 표시").check()
     await expect(text).to_have_text("[00:00] 안녕하세요\n[01:05] 끝")
     await page.get_by_role("button", name="삭제").click()
     await expect(page.locator("#transcript-dialog")).not_to_be_visible()
-    await expect(page.get_by_role("button", name="전사됨 보기")).to_have_count(0)
+    await expect(page.get_by_role("button", name="텍스트 보기")).to_have_count(0)
 
 
 FAILING_WORKER = """
@@ -114,7 +114,7 @@ async def _start_one(page, data, worker, audio_seconds, duration):
     await page.route("**/audio/tok", audio)
     await page.route("**/courses/1/videos/12/transcript", transcript)
     await page.goto("http://dashboard.test/#videos")
-    await page.get_by_role("button", name="전사", exact=True).click()
+    await page.get_by_role("button", name="텍스트로 변환", exact=True).click()
     return saved
 
 

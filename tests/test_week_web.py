@@ -1,6 +1,7 @@
 """첫 화면 '이번 주 할 일': 최소한의 정보와 버튼 하나 (가짜 API, 실제 Chrome)."""
 
 import json
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
@@ -98,7 +99,7 @@ async def test_first_screen_shows_only_this_week(page, tmp_path):
     rows = page.locator(".task")
     await expect(rows).to_have_count(3)
     await expect(rows.first).to_contain_text("아두이노 소개")  # 마감순
-    await expect(page.get_by_role("link", name="6주차 퀴즈 제출하기 (새 탭)")).to_have_attribute("href", LMS)
+    await expect(page.get_by_role("link", name="6주차 퀴즈 LMS에서 제출 (새 탭)")).to_have_attribute("href", LMS)
     # 첫 화면에는 요약 카드·검색·7일 일정표가 없다
     await expect(page.locator(".overview")).to_be_hidden()
     await expect(page.locator(".rail-wrap")).to_be_hidden()
@@ -112,7 +113,7 @@ async def test_first_screen_shows_only_this_week(page, tmp_path):
 
 async def test_one_button_plays_this_weeks_lectures(page, tmp_path):
     await page.goto("http://dashboard.test/")
-    await page.get_by_role("button", name="강의 2개 한 번에 듣기").click()
+    await page.get_by_role("button", name="이번 주 강의 2개 재생").click()
     await expect(page.locator(".cta-confirm")).to_contain_text("강의 2개를 순서대로 끝까지 들을게요")
     await expect(page.locator(".cta-confirm")).to_contain_text("학칙")
     await page.screenshot(path=tmp_path / "confirm.png", full_page=True)
@@ -129,9 +130,9 @@ async def test_one_button_plays_this_weeks_lectures(page, tmp_path):
 
 async def test_cancel_confirmation_starts_nothing(page):
     await page.goto("http://dashboard.test/")
-    await page.get_by_role("button", name="강의 2개 한 번에 듣기").click()
+    await page.get_by_role("button", name="이번 주 강의 2개 재생").click()
     await page.get_by_role("button", name="취소").click()
-    await expect(page.get_by_role("button", name="강의 2개 한 번에 듣기")).to_be_visible()
+    await expect(page.get_by_role("button", name="이번 주 강의 2개 재생")).to_be_visible()
     assert page.calls == []
 
 
@@ -140,7 +141,7 @@ async def test_only_assignments_left_button_opens_submission(page):
     page.data["/week"]["video_seconds"] = 0
     await page.goto("http://dashboard.test/")
     await expect(page.get_by_role("heading", name="이번 주 할 일이 1개 남았어요")).to_be_visible()
-    await expect(page.get_by_role("link", name="6주차 퀴즈 제출하러 가기")).to_have_attribute("href", LMS)
+    await expect(page.get_by_role("link", name="6주차 퀴즈 LMS에서 제출", exact=True)).to_have_attribute("href", LMS)
 
 
 async def test_all_done(page):
@@ -167,7 +168,7 @@ async def test_dashboard_all_playable_lectures_start_with_one_click(page, tmp_pa
         await page.set_viewport_size({"width": width, "height": 844})
         assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     await page.screenshot(path=tmp_path / "playable-mobile.png", full_page=True)
-    await panel.get_by_role("button", name="모두 재생 (2개)", exact=True).click()
+    await panel.get_by_role("button", name="전체 강의 2개 재생", exact=True).click()
     await expect(panel.get_by_role("status")).to_contain_text("0/2개 완료")
     assert page.calls == [("POST", "/playback/batches", {"scope": "all"})]
     await expect(panel.locator("#dashboard-play-all")).to_have_count(0)
@@ -180,10 +181,10 @@ async def test_dashboard_playable_empty_and_loading_error(page):
     page.data["/playback/batches/preview"].update(items=[], total_seconds=0, expected_end=None)
     await page.goto("http://dashboard.test/")
     panel = page.locator("#dashboard-playback")
-    await expect(panel.get_by_role("button", name="모두 재생 (0개)")).to_be_disabled()
+    await expect(panel.get_by_role("button", name="전체 강의 0개 재생")).to_be_disabled()
     await expect(panel).to_contain_text("현재 재생 가능한 미수강 강의가 없습니다.")
     await page.route("**/playback/batches/preview?scope=all", lambda r: r.fulfill(status=503, json={"detail": "조회 실패"}))
-    await panel.get_by_role("button", name="목록 새로고침").click()
+    await panel.get_by_role("button", name="목록 다시 불러오기").click()
     await expect(panel.get_by_role("alert")).to_contain_text("조회 실패")
     await page.unroute("**/playback/batches/preview?scope=all")
     await panel.get_by_role("button", name="다시 시도").click()
@@ -194,7 +195,7 @@ async def test_dashboard_accepted_job_survives_detail_failure(page):
     await page.route("**/playback/batches/7", lambda r: r.fulfill(status=503, json={"detail": "일시 오류"}))
     await page.goto("http://dashboard.test/")
     panel = page.locator("#dashboard-playback")
-    await panel.get_by_role("button", name="모두 재생 (2개)").click()
+    await panel.get_by_role("button", name="전체 강의 2개 재생").click()
     await expect(panel.get_by_role("status")).to_contain_text("0/2개 완료")
     await expect(panel.locator("#dashboard-play-all")).to_have_count(0)
     assert page.calls == [("POST", "/playback/batches", {"scope": "all"})]
@@ -266,3 +267,19 @@ async def test_reload_shows_saved_progress_and_stale_activity(page):
     job.update(progress_updated_at=None)
     await page.reload()
     await expect(current).to_contain_text("아직 실제 재생 진행을 확인하지 못했습니다")
+
+
+async def test_external_buttons_show_new_tab_icon(page):
+    await page.goto("http://dashboard.test/")
+    submit = page.get_by_role("link", name="6주차 퀴즈 LMS에서 제출 (새 탭)")
+    await expect(submit.locator('svg[data-icon="external"][aria-hidden="true"]')).to_have_count(1)
+    lms = page.locator('a[href="https://lms.ssu.ac.kr"]')
+    await expect(lms.locator('svg[data-icon="external"][aria-hidden="true"]')).to_have_count(1)
+
+
+async def test_dashboard_has_one_primary_button(page):
+    await page.goto("http://dashboard.test/")
+    play_all = page.locator("#dashboard-play-all")
+    await expect(play_all).to_have_text("전체 강의 2개 재생")
+    await expect(play_all).not_to_have_class(re.compile(r"\bprimary\b"))
+    await expect(page.locator(".btn.primary:visible")).to_have_count(1)

@@ -21,7 +21,7 @@ const store = {
   del(k) { try { localStorage.removeItem(k); } catch { /* 저장 불가 환경 */ } },
 };
 
-const VIEW_NAMES = { dashboard: "학습 현황", todos: "할 일", assignments: "미제출 과제", calendar: "캘린더", courses: "과목", announcements: "공지", playback: "영상 재생", videos: "강의 영상", notifications: "알림", account: "계정", admin: "사용자 관리" };
+const VIEW_NAMES = { dashboard: "학습 현황", todos: "할 일", assignments: "미제출 과제", calendar: "캘린더", courses: "과목", announcements: "공지", playback: "강의 재생", videos: "내려받기·텍스트 변환", notifications: "알림", account: "계정", admin: "사용자 관리" };
 const initialView = location.hash.slice(1) || "dashboard";
 
 const state = {
@@ -270,7 +270,7 @@ function renderOverview() {
   ];
   if (!state.cred?.last_synced_at) stats.forEach((stat) => { stat[1] = "—"; stat[3] = "첫 동기화를 기다리고 있어요"; });
   const shortcuts = ["soon", "all", "video", "courses"];
-  $("#stats").innerHTML = stats.map(([label, value, unit, hint, cls], i) => `<button class="stat ${cls}" data-shortcut="${shortcuts[i]}" aria-label="${label} ${value}${unit} 보기"><span class="stat-label">${label}<span aria-hidden="true">↗</span></span><span class="stat-value"><strong>${value}</strong><span>${unit}</span></span><small>${hint}</small></button>`).join("");
+  $("#stats").innerHTML = stats.map(([label, value, unit, hint, cls], i) => `<button class="stat ${cls}" data-shortcut="${shortcuts[i]}" aria-label="${label} ${value}${unit} 보기"><span class="stat-label">${label}<span aria-hidden="true">›</span></span><span class="stat-value"><strong>${value}</strong><span>${unit}</span></span><small>${hint}</small></button>`).join("");
 }
 
 /* ---------------- 상단: 동기화 ---------------- */
@@ -309,13 +309,13 @@ $("#sync-btn").addEventListener("click", async () => {
     toast(err.message, true);
   } finally {
     btn.disabled = false;
-    btn.textContent = "새로고침이나 하자";
+    btn.textContent = "LMS 동기화";
   }
 });
 
 /* ---------------- 마감 레일 ---------------- */
 
-/** 진행 중인 묶음(없으면 미리보기 계획)의 항목별 예상 종료 시각과 전체 구간 */
+/** 진행 중인 묶음(없으면 재생 계획)의 항목별 예상 종료 시각과 전체 구간 */
 function playbackTimeline() {
   if (state.active) {
     const now = Date.now();
@@ -360,7 +360,7 @@ function renderRail() {
       const cls = `chip ${t.kind}${risk ? " risk" : soon ? " soon" : ""}`;
       const tip = `${KIND[t.kind]} ${t.title} (${t.course_name})${risk ? " — 재생이 마감 전에 끝나지 않을 수 있음" : ""}`;
       const url = safeUrl(t.url);
-      const content = `<time>${fmtTime(t.at)} · ${KIND[t.kind] || "할 일"}</time><span>${esc(t.title)}</span><small>${esc(t.course_name)}</small>${risk ? '<small class="risk-label">예상 재생 마감 초과</small>' : ""}`;
+      const content = `<time>${fmtTime(t.at)} · ${KIND[t.kind] || "할 일"}${url ? icon("external") : ""}</time><span>${esc(t.title)}</span><small>${esc(t.course_name)}</small>${risk ? '<small class="risk-label">예상 재생 마감 초과</small>' : ""}`;
       return url ? `<a class="${cls}" href="${esc(url)}" target="_blank" rel="noopener" aria-label="${esc(tip)} (새 탭)">${content}</a>` : `<div class="${cls}">${content}</div>`;
     }).join("");
     const weekend = d.getDay() === 0 || d.getDay() === 6;
@@ -380,9 +380,9 @@ function renderRail() {
     const finish = fmtDate(new Date(timeline.end));
     if (timeline.kind === "run") {
       const a = state.active;
-      note = `영상 재생 중: ${a.done_count + a.skipped_count}/${a.total}개 끝남, ${finish}쯤 모두 끝납니다.`;
+      note = `강의 재생 중: ${a.done_count + a.skipped_count}/${a.total}개 끝남, ${finish}쯤 모두 끝납니다.`;
     } else {
-      note = `미리보기한 재생 계획대로라면 ${finish}쯤 끝납니다.`;
+      note = `재생 계획대로라면 ${finish}쯤 끝납니다.`;
     }
     if (risky) note += ` 영상 ${risky}개는 마감 전에 끝나지 않습니다.`;
   }
@@ -546,8 +546,8 @@ function playbackProgressHtml(batch) {
     ${current ? `<div class="playback-current"><h3>현재 재생 중</h3><p>${esc(current.title)} · ${Math.floor(jobProgressPercent(current))}%</p>
       <p class="muted small-text">${esc(courseName(current))} · ${playbackPosition(Math.min(Math.max(0, current.progress_seconds || 0), Math.max(0, current.duration || 0)))} / ${playbackPosition(current.duration)}</p>
       ${playbackActivityHtml(current)}
-      <progress value="${jobProgressPercent(current)}" max="100" aria-label="현재 영상 재생 진행률"></progress></div>`
-      : `<p>${batch.cancel_requested ? "재생 중지를 요청했습니다." : "다음 영상 재생을 기다리고 있습니다."}</p>`}
+      <progress value="${jobProgressPercent(current)}" max="100" aria-label="현재 강의 재생 진행률"></progress></div>`
+      : `<p>${batch.cancel_requested ? "재생 중지를 요청했습니다." : "다음 강의 재생을 기다리고 있습니다."}</p>`}
     <h3>다음 재생 예정 영상 ${upcoming.length}개</h3>
     ${upcoming.length ? `<ol class="playback-upcoming">${upcoming.map((job, index) => `<li>
       <p><strong>${index === 0 ? "다음 재생 · " : ""}${esc(job.title)}</strong></p>
@@ -576,13 +576,13 @@ function drawDashboardPlayback() {
   }).join("")}</ol>` : `<p class="dashboard-playback-note">현재 재생 가능한 미수강 강의가 없습니다.</p>`;
   root.innerHTML = `<div class="panel-body">
     <div class="view-head"><h2>재생 가능한 강의${plan && !state.dashboardLoading ? ` ${items.length}개` : ""}</h2>
-      <button class="btn" id="dashboard-playback-refresh" ${state.dashboardLoading || state.playbackStarting ? "disabled" : ""}>목록 새로고침</button></div>
+      <button class="btn" id="dashboard-playback-refresh" ${state.dashboardLoading || state.playbackStarting ? "disabled" : ""}>목록 다시 불러오기</button></div>
     <p class="dashboard-playback-note">전체 과목에서 지금 열려 있고 마감 전인 미수강 강의입니다. 마지막 동기화 기준이며, 재생 직전에 완료 여부를 다시 확인합니다.</p>
     ${progress}
     ${state.dashboardLoading ? '<p role="status">강의 목록을 불러오는 중입니다.</p>'
       : state.dashboardError ? `<div role="alert"><p>${esc(state.dashboardError)}</p><button class="btn" id="dashboard-playback-retry">다시 시도</button></div>`
-      : `${list}${!batch ? `<button class="btn primary block" id="dashboard-play-all" ${!items.length || state.playbackStarting ? "disabled" : ""}>
-          ${state.playbackStarting ? "재생 요청 중…" : `모두 재생 (${items.length}개)`}</button>
+      : `${list}${!batch ? `<button class="btn block" id="dashboard-play-all" ${!items.length || state.playbackStarting ? "disabled" : ""}>
+          ${state.playbackStarting ? "재생 요청 중…" : `전체 강의 ${items.length}개 재생`}</button>
         ${items.length ? `<p class="dashboard-playback-note">총 ${fmtDuration(items.reduce((sum, item) => sum + item.duration, 0))} 분량 · 1배속으로 순서대로 재생하고 LMS 완료 여부를 확인합니다.</p>` : ""}` : ""}`}
   </div>`;
   $("#dashboard-playback-refresh")?.addEventListener("click", loadDashboardPlayback);
@@ -667,7 +667,7 @@ function renderTodoResults() {
   const filtered = query || state.todoFilter !== "all" || state.todoDeadline !== "all";
   $("#todo-results").innerHTML = groups.size
     ? [...groups.values()].map((g) => `<div class="group-label">${esc(g.label)} · ${g.items.length}개</div><ul class="list">${g.items.map(todoItem).join("")}</ul>`).join("")
-    : `<div class="empty"><strong>${filtered ? "조건에 맞는 할 일이 없어요" : "할 거 없음. 누워도 됨"}</strong><p>${filtered ? "검색어나 필터를 바꿔 다른 할 일을 확인해 보세요." : state.cred?.last_synced_at ? "새로운 할 일이 생기면 이곳에 모아 보여드릴게요." : "첫 동기화가 끝나면 과목과 할 일이 표시됩니다. 잠시 후 ‘새로고침이나 하자’를 눌러 주세요."}</p>${filtered ? '<button class="btn" id="reset-todos">전체 할 일 보기</button>' : ""}</div>`;
+    : `<div class="empty"><strong>${filtered ? "조건에 맞는 할 일이 없어요" : "할 거 없음. 누워도 됨"}</strong><p>${filtered ? "검색어나 필터를 바꿔 다른 할 일을 확인해 보세요." : state.cred?.last_synced_at ? "새로운 할 일이 생기면 이곳에 모아 보여드릴게요." : "첫 동기화가 끝나면 과목과 할 일이 표시됩니다. 잠시 후 ‘LMS 동기화’를 눌러 주세요."}</p>${filtered ? '<button class="btn" id="reset-todos">전체 할 일 보기</button>' : ""}</div>`;
   $("#reset-todos")?.addEventListener("click", () => { state.todoSearch = ""; state.todoFilter = "all"; state.todoDeadline = "all"; viewTodos(); $("#todo-search").focus(); });
 }
 
@@ -676,7 +676,7 @@ function todoItem(t) {
   const left = timeLeft(d);
   const where = t.kind === "video" ? [t.module_title, t.duration && fmtDuration(t.duration)].filter(Boolean).join(" · ") : "";
   const url = safeUrl(t.url);
-  const title = url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(t.title)} <span class="todo-link" aria-label="새 탭에서 열기">↗</span></a>` : esc(t.title);
+  const title = url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(t.title)} <span class="todo-link" aria-label="새 탭에서 열기">${icon("external")}</span></a>` : esc(t.title);
   return `<li><div class="todo-title-row">
     <span class="title"><span class="kind ${esc(t.kind)}">${KIND[t.kind] || "할 일"}</span>${title}</span>
     <span class="left ${left.cls}">${left.text}</span></div>
@@ -728,7 +728,7 @@ async function viewAssignments() {
   $("#view").innerHTML = `
     <div class="view-head"><h1>미제출 과제</h1><div class="filters">${filters}</div></div>
     <div class="panel">${body}</div>
-    <p class="muted small-text">마지막 동기화 기준입니다. 방금 제출했다면 ‘새로고침이나 하자’를 눌러 주세요. 제출 여부를 확인할 수 없는 과제는 넣지 않았습니다.</p>`;
+    <p class="muted small-text">마지막 동기화 기준입니다. 방금 제출했다면 ‘LMS 동기화’를 눌러 주세요. 제출 여부를 확인할 수 없는 과제는 넣지 않았습니다.</p>`;
   $("#view .filters").addEventListener("click", (e) => {
     const k = e.target.closest("button")?.dataset.f;
     if (k) { state.assignmentFilter = k; viewAssignments(); }
@@ -779,7 +779,7 @@ function viewCourses() {
   $("#view").innerHTML = `
     <div class="view-head"><h1>과목</h1></div>
     <p class="notice-inline">자동 수강을 켜면 동기화할 때마다 새로 열린 영상을 순서대로 재생합니다. 직접 시청하지 않은 수강은 학칙상 문제가 될 수 있으니 확인 후 켜세요.</p>
-    <div class="panel">${rows || `<div class="empty"><p>과목이 없습니다. ‘새로고침이나 하자’를 눌러 불러오세요.</p></div>`}</div>
+    <div class="panel">${rows || `<div class="empty"><p>과목이 없습니다. ‘LMS 동기화’를 눌러 불러오세요.</p></div>`}</div>
     <p class="muted small-text">초록 출석, 노랑 지각, 빨강 결석, 회색 기록 없음</p>`;
   $("#view").querySelectorAll("input[data-course]").forEach((el) => el.addEventListener("change", onAutoPlay));
 }
@@ -832,12 +832,12 @@ async function viewAnnouncements() {
   });
 }
 
-/* ---------------- 영상 재생 ---------------- */
+/* ---------------- 강의 재생 ---------------- */
 
 function viewPlayback() {
   if (needCred()) return;
   const v = $("#view");
-  v.innerHTML = `<div class="view-head"><h1>영상 재생</h1></div>
+  v.innerHTML = `<div class="view-head"><h1>강의 재생</h1></div>
     ${state.active ? activeBatchHtml(state.active) : planFormHtml()}
     ${historyHtml()}`;
   document.querySelectorAll(".playback-failure").forEach((details) => {
@@ -866,7 +866,7 @@ function planFormHtml() {
         <label>과목<select name="course">${courses.map(([id, n]) => `<option value="${id}">${esc(n)}</option>`).join("")}</select></label>
         <label>주차<select name="module"></select></label>
       </div>
-      <div class="row"><button class="btn">미리보기</button>
+      <div class="row"><button class="btn">재생 계획 보기</button>
         <span class="muted small-text">1배속으로 처음부터 끝까지 재생하고, 영상마다 LMS에서 완료로 바뀌었는지 확인합니다.</span></div>
     </form></div>
     ${plan ? planHtml(plan) : ""}`;
@@ -921,8 +921,8 @@ function planHtml(plan) {
       <span><b>${plan.items.length}</b>개 영상</span><span><b>${fmtDuration(plan.total_seconds)}</b>예상 소요</span>
       <span><b>${fmtDate(new Date(plan.expected_end))}</b>예상 종료</span></div><p class="muted small-text">현재 대기열을 반영한 예상입니다. 새 요청·재시도에 따라 달라집니다.</p>${warn}</div>
     <ol class="steps">${steps}</ol>
-    <div class="actions"><button class="btn primary" id="start-batch">${plan.items.length}개 영상 재생 시작</button>
-      <button class="btn ghost" id="clear-plan">미리보기 닫기</button></div></div>`;
+    <div class="actions"><button class="btn primary" id="start-batch">${plan.items.length}개 재생 시작</button>
+      <button class="btn ghost" id="clear-plan">계획 닫기</button></div></div>`;
 }
 
 async function startBatch() {
@@ -1035,7 +1035,7 @@ function stopPolling() { clearInterval(pollTimer); pollTimer = null; }
 async function finishActive() {
   const b = state.active;
   stopPolling();
-  toast(`영상 재생 ${BATCH_STATUS[b.status]}: 완료 ${b.done_count}, 실패 ${b.failed_count}`, b.status === "failed");
+  toast(`강의 재생 ${BATCH_STATUS[b.status]}: 완료 ${b.done_count}, 실패 ${b.failed_count}`, b.status === "failed");
   state.active = null;
   [state.todos, state.batches] = await Promise.all([api("/todos"), api("/playback/batches?limit=10")]);
   if (state.view === "dashboard") {
@@ -1061,7 +1061,7 @@ async function viewVideos() {
     .filter((v) => !courses.some((c) => c.lms_course_id === v.lms_course_id))
     .map((v) => [v.lms_course_id, v.course_name])).entries()];
   if (!courses.length && !pastCourses.length) {
-    $("#view").innerHTML = `<div class="view-head"><h1>강의 영상</h1></div><div class="panel empty"><p>과목이 없습니다. ‘새로고침이나 하자’를 눌러 불러오세요.</p></div>`;
+    $("#view").innerHTML = `<div class="view-head"><h1>내려받기·텍스트 변환</h1></div><div class="panel empty"><p>과목이 없습니다. ‘LMS 동기화’를 눌러 불러오세요.</p></div>`;
     return;
   }
   const allIds = [...courses.map((c) => c.lms_course_id), ...pastCourses.map(([id]) => id)];
@@ -1072,7 +1072,7 @@ async function viewVideos() {
   const isPast = !courses.some((c) => c.lms_course_id === state.videoCourse);
   if (isPast) state.videoTab = "videos";  // 지난 과목은 수업자료를 LMS에서 볼 수 없다
   $("#view").innerHTML = `
-    <div class="view-head"><h1>강의 영상</h1>
+    <div class="view-head"><h1>내려받기·텍스트 변환</h1>
       <label>과목<select id="video-course">${options}</select></label></div>
     <div class="tabs" role="tablist">
       <button role="tab" data-tab="videos" aria-selected="${state.videoTab === "videos"}">영상</button>
@@ -1125,8 +1125,8 @@ function renderBulkStatus() {
   $("#bulk-stop")?.addEventListener("click", stopBulkDownload);
 }
 
-function bulkButton(items) {
-  const label = items.length ? `전체 받기 (${items.length})` : "전체 받기";
+function bulkButton(items, title) {
+  const label = items.length ? `${title} ${items.length}개 내려받기` : `${title} 내려받기`;
   return (state.videoTab !== "materials" || bulkDownloadSupported())
     ? `<button class="btn small" data-bulk ${items.length && !state.bulk?.running ? "" : "disabled"}>${label}</button>`
     : `<button class="btn small" disabled title="폴더에 바로 저장하는 기능은 데스크톱 Chrome·Edge에서만 지원합니다.">${label}</button>`;
@@ -1184,8 +1184,8 @@ function renderVideoList() {
   const thumb = (v) => v.thumbnail_url
     ? `<img class="thumb" src="${esc(v.thumbnail_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : "";
   const button = (v) => v.linkPath
-    ? `<button class="btn small" data-link="${esc(v.linkPath)}">내려받기</button>`
-    : `<button class="btn small" disabled title="${esc(v.savedRow?.resolve_error || "")}">내려받기</button>`;
+    ? `<button class="btn small" data-link="${esc(v.linkPath)}">${icon("download")}내려받기</button>`
+    : `<button class="btn small" disabled title="${esc(v.savedRow?.resolve_error || "")}">${icon("download")}내려받기</button>`;
   const bulkGroups = groups.map((g) => g.items.filter((v) => v.linkPath).map((v) => ({
     linkPath: v.linkPath, label: v.title, onDone: () => { v.downloaded_at = new Date().toISOString(); markDownloaded(v); } })));
   box.innerHTML = `<details class="panel-body"><summary>영상 다운로드 · 크롬 확장프로그램 설치 안내</summary>
@@ -1196,7 +1196,7 @@ function renderVideoList() {
     <li>이 페이지를 새로고침하고 내려받기를 누릅니다.</li></ol>
     <p>처음 열린 확장프로그램 창에서 저장 폴더를 선택합니다. 진행 상황과 취소는 그 창에서 확인할 수 있습니다.
     저장이 끝날 때까지 다운로드 창과 이 대시보드 탭을 모두 열어 두세요.</p></details>` + groups.map((g, i) => `<div class="group-label row">${esc(g.title)}
-      <span class="group-actions">${bulkButton(bulkGroups[i])}${typeof transcribeGroupButton === "function" ? transcribeGroupButton(g.items) : ""}</span></div>
+      <span class="group-actions">${bulkButton(bulkGroups[i], g.title)}${typeof transcribeGroupButton === "function" ? transcribeGroupButton(g.items, g.title) : ""}</span></div>
     <ul class="list">${g.items.map((v) => `
     <li class="video-row">
       ${thumb(v)}
@@ -1238,13 +1238,13 @@ function renderMaterialList() {
     if (src) src.downloaded_at = new Date().toISOString();
   };
   const bulkGroups = groups.map((g) => g.items.map((m) => ({ linkPath: m.linkPath, label: m.file_name, onDone: () => markMaterial(m.key) })));
-  box.innerHTML = groups.map((g, i) => `<div class="group-label row">${esc(g.title)}<span class="group-actions">${bulkButton(bulkGroups[i])}</span></div>
+  box.innerHTML = groups.map((g, i) => `<div class="group-label row">${esc(g.title)}<span class="group-actions">${bulkButton(bulkGroups[i], g.title)}</span></div>
     <ul class="list">${g.items.map((m) => `
     <li class="video-row">
       <span class="video-info"><span class="title">${esc(m.file_name)}</span><br>
         <span class="meta row"><span>${esc(m.title)}</span><span>${fmtSize(m.size)}</span>
           <span>${m.kind === "canvas_file" ? "위키 첨부" : "자료"}</span>${doneBadge(m.downloaded_at)}</span></span>
-      <button class="btn small" data-link="${esc(m.linkPath)}">내려받기</button>
+      <button class="btn small" data-link="${esc(m.linkPath)}">${icon("download")}내려받기</button>
     </li>`).join("")}</ul>`).join("");
   box.querySelectorAll("[data-link]").forEach((b) => b.addEventListener("click", async () => {
     if (await downloadVideo(b, b.dataset.link)) {
@@ -1281,7 +1281,7 @@ async function downloadVideo(btn, linkPath) {
     return false;
   } finally {
     btn.disabled = false;
-    btn.textContent = "내려받기";
+    btn.innerHTML = `${icon("download")}내려받기`;
   }
 }
 

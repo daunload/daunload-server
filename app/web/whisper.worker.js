@@ -89,7 +89,7 @@ async function drain(id, job) {
 function schedule(id, job) {
   job.chain = job.chain.then(() => drain(id, job)).catch((err) => {
     jobs.delete(id);
-    post({ type: "error", jobId: id, message: `전사 중 오류가 났습니다: ${err.message}`, fatal: false });
+    post({ type: "error", jobId: id, message: `텍스트 변환 중 오류가 났습니다: ${err.message}`, fatal: false });
   });
 }
 

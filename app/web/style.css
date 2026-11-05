@@ -628,3 +628,7 @@ progress { border: 2px solid var(--ink); border-radius: 6px; height: 12px; }
 @media (prefers-reduced-motion: reduce) {
   .btn.primary:active:not(:disabled) { transform: none; }
 }
+
+/* 버튼 안 아이콘: 글자색을 따르고 새 탭/내려받기 의미만 더한다 */
+.btn .icon { color: currentColor; width: 16px; height: 16px; flex-basis: 16px; }
+.chip time .icon, .todo-link .icon { width: 14px; height: 14px; margin-left: 4px; vertical-align: -2px; color: currentColor; }
