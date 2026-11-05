@@ -97,6 +97,21 @@ async def test_missing_extension_opens_guide(dashboard):
     await expect(page.locator("#toast > *")).to_have_count(0)
 
 
+async def test_missing_extension_toasts_when_guide_is_not_on_the_page(dashboard):
+    page, _ = await _one_video(dashboard)
+    await page.goto("http://dashboard.test/#videos")
+    await expect(page.get_by_role("button", name="내려받기", exact=True)).to_be_visible()
+    # 받은 것만 남은 목록: 안내 상자가 그려지지 않으므로 오류를 토스트로 알려야 한다
+    await page.evaluate("""() => {
+      state.notDownloadedOnly = true;
+      state.videoList.items.forEach((v) => { v.downloaded_at = new Date().toISOString(); });
+      renderVideoList();
+      reportDownloadError(Object.assign(new Error("확장프로그램에 연결하지 못했습니다."), { code: "EXTENSION_MISSING" }));
+    }""")
+    await expect(page.locator("#video-list details")).to_have_count(0)
+    await expect(page.locator("#toast")).to_contain_text("확장프로그램에 연결하지 못했습니다")
+
+
 async def test_missing_extension_on_bulk_opens_guide(dashboard):
     page, _ = await _one_video(dashboard)
     await page.goto("http://dashboard.test/#videos")

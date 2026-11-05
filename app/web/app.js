@@ -188,6 +188,7 @@ function logout() {
   stopPolling();
   stopBulkDownload();
   tx.queue = [];  // cancelTranscription은 지금 도는 작업만 멈추므로, 대기열을 먼저 비워 다음 작업이 시작되지 않게 한다
+  tx.epoch++;  // 취소된 작업이 나중에 끝나도 다음 사용자의 기록에 남지 않게 한다
   cancelTranscription();
   tx.finished = [];
   Object.assign(state, { me: null, cred: null, todos: [], courses: [], announcements: null,
@@ -1165,8 +1166,9 @@ function reportDownloadError(err) {
   if (state.view !== "videos" || !state.videoList) { toast(err.message, true); return; }
   renderCurrentTab();
   const summary = document.querySelector("#video-list details summary");
-  summary?.scrollIntoView({ block: "center" });
-  summary?.focus({ preventScroll: true });
+  if (!summary) { toast(err.message, true); return; }  // 안내가 그려지지 않는 화면(빈 목록·휴대폰)에서도 오류는 보인다
+  summary.scrollIntoView({ block: "center" });
+  summary.focus({ preventScroll: true });
 }
 
 function wireBulk(box, groups) {

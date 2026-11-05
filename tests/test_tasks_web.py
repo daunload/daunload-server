@@ -12,6 +12,13 @@ from tests.test_week_web import page  # noqa: F401  (fixture)
 
 pytestmark = pytest.mark.browser
 RUNNING_NOTE = "이 탭을 열어 두세요"
+HANGING_WORKER = """
+window.Worker = class {
+  addEventListener() {}
+  terminate() {}
+  postMessage() {}
+};
+"""
 POLL = 10000  # 폴링 주기(5초)를 넘겨 기다린다
 
 
@@ -384,8 +391,9 @@ async def test_playback_view_keeps_rows_without_stop(page):
 
 async def test_logout_clears_bulk_and_transcribe_tasks(dashboard):
     page, data = dashboard
-    await _start_one(page, data, FAILING_WORKER, audio_seconds=2, duration=2)
+    await _start_one(page, data, HANGING_WORKER, audio_seconds=2, duration=2)
     await expect(page.locator("#task-panel")).to_be_visible()
+    await page.wait_for_function("tx.current && tx.current.status === 'running'")
     await page.evaluate("""() => {
       bulk.ctrl = new AbortController();
       state.bulk = { done: 0, failed: 0, total: 2, running: true, errors: [], failedItems: [] };

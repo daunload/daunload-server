@@ -7,7 +7,7 @@
 const WHISPER_RATE = 16000;
 const READ_AHEAD_SECONDS = 60;  // Worker보다 이만큼만 앞서 받는다(메모리 일정)
 const MIN_AUDIO_RATIO = 0.97;   // LMS의 영상 길이와 실제 오디오 길이의 오차 허용
-const tx = { worker: null, device: null, modelPercent: null, queue: [], current: null, finished: [], nextId: 1 };
+const tx = { worker: null, device: null, modelPercent: null, queue: [], current: null, finished: [], nextId: 1, epoch: 0 };
 
 function txKey(courseId, moduleItemId) { return `${courseId}:${moduleItemId}`; }
 
@@ -77,6 +77,7 @@ async function runNext() {
   renderTaskPanel();
   if (!job) return;
   job.status = "running";
+  job.epoch = tx.epoch;
   job.segments = [];
   job.ctrl = new AbortController();
   job.done = new Promise((resolve, reject) => { job.resolve = resolve; job.reject = reject; });
@@ -108,7 +109,8 @@ async function runNext() {
     job.ctrl.abort();
     tx.worker?.postMessage({ type: "cancel", jobId: job.id });
   }
-  tx.finished.push(job);
+  // 로그아웃으로 취소된 작업은 다음 사용자에게 보이면 안 되므로 기록하지 않는다
+  if (job.epoch === tx.epoch) tx.finished.push(job);
   tx.current = null;
   runNext();
 }
