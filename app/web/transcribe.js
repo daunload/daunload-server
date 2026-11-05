@@ -272,6 +272,9 @@ async function openTranscript(id) {
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
   $("#tx-delete").onclick = async () => {
+    const ok = await confirmDialog({ title: "변환한 텍스트를 삭제할까요?", body: [`${t.title}의 텍스트가 지워져요. 영상은 그대로 있어요.`],
+      confirmLabel: "텍스트 삭제", danger: true });
+    if (!ok) return;
     try { await api(`/transcripts/${id}`, { method: "DELETE" }); }
     catch (err) { toast(err.message, true); return; }
     onTranscriptSaved({ courseId: t.lms_course_id, moduleItemId: t.module_item_id, title: t.title }, null);

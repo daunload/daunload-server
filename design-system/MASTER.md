@@ -49,13 +49,13 @@ PC와 휴대폰 모두 같은 가운데 창(`<dialog>` + `showModal()`)을 쓴�
 
 확인 버튼에는 결과를 적는다(`8개 재생 시작`, `알림 채널 삭제`). 일괄 재생 경고 문구는 범위와 관계없이 항상 "직접 시청하지 않은 수강은 학칙상 문제가 될 수 있어요."로 한다. 내려받기처럼 자주 쓰는 동작에는 확인 창을 끼우지 않는다.
 
-공통 함수는 뒤 작업에서 `app/web/ui.js`에 추가한다. 새 화면은 직접 만들지 말고 이 함수를 쓴다. 아래는 예정된 사용 모습이다.
+공통 함수는 `app/web/ui.js`에 있다. 새 화면은 직접 만들지 말고 이 함수를 쓴다. 아래는 사용 모습이다.
 
 ```js
-// ui.js (예정): confirmDialog, icon
+// ui.js: confirmDialog({ title, body?: string[], warnings?: string[], confirmLabel, danger?, requireText?, requireLabel? }), closeConfirmDialog(), icon
 const ok = await confirmDialog({
   title: "알림 채널을 삭제할까요?",
-  body: `${esc(name)} 채널로 더 이상 알림을 보내지 않아요.`,
+  body: ["이 채널로 더 이상 알림을 보내지 않아요."],  // 문자열은 textContent로 들어가므로 esc() 불필요
   confirmLabel: "알림 채널 삭제",
   danger: true,
 });

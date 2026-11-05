@@ -2,12 +2,12 @@
 
 /* ---------------- 첫 화면: 이번 주 할 일 ----------------
  * 이번 주(월~일, 한국 시간)에 남은 강의와 과제만 짧게 보여 주고, 버튼 하나로 끝낸다.
- *  - 강의가 있으면: "이번 주 강의 N개 재생" → 확인 → 순서대로 재생하고 학습 완료까지 확인
+ *  - 강의가 있으면: "이번 주 강의 N개 재생" → 확인 창 → 순서대로 재생하고 학습 완료까지 확인
  *  - 과제만 남았으면: 마감이 가장 빠른 과제의 제출 화면을 연다(과제는 직접 제출해야 한다)
  * app.js의 전역(state, api, esc, fmtTime, fmtDuration, dayName, WEEKDAY, toast, startPolling, navigate)을 쓴다.
  */
 
-const week = { data: null, plan: null, error: null, confirming: false, lastActive: null, busy: false };
+const week = { data: null, error: null, lastActive: null, busy: false };
 
 async function renderWeek() {
   const el = document.getElementById("week-panel");
@@ -105,17 +105,6 @@ function ctaHtml(d) {
       <p class="today-sub">창을 닫아도 계속 들어요.${a.cancel_requested ? " 중지하는 중이에요." : ""}</p>
       ${a.cancel_requested ? "" : '<button class="btn ghost block" id="week-stop">중지</button>'}</div>`;
   }
-  if (week.confirming && week.plan) {
-    const p = week.plan;
-    const risky = p.items.filter((i) => i.at_risk).length;
-    return `<div class="cta-confirm">
-      <p class="confirm-title">강의 ${p.items.length}개를 순서대로 끝까지 들을게요</p>
-      <p class="today-sub">1배속 · 약 ${fmtDuration(p.total_seconds)}${p.expected_end ? ` · ${fmtTime(new Date(p.expected_end))}쯤 끝나요` : ""}</p>
-      ${risky ? `<p class="warning">마감 전에 끝나지 않는 강의가 ${risky}개 있어요</p>` : ""}
-      <p class="confirm-note">직접 시청하지 않은 수강은 학칙상 문제가 될 수 있어요.</p>
-      <button class="btn primary block" id="week-start">시작하기</button>
-      <button class="btn ghost block" id="week-cancel">취소</button></div>`;
-  }
   if (d.videos.length) {
     const hasAssignments = d.assignments.length > 0;
     return `<button class="btn primary block" id="week-play">이번 주 강의 ${d.videos.length}개 재생</button>
@@ -133,29 +122,26 @@ function bindWeek() {
   const on = (id, fn) => document.getElementById(id)?.addEventListener("click", fn);
   on("week-all", () => navigate("todos"));
   on("week-missed", () => { state.assignmentFilter = "overdue"; navigate("assignments"); });
-  on("week-cancel", () => { week.confirming = false; week.plan = null; drawWeek(); });
   on("week-play", async (e) => {
-    e.currentTarget.disabled = true;
+    if (week.busy) return;
+    const btn = e.currentTarget;
+    week.busy = true;
+    btn.disabled = true;
     try {
-      week.plan = await api("/playback/batches/preview?scope=week");
-      week.confirming = true;
-    } catch (err) {
-      toast(err.message, true);
-    }
-    drawWeek();
-  });
-  on("week-start", async (e) => {
-    e.currentTarget.disabled = true;
-    try {
+      const plan = await api("/playback/batches/preview?scope=week");
+      btn.disabled = false;
+      btn.focus();
+      if (!(await confirmPlayback(plan, "이번 주"))) return;
+      btn.disabled = true;
       const batch = await api("/playback/batches", { method: "POST", json: { scope: "week" } });
       state.active = await api(`/playback/batches/${batch.id}`);
-      week.confirming = false;
-      week.plan = null;
       week.lastActive = batch.id;
       toast(`강의 ${batch.total}개를 듣기 시작했어요`);
       startPolling();
     } catch (err) {
       toast(err.message, true);
+    } finally {
+      week.busy = false;
     }
     drawWeek();
   });
@@ -175,7 +161,7 @@ function bindWeek() {
 
 // 재생 진행률을 갱신하고(app.js 폴링이 state.active를 갱신), 끝나면 목록을 새로 불러온다.
 setInterval(() => {
-  if (!document.getElementById("week-panel") || week.confirming) return;
+  if (!document.getElementById("week-panel") || week.busy) return;
   const activeId = state.active?.id ?? null;
   if (week.lastActive !== null && activeId === null) renderWeek();
   else if (activeId !== null) { week.lastActive = activeId; drawWeek(); }

@@ -114,10 +114,11 @@ async def test_first_screen_shows_only_this_week(page, tmp_path):
 async def test_one_button_plays_this_weeks_lectures(page, tmp_path):
     await page.goto("http://dashboard.test/")
     await page.get_by_role("button", name="이번 주 강의 2개 재생").click()
-    await expect(page.locator(".cta-confirm")).to_contain_text("강의 2개를 순서대로 끝까지 들을게요")
-    await expect(page.locator(".cta-confirm")).to_contain_text("학칙")
+    dialog = page.locator("#confirm-dialog")
+    await expect(dialog).to_contain_text("이번 주 강의 2개를 순서대로 재생할까요?")
+    await expect(dialog).to_contain_text("학칙")
     await page.screenshot(path=tmp_path / "confirm.png", full_page=True)
-    await page.get_by_role("button", name="시작하기").click()
+    await dialog.get_by_role("button", name="2개 재생 시작").click()
     await expect(page.locator(".cta-progress")).to_contain_text("0/2개 완료")
     await expect(page.locator(".task").first).to_contain_text("듣는 중 30%")
     assert page.calls == [("POST", "/playback/batches", {"scope": "week"})]
@@ -131,7 +132,7 @@ async def test_one_button_plays_this_weeks_lectures(page, tmp_path):
 async def test_cancel_confirmation_starts_nothing(page):
     await page.goto("http://dashboard.test/")
     await page.get_by_role("button", name="이번 주 강의 2개 재생").click()
-    await page.get_by_role("button", name="취소").click()
+    await page.locator("#confirm-dialog").get_by_role("button", name="취소").click()
     await expect(page.get_by_role("button", name="이번 주 강의 2개 재생")).to_be_visible()
     assert page.calls == []
 
@@ -169,6 +170,7 @@ async def test_dashboard_all_playable_lectures_start_with_one_click(page, tmp_pa
         assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     await page.screenshot(path=tmp_path / "playable-mobile.png", full_page=True)
     await panel.get_by_role("button", name="전체 강의 2개 재생", exact=True).click()
+    await page.locator("#confirm-dialog").get_by_role("button", name="2개 재생 시작").click()
     await expect(panel.get_by_role("status")).to_contain_text("0/2개 완료")
     assert page.calls == [("POST", "/playback/batches", {"scope": "all"})]
     await expect(panel.locator("#dashboard-play-all")).to_have_count(0)
@@ -196,6 +198,7 @@ async def test_dashboard_accepted_job_survives_detail_failure(page):
     await page.goto("http://dashboard.test/")
     panel = page.locator("#dashboard-playback")
     await panel.get_by_role("button", name="전체 강의 2개 재생").click()
+    await page.locator("#confirm-dialog").get_by_role("button", name="2개 재생 시작").click()
     await expect(panel.get_by_role("status")).to_contain_text("0/2개 완료")
     await expect(panel.locator("#dashboard-play-all")).to_have_count(0)
     assert page.calls == [("POST", "/playback/batches", {"scope": "all"})]
@@ -209,6 +212,7 @@ async def test_dashboard_repeated_click_only_enqueues_once(page):
       button.click();
       button.click();
     }''')
+    await page.locator("#confirm-dialog").get_by_role("button", name="2개 재생 시작").click()
     await expect(page.locator(".dashboard-playback-progress")).to_contain_text("0/2개 완료")
     assert page.calls == [("POST", "/playback/batches", {"scope": "all"})]
 

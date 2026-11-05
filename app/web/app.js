@@ -200,6 +200,7 @@ function logout() {
     batches: [], active: null, plan: null, planForm: null, planQuery: null,
     videoCourse: null, videoList: null, savedVideos: null, materialList: null, bulk: null,
   assignments: null, assignmentFilter: "unsubmitted", noticeCourse: null, todoSearch: "", todoFilter: "all", todoDeadline: "all" });
+  closeConfirmDialog();
   $("#password").type = "password";
   $("#password-toggle").textContent = "표시";
   $("#password-toggle").setAttribute("aria-pressed", "false");
@@ -588,7 +589,12 @@ function drawDashboardPlayback() {
   $("#dashboard-playback-refresh")?.addEventListener("click", loadDashboardPlayback);
   $("#dashboard-playback-retry")?.addEventListener("click", loadDashboardPlayback);
   $("#dashboard-playback-details")?.addEventListener("click", () => navigate("playback"));
-  $("#dashboard-play-all")?.addEventListener("click", startDashboardPlayback);
+  $("#dashboard-play-all")?.addEventListener("click", confirmDashboardPlayback);
+}
+
+async function confirmDashboardPlayback() {
+  if (state.playbackStarting || state.active || !state.dashboardPlan?.items.length) return;
+  if (await confirmPlayback(state.dashboardPlan, "전체")) await startDashboardPlayback();
 }
 
 async function startDashboardPlayback() {
@@ -919,7 +925,7 @@ function planHtml(plan) {
   return `<div class="panel">
     <div class="panel-body"><div class="summary-line">
       <span><b>${plan.items.length}</b>개 영상</span><span><b>${fmtDuration(plan.total_seconds)}</b>예상 소요</span>
-      <span><b>${fmtDate(new Date(plan.expected_end))}</b>예상 종료</span></div><p class="muted small-text">현재 대기열을 반영한 예상입니다. 새 요청·재시도에 따라 달라집니다.</p>${warn}</div>
+      <span><b>${fmtDate(new Date(plan.expected_end))}</b>예상 종료</span></div><p class="muted small-text">현재 대기열을 반영한 예상입니다. 새 요청·재시도에 따라 달라집니다.</p>${warn}<p class="warning">${esc(PLAYBACK_WARNING)}</p></div>
     <ol class="steps">${steps}</ol>
     <div class="actions"><button class="btn primary" id="start-batch">${plan.items.length}개 재생 시작</button>
       <button class="btn ghost" id="clear-plan">계획 닫기</button></div></div>`;
@@ -1325,6 +1331,9 @@ async function viewNotifications() {
     catch (err) { toast(err.message, true); }
   }));
   $("#view").querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", async () => {
+    const ok = await confirmDialog({ title: "이 알림 채널을 삭제할까요?", body: ["삭제하면 이 채널로 더 이상 알림을 보내지 않아요."],
+      confirmLabel: "알림 채널 삭제", danger: true });
+    if (!ok) return;
     try { await api(`/notifications/channels/${b.dataset.del}`, { method: "DELETE" }); toast("삭제했습니다"); viewNotifications(); }
     catch (err) { toast(err.message, true); }
   }));
@@ -1446,13 +1455,14 @@ function viewAccount() {
       <p class="muted small-text">저장된 학교 비밀번호와 동기화한 과목·할 일·공지, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다.</p>
       <div><button class="btn danger" id="delete-me">계정 삭제</button></div>
     </div></div>`;
-  const del = $("#delete-me");
-  del.addEventListener("click", async () => {
-    if (!del.dataset.armed) {
-      del.dataset.armed = "1";
-      del.textContent = "한 번 더 누르면 삭제합니다";
-      return;
-    }
+  $("#delete-me").addEventListener("click", async () => {
+    const ok = await confirmDialog({
+      title: "계정을 삭제할까요?",
+      body: ["저장된 학교 비밀번호와 동기화한 과목·할 일·공지, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다."],
+      requireText: state.me.student_id, requireLabel: "확인을 위해 학번을 입력하세요",
+      confirmLabel: "계정 삭제", danger: true,
+    });
+    if (!ok) return;
     try {
       await api("/me", { method: "DELETE" });
       toast("계정과 저장된 정보를 모두 지웠습니다");

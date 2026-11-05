@@ -312,11 +312,9 @@ progress::-moz-progress-bar { background: var(--blue); }
 .cta:empty { display: none; }
 .btn.block { width: 100%; min-height: 54px; font-size: var(--text-md); border-radius: 14px; }
 .cta-note { text-align: center; font-size: var(--text-sm); color: var(--ink-3); }
-.cta-progress, .cta-confirm { display: grid; gap: 10px; padding: 20px; background: var(--surface); border-radius: var(--r-card); }
+.cta-progress { display: grid; gap: 10px; padding: 20px; background: var(--surface); border-radius: var(--r-card); }
 .cta-progress .row { justify-content: space-between; }
-.cta-progress .btn.block, .cta-confirm .btn.ghost { min-height: 44px; font-size: var(--text-md); }
-.confirm-title { font-size: var(--text-lg); font-weight: 700; }
-.confirm-note { font-size: var(--text-xs); color: var(--ink-3); }
+.cta-progress .btn.block { min-height: 44px; font-size: var(--text-md); }
 .today-links { display: flex; gap: 16px; margin-top: 8px; }
 .today-links .btn.link { color: var(--ink-3); font-size: var(--text-sm); }
 .today-links .btn.link:hover { color: var(--ink-2); }
@@ -591,7 +589,7 @@ progress { border: 2px solid var(--ink); border-radius: 6px; height: 12px; }
 .side button.on .icon { color: var(--ink); }
 .nav-label, .icon { color: var(--ink-2); }
 
-.panel, .stat, .task-list, .rail-wrap, .cta-progress, .cta-confirm, .notice-inline, .transcribe-panel, .transcript-dialog {
+.panel, .stat, .task-list, .rail-wrap, .cta-progress, .notice-inline, .transcribe-panel, .transcript-dialog, .confirm-dialog {
   border: 2px solid var(--ink);
 }
 .stat:hover { background: var(--pink-soft); }
@@ -632,3 +630,13 @@ progress { border: 2px solid var(--ink); border-radius: 6px; height: 12px; }
 /* 버튼 안 아이콘: 글자색을 따르고 새 탭/내려받기 의미만 더한다 */
 .btn .icon { color: currentColor; width: 16px; height: 16px; flex-basis: 16px; }
 .chip time .icon, .todo-link .icon { width: 14px; height: 14px; margin-left: 4px; vertical-align: -2px; color: currentColor; }
+
+/* 공통 확인 창 */
+.confirm-dialog { border-radius: var(--r-card); padding: 20px; width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow-y: auto; background: var(--surface); color: var(--ink); }
+.confirm-dialog[open] { display: grid; gap: 12px; }
+.confirm-dialog::backdrop { background: rgba(0,0,0,.35); }
+.confirm-title { font-size: var(--text-lg); font-weight: 700; }
+.confirm-body { font-size: var(--text-sm); color: var(--ink-2); }
+.confirm-require { display: grid; gap: 6px; font-size: var(--text-sm); }
+.confirm-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.confirm-actions .btn { min-height: 44px; }

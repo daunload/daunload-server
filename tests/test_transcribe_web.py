@@ -79,7 +79,8 @@ async def test_transcript_dialog_toggle_and_delete(dashboard):
     await expect(text).to_have_text("안녕하세요\n끝")
     await page.get_by_label("시간 표시").check()
     await expect(text).to_have_text("[00:00] 안녕하세요\n[01:05] 끝")
-    await page.get_by_role("button", name="삭제").click()
+    await page.locator("#transcript-dialog").get_by_role("button", name="삭제").click()
+    await page.locator("#confirm-dialog").get_by_role("button", name="텍스트 삭제").click()
     await expect(page.locator("#transcript-dialog")).not_to_be_visible()
     await expect(page.get_by_role("button", name="텍스트 보기")).to_have_count(0)
 
