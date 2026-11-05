@@ -11,3 +11,5 @@ deploy/hetzner/.release.env*
 deploy/hetzner/.deploy.lock
 
 dist/
+
+.superpowers/
