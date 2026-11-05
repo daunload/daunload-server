@@ -28,8 +28,8 @@ async def test_video_tab_badges_filter_and_materials_tab(dashboard):
     await page.goto("http://dashboard.test/#videos")
     rows = page.locator("#video-list li.video-row")
     await expect(rows).to_have_count(2)
-    await expect(rows.nth(0).get_by_text("✓ 받음")).to_be_visible()
-    await expect(rows.nth(1).get_by_text("✓ 받음")).to_have_count(0)
+    await expect(rows.nth(0).locator(".received")).to_be_visible()
+    await expect(rows.nth(1).locator(".received")).to_have_count(0)
     await expect(page.get_by_role("button", name="1주차 전체 내려받기 (2)")).to_be_visible()
 
     await page.get_by_label("안 받은 것만").check()
@@ -55,7 +55,7 @@ async def test_material_download_marks_row(dashboard):
     await page.goto("http://dashboard.test/#videos")
     await page.get_by_role("tab", name="수업자료").click()
     await page.get_by_role("button", name="내려받기", exact=True).click()
-    await expect(page.locator("#video-list").get_by_text("✓ 받음")).to_be_visible()
+    await expect(page.locator("#video-list").locator(".received")).to_be_visible()
 
 
 FAKE_FOLDER = """
@@ -143,9 +143,9 @@ async def test_direct_video_records_only_after_extension_completion(dashboard):
     await page.get_by_role('button', name='내려받기', exact=True).click()
     await expect(page.get_by_role('button', name='다운로드 중', exact=True)).to_be_disabled()
     assert calls == []
-    await expect(page.locator('#video-list').get_by_text('✓ 받음')).to_have_count(0)
+    await expect(page.locator('#video-list').locator('.received')).to_have_count(0)
     await page.evaluate("window.__extensionState = 'complete'")
-    await expect(page.locator('#video-list').get_by_text('✓ 받음')).to_be_visible()
+    await expect(page.locator('#video-list').locator('.received')).to_be_visible()
     assert calls == [{'receipt': 'receipt'}]
 
 
@@ -189,7 +189,7 @@ async def test_bulk_stops_on_closed_manager_and_can_restart(dashboard):
     # All four videos must be registered before any download has completed.
     sheet = await _open_panel(page)
     await expect(sheet).to_contain_text('다운로드 0/4개')
-    await expect(page.locator('#video-list').get_by_text('✓ 받음')).to_have_count(0)
+    await expect(page.locator('#video-list').locator('.received')).to_have_count(0)
     await page.evaluate("""() => {
       window.__extensionState = 'interrupted';
       window.__extensionCode = 'MANAGER_CLOSED';
@@ -268,14 +268,14 @@ async def test_bulk_failure_can_retry_only_failed_items(dashboard):
     await expect(sheet).to_contain_text('다운로드 실패 1개')
     await expect(sheet).to_contain_text('링크 <b>오류</b>')
     assert await sheet.locator('b').count() == 0
-    await expect(page.locator('#video-list').get_by_text('✓ 받음')).to_have_count(3)
+    await expect(page.locator('#video-list').locator('.received')).to_have_count(3)
     fail["on"] = False
     await page.evaluate("window.__extensionCalls = []")
     await sheet.get_by_role('button', name='다시 시도').click()
     await expect(page.locator('#toast')).to_contain_text('1개를 모두 받았어요')
     await expect(page.locator('#task-panel')).to_be_hidden()
     assert await page.evaluate("window.__extensionCalls.filter(x => x === 'start').length") == 1
-    await expect(page.locator('#video-list').get_by_text('✓ 받음')).to_have_count(4)
+    await expect(page.locator('#video-list').locator('.received')).to_have_count(4)
 
 
 async def test_bulk_success_clears_row_and_toasts(dashboard):
@@ -298,7 +298,7 @@ async def test_single_material_not_in_panel(dashboard):
     await page.goto("http://dashboard.test/#videos")
     await page.get_by_role("tab", name="수업자료").click()
     await page.get_by_role("button", name="내려받기", exact=True).click()
-    await expect(page.locator("#video-list").get_by_text("✓ 받음")).to_be_visible()
+    await expect(page.locator("#video-list").locator(".received")).to_be_visible()
     await expect(page.locator("#task-panel")).to_be_hidden()
 
 
@@ -361,8 +361,8 @@ async def test_group_actions_only_appear_when_they_add_something(dashboard):
     await _two_weeks(page, data)
     groups = page.locator('#video-list .group-label')
     await expect(groups.nth(0).get_by_role('button')).to_have_count(0)  # 1개뿐이면 줄 버튼과 같은 동작이다
-    await expect(groups.nth(1).get_by_role('button', name='2주차 전체 내려받기 (2)')).to_have_text('전체 내려받기 (2)')
-    await expect(groups.nth(1).get_by_role('button', name='2주차 전체 텍스트로 변환 (2)')).to_have_text('전체 텍스트로 변환 (2)')
+    await expect(groups.nth(1).get_by_role('button', name='2주차 전체 내려받기 (2)')).to_have_text('전체 2')
+    await expect(groups.nth(1).get_by_role('button', name='2주차 전체 텍스트로 변환 (2)')).to_have_text('전체 2')
 
 
 async def test_group_transcribe_hides_when_one_video_is_left(dashboard):
@@ -401,3 +401,27 @@ async def test_row_buttons_keep_weight_only_on_work_left_to_do(dashboard):
     await expect(rows.nth(1).get_by_role('button', name='텍스트로 변환', exact=True)).to_have_class('btn small ghost')
     for button in await page.locator('#video-list .btn').all():
         assert (await button.bounding_box())['height'] >= 44
+
+
+async def test_rows_use_icons_and_explain_them_once(dashboard):
+    page, data = dashboard
+    await page.add_init_script(FAKE_EXTENSION)
+    data['/saved-videos'] = []
+    data['/courses/1/videos'] = [_video(11, '받은 강의', downloaded=True), {**_video(12, '안 받은 강의'), 'completed': True}]
+    await page.set_viewport_size({'width': 375, 'height': 812})
+    await page.goto('http://dashboard.test/#videos')
+    rows = page.locator('#video-list li.video-row')
+    await expect(rows).to_have_count(2)
+    await expect(rows.nth(0).locator('[data-icon="download-done"]')).to_be_visible()
+    await expect(rows.nth(1).locator('[data-icon="download"]')).to_be_visible()
+    await expect(rows.nth(1).get_by_role('img', name='수강 완료')).to_be_visible()
+    for row in await rows.all():
+        for button in await row.locator('.btn').all():
+            box = await button.bounding_box()
+            assert box['width'] >= 44 and box['height'] >= 44
+            label_box = await button.locator('.sr-only').bounding_box()
+            assert label_box['width'] <= 1  # 이름은 보조기기용이고 눈에는 아이콘만 보인다
+    legend = page.locator('.icon-legend')
+    for label in ('내려받기', '받음', '텍스트로 변환', '수강 완료', '미수강'):
+        await expect(legend.get_by_text(label, exact=True)).to_be_visible()
+    await expect(legend).not_to_contain_text('아직 열리지 않음')  # 목록에 없는 아이콘은 설명하지 않는다

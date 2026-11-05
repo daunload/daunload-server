@@ -114,6 +114,8 @@ async function runNext() {
   if (job.epoch === tx.epoch) tx.finished.push(job);
   tx.current = null;
   runNext();
+  // 끝난 줄이 '변환 중'에 머물지 않도록 현재 작업이 바뀐 뒤에 다시 그린다 (성공·실패·중지 모두)
+  if (state.view === "videos" && state.videoTab === "videos" && state.videoList) renderVideoList();
 }
 
 async function pumpAudio(body, job, worker) {
@@ -169,20 +171,22 @@ function txStatusOf(courseId, moduleItemId) {
 }
 
 function transcribeButton(v, courseId) {
-  const parts = [];
-  if (v.transcript_id) parts.push(`<button class="btn small ghost" data-tx-open="${v.transcript_id}">텍스트 보기</button>`);
-  if (!v.audioPath) return parts.join("");
-  const st = txStatusOf(courseId, v.module_item_id);
-  const label = st === "running" ? "변환 중" : st === "queued" ? "대기 중" : v.transcript_id ? "다시 변환" : "텍스트로 변환";
-  parts.push(`<button class="btn small ghost" data-tx="${v.module_item_id}" ${st ? "disabled" : ""}>${label}</button>`);
-  return parts.join("");
+  // 줄마다 한 칸만 쓴다. 다시 변환은 드문 일이라 텍스트 창 안에 둔다.
+  const st = v.audioPath ? txStatusOf(courseId, v.module_item_id) : null;
+  if (st) {
+    const label = st === "running" ? "변환 중" : "대기 중";
+    return `<button class="btn small ghost" data-tx="${v.module_item_id}" title="${label}" disabled>${iconOnly(st === "running" ? "loader" : "clock", label)}</button>`;
+  }
+  if (v.transcript_id) return `<button class="btn small ghost" data-tx-open="${v.transcript_id}" title="텍스트 보기">${iconOnly("text-view", "텍스트 보기")}</button>`;
+  if (!v.audioPath) return "";
+  return `<button class="btn small ghost" data-tx="${v.module_item_id}" title="텍스트로 변환">${iconOnly("text-convert", "텍스트로 변환")}</button>`;
 }
 
 function transcribeGroupButton(items, title) {
   const n = items.filter((v) => v.audioPath && !v.transcript_id).length;
   if (n < 2) return "";  // 1개뿐이면 그 줄의 버튼과 같은 동작이다
   const label = `전체 텍스트로 변환 (${n})`;
-  return `<button class="btn small link" data-tx-group="${esc(items[0].module_id)}" aria-label="${esc(title)} ${label}">${label}</button>`;
+  return `<button class="btn small link" data-tx-group="${esc(items[0].module_id)}" aria-label="${esc(title)} ${label}" title="${label}">${icon("text-convert")}전체 ${n}</button>`;
 }
 
 function wireTranscribe(box, items, courseId) {
@@ -196,7 +200,10 @@ function wireTranscribe(box, items, courseId) {
     enqueueTranscription(items.filter((v) => String(v.module_id) === b.dataset.txGroup && v.audioPath && !v.transcript_id).map(toJob));
     renderVideoList();
   }));
-  box.querySelectorAll("[data-tx-open]").forEach((b) => b.addEventListener("click", () => openTranscript(Number(b.dataset.txOpen))));
+  box.querySelectorAll("[data-tx-open]").forEach((b) => b.addEventListener("click", () => {
+    const v = items.find((x) => String(x.transcript_id) === b.dataset.txOpen);
+    openTranscript(Number(b.dataset.txOpen), v?.audioPath ? toJob(v) : null);
+  }));
 }
 
 window.addEventListener("beforeunload", (e) => {
@@ -213,7 +220,7 @@ function fmtStamp(sec) {
   return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-async function openTranscript(id) {
+async function openTranscript(id, redoJob = null) {
   const dlg = $("#transcript-dialog");
   dlg.innerHTML = `<p class="meta">불러오는 중</p>`;
   dlg.showModal();
@@ -231,6 +238,7 @@ async function openTranscript(id) {
     <div class="row dialog-actions">
       <button class="btn small" id="tx-copy">복사</button>
       <button class="btn small" id="tx-save">.txt로 받기</button>
+      ${redoJob ? '<button class="btn small" id="tx-redo">다시 변환</button>' : ""}
       <button class="btn small danger" id="tx-delete">삭제</button>
       <button class="btn small primary" id="tx-close" style="margin-left:auto">닫기</button>
     </div>`;
@@ -246,6 +254,11 @@ async function openTranscript(id) {
     a.download = `${t.title.replace(/[\\/:*?"<>|]/g, " ").trim() || "transcript"}.txt`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  if (redoJob) $("#tx-redo").onclick = () => {
+    dlg.close();
+    enqueueTranscription([redoJob]);
+    renderVideoList();
   };
   $("#tx-delete").onclick = async () => {
     const ok = await confirmDialog({ title: "변환한 텍스트를 삭제할까요?", body: [`${t.title}의 텍스트가 지워져요. 영상은 그대로 있어요.`],

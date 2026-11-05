@@ -36,6 +36,8 @@
   --text-lg: 18px;
   --text-xl: 22px;
   --touch: 44px;
+  --gutter: 16px;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 9 7 7 7-7'/%3E%3C/svg%3E");
   --ad-inset: 0px;
   --z-nav: 10;
   --z-top: 15;
@@ -69,8 +71,6 @@
 .playback-percent strong { font-size: var(--text-xl); font-weight: 700; }
 .playback-overall { box-shadow: inset 0 1px 0 var(--line); }
 .playback-help summary { display: flex; align-items: center; min-height: var(--touch); cursor: pointer; font-size: var(--text-sm); font-weight: 600; color: var(--ink-2); }
-.playback-help summary::after, details.panel-body > summary::after { content: "⌄"; margin-left: 8px; line-height: 1; transform: translateY(-2px); }
-.playback-help[open] summary::after, details.panel-body[open] > summary::after { content: "⌃"; transform: translateY(3px); }
 .playback-help ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: var(--text-sm); color: var(--ink-2); }
 .panel-title { padding: 18px 20px 4px; font-size: var(--text-md); font-weight: 700; }
 .history-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
@@ -236,7 +236,6 @@ progress::-moz-progress-bar { background: var(--blue); }
 /* ---------- 카드, 목록 ---------- */
 .panel { background: var(--surface); border-radius: var(--r-card); }
 .panel-body { padding: 20px; display: grid; gap: 12px; }
-details.panel-body > summary { display: flex; align-items: center; min-height: var(--touch); cursor: pointer; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 12px 20px 20px; }
 .list { list-style: none; margin: 0; padding: 4px 0; }
 .list > li { padding: 14px 20px; display: grid; gap: 2px; }
@@ -433,9 +432,6 @@ a.chip:hover { text-decoration: none; box-shadow: 0 0 0 1px var(--line); }
 
 details.notice + details.notice { box-shadow: inset 0 1px 0 var(--fill); }
 details.notice summary { padding: 14px 44px 14px 20px; position: relative; cursor: pointer; display: grid; gap: 2px; list-style: none; }
-details.notice summary::-webkit-details-marker { display: none; }
-details.notice summary::after { content: "⌄"; position: absolute; right: 20px; top: 14px; color: var(--ink-3); }
-details.notice[open] summary::after { content: "⌃"; }
 .notice-body { padding: 0 20px 18px; overflow-wrap: anywhere; white-space: pre-wrap; max-width: 72ch; color: var(--ink-2); font-size: var(--text-sm); }
 
 .steps { list-style: none; margin: 0; padding: 4px 0; }
@@ -497,7 +493,7 @@ details.notice[open] summary::after { content: "⌃"; }
   .navigation.expanded .side { display: grid; max-height: calc(100dvh - 100px); overflow-y: auto; }
   .side :is(button, .privacy-link) { flex-direction: column; justify-content: center; gap: 4px; min-height: 60px; padding: 8px 4px; font-size: var(--text-xs); text-align: center; background: var(--surface); border-radius: var(--r-btn); }
   .nav-label { display: none; }
-  .workspace { padding: 8px 12px 32px; gap: 12px; }
+  .workspace { padding: 12px var(--gutter) 32px; gap: 12px; }
   .overview-heading { align-items: center; }
   .overview-heading > .btn { display: none; }
   .overview h1 { font-size: var(--text-xl); }
@@ -516,11 +512,7 @@ details.notice[open] summary::after { content: "⌃"; }
   .list > li, .steps li { padding-inline: 16px; }
   .panel-title { padding-inline: 16px; }
   .thumb { display: none; }
-  .list > li.video-row { flex-direction: column; align-items: stretch; gap: 6px; padding-block: 10px; }
-  .row-actions { margin-left: 0; justify-content: stretch; flex-shrink: 1; }
-  .row-actions .btn { flex: 1 1 0; min-width: 0; }
   .panel-body { padding: 16px; }
-  .dashboard-workspace { padding-top: 16px; }
   .today h1 { font-size: var(--text-xl); }
   .task { padding: 14px 16px; }
   .course { padding: 14px 16px; }
@@ -531,7 +523,7 @@ details.notice[open] summary::after { content: "⌃"; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
-  .skeleton, .toast { animation: none !important; }
+  .skeleton, .toast, .icon[data-icon="loader"] { animation: none !important; }
 }
 
 /* 회색 바탕 위에 놓인 버튼·진행 막대는 흰색/진한 회색으로 구분한다 */
@@ -629,7 +621,7 @@ progress { border: 2px solid var(--ink); border-radius: 6px; height: 12px; }
 .toast { background: var(--ink); border: 2px solid var(--surface); }
 @media (max-width: 760px) {
   .brand { font-size: var(--text-md); }
-  .topbar { gap: 6px; padding: 0 10px; }
+  .topbar { gap: 6px; padding: 0 var(--gutter); }
   .topbar .btn.small { padding: 0 8px; font-size: var(--text-sm); }
   .mobile-menu { border: 0; border-bottom: 2px solid var(--ink); }
   .side :is(button, .privacy-link) { border: 2px solid var(--ink); }
@@ -698,3 +690,86 @@ body.has-task-bar .toast-stack { bottom: calc(72px + var(--ad-inset)); }
 
 /* 법적 안내 링크도 설정 메뉴와 같은 크기와 키보드 접근성을 유지한다. */
 .side .privacy-link { text-decoration: none; }
+
+/* ---------- 접는 안내의 화살표: 글자 대신 먹선 아이콘을 그려 눌렀을 때 돌아간다 ---------- */
+.chevron, .playback-help summary::after, .guide > summary::after, .notice-fold > summary::after, details.notice summary::after {
+  content: ""; display: inline-block; flex: none; width: 18px; height: 18px;
+  background: currentColor; mask: var(--chevron) center / contain no-repeat; -webkit-mask: var(--chevron) center / contain no-repeat;
+  transition: rotate .2s ease;
+}
+.playback-help[open] summary::after, .guide[open] > summary::after, .notice-fold[open] > summary::after, details.notice[open] summary::after, [aria-expanded="true"] .chevron { rotate: 180deg; }
+.playback-help summary, .guide > summary, .notice-fold > summary, details.notice summary { list-style: none; }
+.playback-help summary::-webkit-details-marker, .guide > summary::-webkit-details-marker, .notice-fold > summary::-webkit-details-marker, details.notice summary::-webkit-details-marker { display: none; }
+.playback-help summary { justify-content: space-between; gap: 8px; }
+.playback-help summary:hover { color: var(--ink); }
+details.notice summary::after { position: absolute; right: 20px; top: 16px; color: var(--ink-3); }
+details.notice summary:hover { background: var(--pink-soft); }
+.mobile-menu > span:last-child { display: inline-flex; align-items: center; gap: 6px; }
+.guide > summary, .notice-fold > summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  min-height: var(--touch); padding: 8px 16px; cursor: pointer;
+  font-size: var(--text-sm); font-weight: 600; color: var(--ink); transition: background .12s;
+}
+.guide > summary:hover, .notice-fold > summary:hover { background: var(--pink-soft); }
+.guide > summary:focus-visible, .notice-fold > summary:focus-visible { outline-offset: -3px; }
+.guide[open] > summary { box-shadow: inset 0 -1px 0 var(--line); }
+.guide-body { display: grid; gap: 12px; padding: 12px 16px 16px; font-size: var(--text-sm); color: var(--ink-2); overflow-wrap: anywhere; }
+.guide-body ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.notice-fold { padding: 0; overflow: hidden; }
+.notice-fold > p { padding: 4px 16px 14px; overflow-wrap: anywhere; }
+
+/* ---------- 주차별 목록: 상태와 동작은 아이콘, 글자는 제목과 분량만 ---------- */
+#video-list { overflow: hidden; }
+#video-list .list { padding: 0; }
+.icon-legend {
+  list-style: none; margin: 0; padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 4px 12px;
+  font-size: var(--text-xs); color: var(--ink-2); box-shadow: inset 0 1px 0 var(--line);
+}
+.guide + .icon-legend { box-shadow: inset 0 1px 0 var(--line); }
+.icon-legend:first-child { box-shadow: none; }
+.icon-legend li { display: inline-flex; align-items: center; gap: 4px; }
+.icon-legend .icon { width: 14px; height: 14px; flex-basis: 14px; }
+#video-list .group-label {
+  gap: 0 8px; padding: 2px 8px 2px 20px; color: var(--ink);
+  background: var(--fill); box-shadow: inset 0 1px 0 var(--line), inset 0 -1px 0 var(--line);
+}
+.group-title { flex: 1 1 8em; min-width: 0; overflow-wrap: anywhere; }
+.group-actions { gap: 0 4px; }
+.group-actions .btn.link { padding: 0 8px; gap: 4px; font-weight: 600; white-space: nowrap; }
+.row-actions { flex-wrap: nowrap; gap: 4px; }
+.row-actions .btn { width: var(--touch); padding: 0; flex: none; }
+.row-actions .btn .icon { width: 20px; height: 20px; flex-basis: 20px; }
+.btn .icon[data-icon="download-done"], .icon-legend .icon[data-icon="download-done"] { color: var(--green); }
+.btn .icon[data-icon="text-view"], .icon-legend .icon[data-icon="text-view"] { color: var(--blue); }
+.video-status { flex: none; display: inline-grid; align-self: flex-start; margin-top: 2px; }
+.video-status .icon { width: 20px; height: 20px; flex-basis: 20px; }
+.video-status.done .icon, .icon-legend .icon[data-icon="check-circle"] { color: var(--green); }
+.video-status.todo .icon { color: var(--ink-3); }
+.video-status.expired .icon, .icon-legend .icon[data-icon="clock"] { color: var(--amber); }
+.video-status.locked .icon { color: var(--ink-3); }
+.icon[data-icon="loader"] { animation: spin .9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 카드 안의 머리줄은 카드 본문과 같은 선에서 시작한다 */
+.panel .view-head { padding-inline: 0; }
+
+/* ---------- 모바일 여백: 카드 밖은 --gutter, 카드 안은 16px 한 가지로 맞춘다 ---------- */
+@media (max-width: 760px) {
+  :root { --gutter: 12px; }
+  .mobile-menu { padding-inline: var(--gutter); }
+  .view-head, .overview-heading { padding-inline: 0; }
+  .today-links .btn.link { padding-inline: 0; }
+  .view-head label { width: 100%; grid-template-columns: auto minmax(0, 1fr); grid-auto-flow: row; }
+  .view-head select { width: 100%; }
+  .tabs [role="tab"] { padding-inline: 12px; }
+  .list > li.video-row { gap: 10px; padding: 8px 8px 8px 16px; }
+  #video-list .group-label { padding-left: 16px; }
+  .guide > summary, .notice-fold > summary { padding-inline: 16px; }
+}
+
+.video-info .reason { display: block; margin-top: 2px; }
+
+/* 제목 링크는 글자 높이뿐이라 줄 전체를 누를 수 있게 넓힌다 (줄 안에 다른 버튼이 없는 목록만) */
+#todo-results .list > li, .cal-item { position: relative; }
+#todo-results .title a::after, .cal-item .task-title a::after { content: ""; position: absolute; inset: 0; }
+#todo-results .list > li:has(a):hover, .cal-item:has(a):hover { background: var(--pink-soft); }

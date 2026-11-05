@@ -9,6 +9,14 @@ const PLAYBACK_WARNING = "직접 시청하지 않은 수강은 학칙상 문제�
 const ICONS = {
   external: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
   download: '<path d="M12 4v11m-4-4 4 4 4-4M5 20h14"/>',
+  "download-done": '<path d="m6 10 4.5 4.5L19 6M5 20h14"/>',
+  "text-convert": '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 12h6M12 12v6"/>',
+  "text-view": '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h6"/>',
+  "check-circle": '<circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.8 2.8L16 9.5"/>',
+  circle: '<circle cx="12" cy="12" r="9"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  loader: '<path d="M12 3a9 9 0 1 0 9 9"/>',
 };
 
 /** 장식용 인라인 SVG. aria-hidden이라 버튼의 접근 가능한 이름을 바꾸지 않는다. */
@@ -16,6 +24,11 @@ function icon(name) {
   const paths = ICONS[name];
   if (!paths) return "";
   return `<svg class="icon" data-icon="${name}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${paths}</svg>`;
+}
+
+/** 글자 없는 아이콘 버튼의 내용. 이름은 보조기기와 테스트가 그대로 읽는다. 눈으로 볼 뜻은 title과 목록 위 범례가 맡는다. */
+function iconOnly(name, label) {
+  return `${icon(name)}<span class="sr-only">${label}</span>`;
 }
 
 /* ---------------- 알림 토스트 ----------------

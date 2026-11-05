@@ -1130,7 +1130,7 @@ async function viewVideos() {
     </div>
     ${isPast ? '<p class="tabs-reason" id="tabs-reason">지난 과목은 수업자료를 볼 수 없어요</p>' : ""}
     ${phone ? `<p class="notice-inline" role="note">${PHONE_NOTICE}</p>` : ""}
-    <p class="notice-inline">본인이 수강하는 강의와 자료를 개인 복습용으로 받는 기능입니다. 강의 영상과 자료는 교수와 학교의 저작물이므로 다른 사람에게 공유하거나 올리지 마세요. 파일은 서버에 저장하지 않고 학교에서 받는 대로 바로 전달합니다. 동기화 때 영상 주소를 저장해 두므로 시청기간이 끝난 영상도 받을 수 있지만, 학교 서버가 주소를 막거나 영상을 지우면 받을 수 없습니다.</p>
+    <details class="notice-inline notice-fold"><summary>개인 복습용이에요. 공유하지 마세요</summary><p>본인이 수강하는 강의와 자료를 개인 복습용으로 받는 기능입니다. 강의 영상과 자료는 교수와 학교의 저작물이므로 다른 사람에게 공유하거나 올리지 마세요. 파일은 서버에 저장하지 않고 학교에서 받는 대로 바로 전달합니다. 동기화 때 영상 주소를 저장해 두므로 시청기간이 끝난 영상도 받을 수 있지만, 학교 서버가 주소를 막거나 영상을 지우면 받을 수 없습니다.</p></details>
     <div class="panel" id="video-list" aria-busy="true"><p class="sr-only" role="status">LMS에서 목록을 불러오는 중</p>${skeletonRows(4)}</div>`;
   $("#video-course").addEventListener("change", (e) => {
     state.videoCourse = Number(e.target.value); state.videoList = null; state.materialList = null; viewVideos();
@@ -1168,11 +1168,12 @@ function renderCurrentTab() {
 function bulkButton(items, title, index) {
   if (items.length < 2) return "";
   const label = `전체 내려받기 (${items.length})`;
-  const name = `aria-label="${esc(title)} ${label}"`;
-  if (isPhoneDevice()) return `<button class="btn small link" data-bulk="${index}" ${name} disabled>${label}</button>`;  // 이유는 화면 위쪽에 한 번만 알린다
+  const name = `aria-label="${esc(title)} ${label}" title="${label}"`;
+  const face = `${icon("download")}전체 ${items.length}`;
+  if (isPhoneDevice()) return `<button class="btn small link" data-bulk="${index}" ${name} disabled>${face}</button>`;  // 이유는 화면 위쪽에 한 번만 알린다
   return (state.videoTab !== "materials" || bulkDownloadSupported())
-    ? `<button class="btn small link" data-bulk="${index}" ${name} ${state.bulk?.running ? "disabled" : ""}>${label}</button>`
-    : `<button class="btn small link" ${name} disabled>${label}</button><span class="reason">폴더에 바로 저장하는 기능은 데스크톱 Chrome·Edge에서만 지원해요</span>`;
+    ? `<button class="btn small link" data-bulk="${index}" ${name} ${state.bulk?.running ? "disabled" : ""}>${face}</button>`
+    : `<button class="btn small link" ${name} disabled>${face}</button><span class="reason">폴더에 바로 저장하는 기능은 데스크톱 Chrome·Edge에서만 지원해요</span>`;
 }
 
 /** 여러 개 받기를 시작한다. 진행은 하단 패널에 나오고, 실패한 항목만 다시 시도할 수 있다. */
@@ -1224,7 +1225,31 @@ function groupBy(items, key, title) {
   return [...groups.values()];
 }
 
-const doneBadge = (at) => at ? `<span class="badge done" title="${esc(fmtDate(new Date(at)))}에 받음">✓ 받음</span>` : "";
+/** 받았는지는 내려받기 아이콘의 모양과 색으로 보여 준다. 이 글자는 보조기기용이다. */
+const doneBadge = (at) => at ? '<span class="received sr-only">받음</span>' : "";
+const downloadFace = (at) => iconOnly(at ? "download-done" : "download", "내려받기");
+const downloadTip = (at) => at ? `${esc(fmtDate(new Date(at)))}에 받음. 누르면 다시 받아요` : "내려받기";
+
+const VIDEO_STATUS = {
+  done: ["check-circle", "수강 완료"],
+  todo: ["circle", "미수강"],
+  expired: ["clock", "시청기간 종료"],
+  locked: ["lock", "아직 열리지 않음"],
+};
+const videoStatus = (v) => v.available ? (v.completed ? "done" : "todo") : v.savedRow ? "expired" : "locked";
+
+/** 글자를 뺀 아이콘의 뜻을 목록 위에 한 번만 적는다. 터치 화면에는 title이 없어서 필요하다. 지금 목록에 있는 것만 보인다. */
+function iconLegend(items, phone) {
+  const has = (test) => items.some(test);
+  const rows = [
+    !phone && has((v) => v.linkPath && !v.downloaded_at) && ["download", "내려받기"],
+    has((v) => v.downloaded_at) && ["download-done", "받음"],
+    has((v) => v.audioPath && !v.transcript_id) && ["text-convert", "텍스트로 변환"],
+    has((v) => v.transcript_id) && ["text-view", "텍스트 보기"],
+    ...Object.entries(VIDEO_STATUS).map(([key, row]) => has((v) => videoStatus(v) === key) && row),
+  ].filter(Boolean);
+  return `<ul class="icon-legend" aria-label="아이콘 설명">${rows.map(([name, label]) => `<li>${icon(name)}${label}</li>`).join("")}</ul>`;
+}
 
 function renderVideoList() {
   const courseId = state.videoList.courseId;
@@ -1254,34 +1279,37 @@ function renderVideoList() {
     return;
   }
   const groups = groupBy(items, "module_id", "module_title");
-  const status = (v) => v.available ? (v.completed ? "수강 완료" : "미수강")
-    : v.savedRow ? "시청기간 종료" : "아직 열리지 않음";
+  const status = (v) => {
+    const key = videoStatus(v);
+    const [name, label] = VIDEO_STATUS[key];
+    const full = v.savedRow?.saved ? `${label}, 주소 저장됨` : label;
+    return `<span class="video-status ${key}" role="img" aria-label="${full}" title="${full}">${icon(name)}</span>`;
+  };
   const thumb = (v) => v.thumbnail_url
     ? `<img class="thumb" src="${esc(v.thumbnail_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : "";
   const button = (v) => v.linkPath && !phone
-    ? `<button class="btn small ${v.downloaded_at ? "ghost" : "soft"}" data-link="${esc(v.linkPath)}">${icon("download")}내려받기</button>`
-    : `<button class="btn small ghost" disabled>${icon("download")}내려받기</button>`;
+    ? `<button class="btn small ${v.downloaded_at ? "ghost" : "soft"}" data-link="${esc(v.linkPath)}" title="${downloadTip(v.downloaded_at)}">${downloadFace(v.downloaded_at)}</button>`
+    : `<button class="btn small ghost" disabled>${downloadFace(v.downloaded_at)}</button>`;
   // 내려받을 수 없는 이유는 마우스를 올리지 않아도 보이게 글자로 둔다. 휴대폰은 화면 위쪽 안내 하나로 갈음한다.
   const reason = (v) => v.linkPath || phone ? "" : `<span class="reason">${esc(v.savedRow?.resolve_error || "지금은 내려받을 수 없어요")}</span>`;
   const bulkGroups = groups.map((g) => g.items.filter((v) => v.linkPath).map((v) => ({
     linkPath: v.linkPath, label: v.title, onDone: () => { v.downloaded_at = new Date().toISOString(); markDownloaded(v); } })));
-  const guide = phone ? "" : `<details class="panel-body" ${state.extensionMissing ? "open" : ""}><summary>영상 다운로드 · 크롬 확장프로그램 설치 안내</summary>
-    ${state.extensionMissing ? `<p class="error" role="alert">${esc(state.extensionMissing)}</p>` : ""}
+  const guide = phone ? "" : `<details class="guide" ${state.extensionMissing ? "open" : ""}><summary>영상 다운로드 · 크롬 확장프로그램 설치 안내</summary>
+    <div class="guide-body">${state.extensionMissing ? `<p class="error" role="alert">${esc(state.extensionMissing)}</p>` : ""}
     <p>영상은 학교에서 PC로 직접 저장됩니다. 데스크톱 크롬에 아유 하기싫어 확장프로그램을 설치해 주세요.</p>
     <ol><li>운영자가 제공한 확장프로그램 ZIP을 받아 압축을 풉니다.</li>
     <li>크롬 주소창에 chrome://extensions를 입력하고 개발자 모드를 켭니다.</li>
     <li>‘압축해제된 확장 프로그램을 로드합니다’에서 압축을 푼 폴더를 선택합니다.</li>
     <li>이 페이지를 새로고침하고 내려받기를 누릅니다.</li></ol>
     <p>처음 열린 확장프로그램 창에서 저장 폴더를 선택합니다. 진행 상황과 취소는 그 창에서 확인할 수 있습니다.
-    저장이 끝날 때까지 다운로드 창과 이 대시보드 탭을 모두 열어 두세요.</p></details>`;
-  box.innerHTML = guide + groups.map((g, i) => `<div class="group-label row">${esc(g.title)}
+    저장이 끝날 때까지 다운로드 창과 이 대시보드 탭을 모두 열어 두세요.</p></div></details>`;
+  box.innerHTML = guide + iconLegend(items, phone) + groups.map((g, i) => `<div class="group-label row"><span class="group-title">${esc(g.title)}</span>
       <span class="group-actions">${bulkButton(bulkGroups[i], g.title, i)}${typeof transcribeGroupButton === "function" ? transcribeGroupButton(g.items, g.title) : ""}</span></div>
     <ul class="list">${g.items.map((v) => `
     <li class="video-row">
-      ${thumb(v)}
+      ${status(v)}${thumb(v)}
       <span class="video-info"><span class="title">${esc(v.title)}</span><br>
-        <span class="meta row"><span>${v.duration ? fmtDuration(v.duration) : ""}</span><span>${fmtSize(v.size)}</span>
-          <span>${status(v)}</span>${v.savedRow?.saved ? "<span>주소 저장됨</span>" : ""}${doneBadge(v.downloaded_at)}</span>${reason(v) ? `<br>${reason(v)}` : ""}</span>
+        <span class="meta row"><span>${v.duration ? fmtDuration(v.duration) : ""}</span><span>${fmtSize(v.size)}</span>${doneBadge(v.downloaded_at)}</span>${reason(v)}</span>
       <span class="row-actions">${typeof transcribeButton === "function" ? transcribeButton(v, courseId) : ""}${button(v)}</span>
     </li>`).join("")}</ul>`).join("");
   box.querySelectorAll("[data-link]").forEach((b) => b.addEventListener("click", async () => {
@@ -1318,13 +1346,13 @@ function renderMaterialList() {
     if (src) src.downloaded_at = new Date().toISOString();
   };
   const bulkGroups = groups.map((g) => g.items.map((m) => ({ linkPath: m.linkPath, label: m.file_name, onDone: () => markMaterial(m.key) })));
-  box.innerHTML = groups.map((g, i) => `<div class="group-label row">${esc(g.title)}<span class="group-actions">${bulkButton(bulkGroups[i], g.title, i)}</span></div>
+  box.innerHTML = groups.map((g, i) => `<div class="group-label row"><span class="group-title">${esc(g.title)}</span><span class="group-actions">${bulkButton(bulkGroups[i], g.title, i)}</span></div>
     <ul class="list">${g.items.map((m) => `
     <li class="video-row">
       <span class="video-info"><span class="title">${esc(m.file_name)}</span><br>
         <span class="meta row"><span>${esc(m.title)}</span><span>${fmtSize(m.size)}</span>
-          <span>${m.kind === "canvas_file" ? "위키 첨부" : "자료"}</span>${doneBadge(m.downloaded_at)}</span></span>
-      <button class="btn small ${m.downloaded_at ? "ghost" : "soft"}" data-link="${esc(m.linkPath)}">${icon("download")}내려받기</button>
+          ${m.kind === "canvas_file" ? "<span>위키 첨부</span>" : ""}${doneBadge(m.downloaded_at)}</span></span>
+      <span class="row-actions"><button class="btn small ${m.downloaded_at ? "ghost" : "soft"}" data-link="${esc(m.linkPath)}" title="${downloadTip(m.downloaded_at)}">${downloadFace(m.downloaded_at)}</button></span>
     </li>`).join("")}</ul>`).join("");
   box.querySelectorAll("[data-link]").forEach((b) => b.addEventListener("click", async () => {
     if (await downloadVideo(b, b.dataset.link)) {
@@ -1338,12 +1366,13 @@ function renderMaterialList() {
 
 async function downloadVideo(btn, linkPath) {
   const token = state.token;
+  const face = btn.innerHTML;
   btn.disabled = true;
-  btn.textContent = "준비 중";
+  btn.innerHTML = iconOnly("loader", "준비 중");
   try {
     if (linkPath.endsWith("/direct-download")) {
       await requireDownloadExtension();
-      btn.textContent = "다운로드 중";
+      btn.innerHTML = iconOnly("loader", "다운로드 중");
       await downloadDirectVideo({ linkPath }, new AbortController().signal);
       if (state.token !== token) return false;  // 로그아웃 뒤에 늦게 온 결과는 알리지 않는다
       toast("영상 저장이 완료되었습니다.");
@@ -1364,7 +1393,7 @@ async function downloadVideo(btn, linkPath) {
     return false;
   } finally {
     btn.disabled = false;
-    btn.innerHTML = `${icon("download")}내려받기`;
+    btn.innerHTML = face;
   }
 }
 

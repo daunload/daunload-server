@@ -85,6 +85,25 @@ async def test_transcript_dialog_toggle_and_delete(dashboard):
     await expect(page.get_by_role("button", name="텍스트 보기")).to_have_count(0)
 
 
+async def test_redo_lives_in_the_transcript_dialog(dashboard):
+    page, data = dashboard
+    data["/saved-videos"] = []
+    data["/courses/1/videos"] = [_video(12, "2강 재귀", transcript=9)]
+    data["/transcripts/9"] = {"id": 9, "lms_course_id": 1, "module_item_id": 12, "course_name": "컴퓨터프로그래밍",
+                              "title": "2강 재귀", "model": "whisper-small/wasm", "duration": 70, "updated_at": "2026-10-29T00:00:00Z",
+                              "text": "끝", "segments": []}
+    await page.goto("http://dashboard.test/#videos")
+    row = page.locator("#video-list li.video-row")
+    await expect(row.get_by_role("button", name="텍스트 보기")).to_be_visible()
+    await expect(row.get_by_role("button", name="다시 변환")).to_have_count(0)
+    await expect(row.get_by_role("button")).to_have_count(2)
+    await page.evaluate("enqueueTranscription = (jobs) => { window.__redo = jobs; }")
+    await row.get_by_role("button", name="텍스트 보기").click()
+    await page.locator("#transcript-dialog").get_by_role("button", name="다시 변환").click()
+    await expect(page.locator("#transcript-dialog")).not_to_be_visible()
+    assert await page.evaluate("window.__redo.map((j) => j.moduleItemId)") == [12]
+
+
 FAILING_WORKER = """
 window.Worker = class {
   constructor() { this.listeners = []; }

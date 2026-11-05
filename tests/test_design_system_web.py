@@ -28,7 +28,7 @@ def _seed(data, videos):
 
 async def test_mobile_touch_targets_and_type(dashboard):
     page, data = dashboard
-    # 2-button rows (transcribe + download) and 3-button rows (view transcript + transcribe + download)
+    # every row has at most two icon buttons: transcribe or view transcript, and download
     _seed(data, [_video(11, "2강 재귀"), _video(12, "3강 정렬"), _video(13, "4강 탐색", transcript=9)])
     await page.set_viewport_size({"width": 375, "height": 812})
     sizes = []
@@ -79,3 +79,28 @@ async def test_long_titles_never_scroll_sideways(dashboard, width):
         await expect(page.locator("#view")).not_to_be_empty()
         await page.wait_for_timeout(150)
         assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (view, width)
+
+
+async def test_mobile_edges_line_up(dashboard):
+    page, data = dashboard
+    _seed(data, [_video(11, "2강 재귀"), _video(12, "3강 정렬")])
+    await page.set_viewport_size({"width": 375, "height": 812})
+    await page.goto("http://dashboard.test/#videos")
+    await expect(page.locator("#video-list li.video-row")).to_have_count(2)
+    lefts = await page.evaluate("""['.topbar .home-link', '#current-view', '.tabs', '.notice-fold', '#video-list']
+      .map(s => Math.round(document.querySelector(s).getBoundingClientRect().left))""")
+    assert set(lefts) == {12}, lefts
+
+
+async def test_disclosure_arrow_is_an_icon_that_turns(dashboard):
+    page, data = dashboard
+    _seed(data, [_video(11, "2강 재귀")])
+    await page.goto("http://dashboard.test/#videos")
+    summary = page.locator("#video-list .guide > summary")
+    arrow = lambda prop: summary.evaluate(f"e => getComputedStyle(e, '::after').{prop}")
+    assert await arrow("content") == '""' and "svg" in await arrow("maskImage")
+    assert await arrow("rotate") == "none"
+    await summary.click()
+    await page.wait_for_function("getComputedStyle(document.querySelector('.guide > summary'), '::after').rotate === '180deg'")
+    await summary.hover()
+    assert await summary.evaluate("e => getComputedStyle(e).cursor") == "pointer"
