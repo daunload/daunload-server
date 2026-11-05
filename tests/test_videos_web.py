@@ -99,10 +99,10 @@ async def test_bulk_download_waits_out_busy_server(dashboard):
     await page.get_by_role("tab", name="수업자료").click()
     await page.get_by_role("button", name="1주차 1개 내려받기").click()
     await expect(page.locator("#task-sheet")).to_contain_text("다운로드 0/1개")
-    for _ in range(20):
+    for _ in range(100):  # 완료 토스트(3.2초)가 사라지기 전에 멈추도록 잘게 나눠 진행한다
         if await page.locator("#task-panel").is_hidden():
             break
-        await page.clock.run_for(5000)
+        await page.clock.run_for(1000)
     await expect(page.locator("#task-panel")).to_be_hidden()
     await expect(page.locator("#toast")).to_contain_text("1개를 모두 받았어요")
     assert await page.evaluate("window.__saved['자료.pdf']") == 1
@@ -155,7 +155,7 @@ async def test_missing_extension_never_falls_back_to_relay(dashboard):
     page.on('request', lambda req: requested.append(req.url))
     await page.goto('http://dashboard.test/#videos')
     await page.get_by_role('button', name='내려받기', exact=True).click()
-    await expect(page.locator('#toast')).to_contain_text('확장프로그램에 연결하지 못했습니다')
+    await expect(page.locator('#video-list details')).to_contain_text('확장프로그램에 연결하지 못했습니다')
     assert not any('/download-link' in url or '/direct-download' in url or '/downloads/' in url for url in requested)
 
 

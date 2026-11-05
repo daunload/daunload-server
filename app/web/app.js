@@ -74,15 +74,6 @@ function timeLeft(deadline) {
   return { text, cls };
 }
 
-let toastTimer;
-function toast(msg, bad = false) {
-  const t = $("#toast");
-  t.textContent = msg;
-  t.className = `toast show${bad ? " bad" : ""}`;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.className = "toast"), 3200);
-}
-
 class ApiError extends Error {
   constructor(status, message, code) { super(message); this.status = status; this.code = code; }
 }
@@ -205,6 +196,8 @@ function logout() {
     videoCourse: null, videoList: null, savedVideos: null, materialList: null, bulk: null,
   assignments: null, assignmentFilter: "unsubmitted", noticeCourse: null, todoSearch: "", todoFilter: "all", todoDeadline: "all" });
   closeConfirmDialog();
+  clearToasts();
+  state.extensionMissing = null;
   renderTaskPanel();
   $("#password").type = "password";
   $("#password-toggle").textContent = "표시";
@@ -580,7 +573,7 @@ function drawDashboardPlayback() {
     <div class="view-head"><h2>재생 가능한 강의${plan && !state.dashboardLoading ? ` ${items.length}개` : ""}</h2>
       <button class="btn" id="dashboard-playback-refresh" ${state.dashboardLoading || state.playbackStarting ? "disabled" : ""}>목록 다시 불러오기</button></div>
     <p class="dashboard-playback-note">전체 과목에서 지금 열려 있고 마감 전인 미수강 강의입니다. 마지막 동기화 기준이며, 재생 직전에 완료 여부를 다시 확인합니다.</p>
-    ${state.dashboardLoading ? '<p role="status">강의 목록을 불러오는 중입니다.</p>'
+    ${state.dashboardLoading ? `<p role="status">강의 목록을 불러오는 중입니다.</p>${skeletonRows(3)}`
       : state.dashboardError ? `<div role="alert"><p>${esc(state.dashboardError)}</p><button class="btn" id="dashboard-playback-retry">다시 시도</button></div>`
       : `${list}${!batch ? `<button class="btn block" id="dashboard-play-all" ${!items.length || state.playbackStarting ? "disabled" : ""}>
           ${state.playbackStarting ? "재생 요청 중…" : `전체 강의 ${items.length}개 재생`}</button>
@@ -1092,16 +1085,19 @@ async function viewVideos() {
     + (pastCourses.length ? `<optgroup label="지난 과목 (저장된 영상)">${pastCourses.map(([id, name]) => opt(id, name)).join("")}</optgroup>` : "");
   const isPast = !courses.some((c) => c.lms_course_id === state.videoCourse);
   if (isPast) state.videoTab = "videos";  // 지난 과목은 수업자료를 LMS에서 볼 수 없다
+  const phone = isPhoneDevice();
   $("#view").innerHTML = `
     <div class="view-head"><h1>내려받기·텍스트 변환</h1>
       <label>과목<select id="video-course">${options}</select></label></div>
     <div class="tabs" role="tablist">
       <button role="tab" data-tab="videos" aria-selected="${state.videoTab === "videos"}">영상</button>
-      <button role="tab" data-tab="materials" aria-selected="${state.videoTab === "materials"}" ${isPast ? "disabled" : ""}>수업자료</button>
+      <button role="tab" data-tab="materials" aria-selected="${state.videoTab === "materials"}" ${isPast ? 'disabled aria-describedby="tabs-reason"' : ""}>수업자료</button>
       <label class="check inline"><input type="checkbox" id="not-downloaded" ${state.notDownloadedOnly ? "checked" : ""}><span>안 받은 것만</span></label>
     </div>
+    ${isPast ? '<p class="tabs-reason" id="tabs-reason">지난 과목은 수업자료를 볼 수 없어요</p>' : ""}
+    ${phone ? `<p class="notice-inline" role="note">${PHONE_NOTICE}</p>` : ""}
     <p class="notice-inline">본인이 수강하는 강의와 자료를 개인 복습용으로 받는 기능입니다. 강의 영상과 자료는 교수와 학교의 저작물이므로 다른 사람에게 공유하거나 올리지 마세요. 파일은 서버에 저장하지 않고 학교에서 받는 대로 바로 전달합니다. 동기화 때 영상 주소를 저장해 두므로 시청기간이 끝난 영상도 받을 수 있지만, 학교 서버가 주소를 막거나 영상을 지우면 받을 수 없습니다.</p>
-    <div class="panel" id="video-list"><div class="empty loading"><p>LMS에서 목록을 불러오는 중</p></div></div>`;
+    <div class="panel" id="video-list" aria-busy="true"><p class="sr-only" role="status">LMS에서 목록을 불러오는 중</p>${skeletonRows(4)}</div>`;
   $("#video-course").addEventListener("change", (e) => {
     state.videoCourse = Number(e.target.value); state.videoList = null; state.materialList = null; viewVideos();
   });
@@ -1128,12 +1124,15 @@ async function viewVideos() {
   renderCurrentTab();
 }
 
+const PHONE_NOTICE = "PC 크롬에서 받을 수 있어요";
+
 function renderCurrentTab() {
   if (state.videoTab === "materials") renderMaterialList(); else renderVideoList();
 }
 
 function bulkButton(items, title) {
   const label = items.length ? `${title} ${items.length}개 내려받기` : `${title} 내려받기`;
+  if (isPhoneDevice()) return `<button class="btn small" data-bulk disabled>${label}</button>`;  // 이유는 화면 위쪽에 한 번만 알린다
   return (state.videoTab !== "materials" || bulkDownloadSupported())
     ? `<button class="btn small" data-bulk ${items.length && !state.bulk?.running ? "" : "disabled"}>${label}</button>`
     : `<button class="btn small" disabled title="폴더에 바로 저장하는 기능은 데스크톱 Chrome·Edge에서만 지원합니다.">${label}</button>`;
@@ -1150,13 +1149,24 @@ async function runBulkDownload(items) {
         if (stat.stopped) toast(`${stat.done}/${stat.total}개 받고 중지했어요`);
         else if (!stat.failedItems.length) toast(`${stat.done}개를 모두 받았어요`);
         if (!stat.failedItems.length) state.bulk = null;
-        renderCurrentTab();
+        if (state.view === "videos") renderCurrentTab();  // 다른 화면으로 옮겼다면 덮어쓰지 않는다
       }
       renderTaskPanel();
     });
   } catch (err) {
-    if (err.name !== "AbortError") toast(err.message, true);  // 폴더 선택 취소는 조용히
+    if (err.name !== "AbortError") reportDownloadError(err);  // 폴더 선택 취소는 조용히
   }
+}
+
+/** 확장프로그램이 없으면 설치 안내를 펼쳐 문구를 그 안에 보이고, 그 밖의 오류는 토스트로 알린다. */
+function reportDownloadError(err) {
+  if (err.code !== "EXTENSION_MISSING") { toast(err.message, true); return; }
+  state.extensionMissing = err.message;
+  if (state.view !== "videos" || !state.videoList) { toast(err.message, true); return; }
+  renderCurrentTab();
+  const summary = document.querySelector("#video-list details summary");
+  summary?.scrollIntoView({ block: "center" });
+  summary?.focus({ preventScroll: true });
 }
 
 function wireBulk(box, groups) {
@@ -1195,6 +1205,8 @@ function renderVideoList() {
   }
   if (state.notDownloadedOnly) items = items.filter((v) => !v.downloaded_at);
   const box = $("#video-list");
+  box.removeAttribute("aria-busy");
+  const phone = isPhoneDevice();
   if (!items.length) {
     box.innerHTML = `<div class="empty"><p>${state.notDownloadedOnly ? "아직 받지 않은 영상이 없습니다." : "이 과목에는 내려받을 수 있는 강의 영상이 없습니다."}</p></div>`;
     return;
@@ -1204,26 +1216,30 @@ function renderVideoList() {
     : v.savedRow ? "시청기간 종료" : "아직 열리지 않음";
   const thumb = (v) => v.thumbnail_url
     ? `<img class="thumb" src="${esc(v.thumbnail_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : "";
-  const button = (v) => v.linkPath
+  const button = (v) => v.linkPath && !phone
     ? `<button class="btn small" data-link="${esc(v.linkPath)}">${icon("download")}내려받기</button>`
-    : `<button class="btn small" disabled title="${esc(v.savedRow?.resolve_error || "")}">${icon("download")}내려받기</button>`;
+    : `<button class="btn small" disabled>${icon("download")}내려받기</button>`;
+  // 내려받을 수 없는 이유는 마우스를 올리지 않아도 보이게 글자로 둔다. 휴대폰은 화면 위쪽 안내 하나로 갈음한다.
+  const reason = (v) => v.linkPath || phone ? "" : `<span class="reason">${esc(v.savedRow?.resolve_error || "지금은 내려받을 수 없어요")}</span>`;
   const bulkGroups = groups.map((g) => g.items.filter((v) => v.linkPath).map((v) => ({
     linkPath: v.linkPath, label: v.title, onDone: () => { v.downloaded_at = new Date().toISOString(); markDownloaded(v); } })));
-  box.innerHTML = `<details class="panel-body"><summary>영상 다운로드 · 크롬 확장프로그램 설치 안내</summary>
+  const guide = phone ? "" : `<details class="panel-body" ${state.extensionMissing ? "open" : ""}><summary>영상 다운로드 · 크롬 확장프로그램 설치 안내</summary>
+    ${state.extensionMissing ? `<p class="error" role="alert">${esc(state.extensionMissing)}</p>` : ""}
     <p>영상은 학교에서 PC로 직접 저장됩니다. 데스크톱 크롬에 아유 하기싫어 확장프로그램을 설치해 주세요.</p>
     <ol><li>운영자가 제공한 확장프로그램 ZIP을 받아 압축을 풉니다.</li>
     <li>크롬 주소창에 chrome://extensions를 입력하고 개발자 모드를 켭니다.</li>
     <li>‘압축해제된 확장 프로그램을 로드합니다’에서 압축을 푼 폴더를 선택합니다.</li>
     <li>이 페이지를 새로고침하고 내려받기를 누릅니다.</li></ol>
     <p>처음 열린 확장프로그램 창에서 저장 폴더를 선택합니다. 진행 상황과 취소는 그 창에서 확인할 수 있습니다.
-    저장이 끝날 때까지 다운로드 창과 이 대시보드 탭을 모두 열어 두세요.</p></details>` + groups.map((g, i) => `<div class="group-label row">${esc(g.title)}
+    저장이 끝날 때까지 다운로드 창과 이 대시보드 탭을 모두 열어 두세요.</p></details>`;
+  box.innerHTML = guide + groups.map((g, i) => `<div class="group-label row">${esc(g.title)}
       <span class="group-actions">${bulkButton(bulkGroups[i], g.title)}${typeof transcribeGroupButton === "function" ? transcribeGroupButton(g.items, g.title) : ""}</span></div>
     <ul class="list">${g.items.map((v) => `
     <li class="video-row">
       ${thumb(v)}
       <span class="video-info"><span class="title">${esc(v.title)}</span><br>
         <span class="meta row"><span>${v.duration ? fmtDuration(v.duration) : ""}</span><span>${fmtSize(v.size)}</span>
-          <span>${status(v)}</span>${v.savedRow?.saved ? "<span>주소 저장됨</span>" : ""}${doneBadge(v.downloaded_at)}</span></span>
+          <span>${status(v)}</span>${v.savedRow?.saved ? "<span>주소 저장됨</span>" : ""}${doneBadge(v.downloaded_at)}</span>${reason(v) ? `<br>${reason(v)}` : ""}</span>
       <span class="row-actions">${typeof transcribeButton === "function" ? transcribeButton(v, courseId) : ""}${button(v)}</span>
     </li>`).join("")}</ul>`).join("");
   box.querySelectorAll("[data-link]").forEach((b) => b.addEventListener("click", async () => {
@@ -1249,6 +1265,7 @@ function renderMaterialList() {
   let items = state.materialList.items.map((m) => ({ ...m, linkPath: `/courses/${courseId}/materials/${encodeURIComponent(m.key)}/download-link` }));
   if (state.notDownloadedOnly) items = items.filter((m) => !m.downloaded_at);
   const box = $("#video-list");
+  box.removeAttribute("aria-busy");
   if (!items.length) {
     box.innerHTML = `<div class="empty"><p>${state.notDownloadedOnly ? "아직 받지 않은 자료가 없습니다." : "이 과목에는 받을 수 있는 수업자료가 없습니다."}</p></div>`;
     return;
@@ -1298,7 +1315,7 @@ async function downloadVideo(btn, linkPath) {
     toast(`${link.file_name} 내려받기를 시작했습니다. 브라우저 다운로드 목록에서 진행 상황을 볼 수 있습니다.`);
     return true;
   } catch (err) {
-    toast(err.message, true);
+    reportDownloadError(err);
     return false;
   } finally {
     btn.disabled = false;
@@ -1338,18 +1355,20 @@ async function viewNotifications() {
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const body = { kind: form.kind.value, webhook_url: form.webhook_url.value || null, bot_token: form.bot_token.value || null, chat_id: form.chat_id.value || null };
-    try { await api("/notifications/channels", { method: "POST", json: body }); toast("알림 받을 곳을 추가했습니다"); viewNotifications(); }
-    catch (err) { toast(err.message, true); }
+    try {
+      await withPending(form.querySelector("button:not([type=button])"), "처리 중", () => api("/notifications/channels", { method: "POST", json: body }));
+      toast("알림 받을 곳을 추가했습니다"); viewNotifications();
+    } catch (err) { toast(err.message, true); }
   });
   $("#view").querySelectorAll("[data-test]").forEach((b) => b.addEventListener("click", async () => {
-    try { await api(`/notifications/channels/${b.dataset.test}/test`, { method: "POST" }); toast("테스트 메시지를 보냈습니다"); }
+    try { await withPending(b, "처리 중", () => api(`/notifications/channels/${b.dataset.test}/test`, { method: "POST" })); toast("테스트 메시지를 보냈습니다"); }
     catch (err) { toast(err.message, true); }
   }));
   $("#view").querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", async () => {
     const ok = await confirmDialog({ title: "이 알림 채널을 삭제할까요?", body: ["삭제하면 이 채널로 더 이상 알림을 보내지 않아요."],
       confirmLabel: "알림 채널 삭제", danger: true });
     if (!ok) return;
-    try { await api(`/notifications/channels/${b.dataset.del}`, { method: "DELETE" }); toast("삭제했습니다"); viewNotifications(); }
+    try { await withPending(b, "처리 중", () => api(`/notifications/channels/${b.dataset.del}`, { method: "DELETE" })); toast("삭제했습니다"); viewNotifications(); }
     catch (err) { toast(err.message, true); }
   }));
 }
@@ -1479,7 +1498,7 @@ function viewAccount() {
     });
     if (!ok) return;
     try {
-      await api("/me", { method: "DELETE" });
+      await withPending($("#delete-me"), "처리 중", () => api("/me", { method: "DELETE" }));
       toast("계정과 저장된 정보를 모두 지웠습니다");
       logout();
     } catch (err) { toast(err.message, true); }

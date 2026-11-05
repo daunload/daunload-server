@@ -141,7 +141,9 @@ function extensionRequest(action, data = {}) {
     };
     const timer = setTimeout(() => {
       cleanup();
-      reject(new Error("아유 하기싫어 확장프로그램에 연결하지 못했습니다. 설치·사용 설정 후 페이지를 새로고침해 주세요."));
+      const error = new Error("아유 하기싫어 확장프로그램에 연결하지 못했습니다. 설치·사용 설정 후 페이지를 새로고침해 주세요.");
+      if (action === "ping") error.code = "EXTENSION_MISSING";
+      reject(error);
     }, action === "ping" ? 1500 : 15000);
     window.addEventListener("message", receive);
     window.postMessage({ channel: "ssu-download-request", id, action, ...data }, location.origin);
@@ -151,6 +153,7 @@ function extensionRequest(action, data = {}) {
 async function requireDownloadExtension() {
   const result = await extensionRequest("ping");
   if (result?.version !== 1 || !result.sessions || !result.queue) throw new Error("아유 하기싫어 확장프로그램을 업데이트해 주세요.");
+  state.extensionMissing = null;
 }
 
 async function enqueueDirectVideo(item, signal, session = null) {

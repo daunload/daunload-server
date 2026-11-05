@@ -18,6 +18,71 @@ function icon(name) {
   return `<svg class="icon" data-icon="${name}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${paths}</svg>`;
 }
 
+/* ---------------- 알림 토스트 ----------------
+ * #toast는 메시지 묶음이다. 성공은 3200ms 뒤 사라지고, 오류는 닫기 전까지 남는다.
+ * 같은 오류가 이미 떠 있으면 늘리지 않고, 최대 3개까지만 두며 넘치면 가장 오래된 것부터 지운다.
+ */
+
+const TOAST_MS = 3200;
+const TOAST_MAX = 3;
+
+function toast(msg, bad = false) {
+  const box = document.getElementById("toast");
+  if (!box) return;
+  if (bad && [...box.children].some((n) => n.classList.contains("bad") && n.firstChild?.textContent === msg)) return;
+  const item = document.createElement("div");
+  item.className = `toast${bad ? " bad" : ""}`;
+  const text = document.createElement("span");
+  text.textContent = msg;
+  item.append(text);
+  if (bad) {
+    item.setAttribute("role", "alert");
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "toast-close";
+    close.textContent = "닫기";
+    close.addEventListener("click", () => item.remove());
+    item.append(close);
+  } else {
+    setTimeout(() => item.remove(), TOAST_MS);
+  }
+  box.append(item);
+  while (box.children.length > TOAST_MAX) box.firstElementChild.remove();
+}
+
+function clearToasts() {
+  document.getElementById("toast")?.replaceChildren();
+}
+
+/* ---------------- 처리 중 상태 · 스켈레톤 · 기기 ---------------- */
+
+/** 버튼을 잠그고 label을 보여 주는 동안 fn을 실행한다. 끝나면(실패해도) 원래 모습으로 되돌린다. */
+async function withPending(btn, label, fn) {
+  const html = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = label;
+  btn.setAttribute("aria-busy", "true");
+  try {
+    return await fn();
+  } finally {
+    if (btn.isConnected) {
+      btn.innerHTML = html;
+      btn.disabled = false;
+      btn.removeAttribute("aria-busy");
+    }
+  }
+}
+
+/** 목록이 불러와지는 동안 보여 줄 자리표시 줄 n개. 화면 낭독기에는 숨긴다. */
+function skeletonRows(n) {
+  return `<div class="skeleton-list" aria-hidden="true">${'<div class="skeleton"></div>'.repeat(n)}</div>`;
+}
+
+/** 터치 기기인지. 다운로드 안내에만 쓰고 레이아웃 분기에는 쓰지 않는다. */
+function isPhoneDevice() {
+  return window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+}
+
 /* ---------------- 공통 확인 창 ----------------
  * confirmDialog({ title, body?: string[], warnings?: string[], confirmLabel, danger?, requireText?, requireLabel? })
  *   -> Promise<boolean>. 모든 문자열은 textContent로 넣는다. 이미 열려 있으면 같은 Promise를 돌려준다.
