@@ -1,7 +1,7 @@
 [project]
 name = "ssu-lms-server"
 version = "0.1.0"
-description = "숭실대 LMS 강의·과제·공지 조회와 온라인 강의 재생 서버"
+description = "LMS 강의·과제·공지 조회와 온라인 강의 재생 서버"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",

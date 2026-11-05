@@ -82,7 +82,7 @@ async def login(
     db: Db,
     queue: JobQueue,
     username: Annotated[str, Form(description="학번")],
-    password: Annotated[str, Form(description="숭실 통합 로그인 비밀번호")],
+    password: Annotated[str, Form(description="통합 로그인 비밀번호")],
     agree_terms: Annotated[bool, Form(description="첫 로그인 때 필요한 동의")] = False,
 ):
     """학번과 학교 비밀번호로 로그인한다.

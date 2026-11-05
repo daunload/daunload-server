@@ -1,4 +1,4 @@
-"""숭실대 SSO → LMS → Canvas 로그인.
+"""대학 SSO → LMS → Canvas 로그인.
 
 chlwhdtn03/LMS-API의 LmsAuthService.kt 흐름을 옮겼다.
 1. smartid SSO 로그인으로 sToken을 받는다.

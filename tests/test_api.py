@@ -297,7 +297,7 @@ async def test_other_users_batch_is_hidden(env):
 async def test_dashboard_is_served_and_api_still_wins(env):
     api, _ = env
     r = await api.get("/")
-    assert r.status_code == 200 and "숭실 LMS" in r.text
+    assert r.status_code == 200 and "아유 하기싫어" in r.text
     assert (await api.get("/app.js")).status_code == 200
     assert (await api.get("/health")).json() == {"ok": True}
     h = await _signup(api)

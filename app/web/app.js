@@ -116,6 +116,23 @@ function showAuth() {
   $("#auth").hidden = false;
 }
 
+// 로그인 화면의 뚱이 표정. 실제 안내와 오류는 폼이 맡고, 여기는 분위기만 바꾼다.
+const AUTH_MOODS = {
+  idle: ["blank", "아유… 하기 싫어…"],
+  password: ["think", "비밀번호가… 뭐였더라…"],
+  consent: ["think", "이건 읽어 보고 가자"],
+  submitting: ["steam", "머리에서 김 나는 중…"],
+  error: ["burnt", "아유… 터졌다"],
+};
+function setAuthMood(mood) {
+  const [image, caption] = AUTH_MOODS[mood];
+  $("#auth-mood").src = `/patrick-${image}.jpg`;
+  $("#auth-caption").textContent = caption;
+}
+Object.values(AUTH_MOODS).forEach(([image]) => { new Image().src = `/patrick-${image}.jpg`; });
+$("#password").addEventListener("focus", () => setAuthMood("password"));
+$("#password").addEventListener("blur", () => { if (!$("#auth-error").textContent) setAuthMood("idle"); });
+
 $("#password-toggle").addEventListener("click", (e) => {
   const input = $("#password");
   const visible = input.type === "password";
@@ -131,6 +148,7 @@ $("#login-form").student_id.addEventListener("input", () => {
   $("#consent-row").hidden = true;
   $("#auth-submit").textContent = "로그인";
   $("#auth-error").textContent = "";
+  setAuthMood("idle");
 });
 
 $("#login-form").addEventListener("submit", async (e) => {
@@ -140,11 +158,13 @@ $("#login-form").addEventListener("submit", async (e) => {
   const consentShown = !$("#consent-row").hidden;
   if (consentShown && !f.agree.checked) {
     $("#auth-error").textContent = "동의해야 시작할 수 있습니다.";
+    setAuthMood("error");
     return;
   }
   btn.disabled = true;
   btn.textContent = "학교 계정 확인 중";
   $("#auth-error").textContent = "";
+  setAuthMood("submitting");
   try {
     const form = { username: f.student_id.value.trim(), password: f.password.value };
     if (consentShown) form.agree_terms = "true";
@@ -153,13 +173,16 @@ $("#login-form").addEventListener("submit", async (e) => {
     store.set("token", state.token);
     f.reset();
     $("#consent-row").hidden = true;
+    setAuthMood("idle");
     await boot();
   } catch (err) {
     if (err.code === "consent_required") {
       $("#consent-row").hidden = false;
+      setAuthMood("consent");
       f.agree.focus();
     } else {
       $("#auth-error").textContent = err.message;
+      setAuthMood("error");
     }
   } finally {
     btn.disabled = false;
@@ -206,6 +229,7 @@ async function boot() {
   $("#auth").hidden = true;
   $("#startup").hidden = false;
   $("#startup-message").textContent = "잠시만 기다려 주세요.";
+  $("#startup-photo").src = "/patrick-steam.jpg";
   $("#retry-boot").hidden = true;
   $("#startup-login").hidden = true;
   try {
@@ -213,6 +237,7 @@ async function boot() {
   } catch (err) {
     if (err.status !== 401) {
       $("#startup-message").textContent = `학습 현황을 불러오지 못했습니다. ${err.message}`;
+      $("#startup-photo").src = "/patrick-burnt.jpg";
       $("#retry-boot").hidden = false;
       $("#startup-login").hidden = false;
     }
@@ -284,7 +309,7 @@ $("#sync-btn").addEventListener("click", async () => {
     toast(err.message, true);
   } finally {
     btn.disabled = false;
-    btn.textContent = "지금 동기화";
+    btn.textContent = "새로고침이나 하자";
   }
 });
 
@@ -430,7 +455,7 @@ function renderView() {
   $("#stats").hidden = state.view === "dashboard";
   $(".rail-wrap").hidden = !["todos", "playback"].includes(state.view);
   $("#current-view").textContent = VIEW_NAMES[state.view] || "할 일";
-  document.title = `${VIEW_NAMES[state.view] || "할 일"} · 숭실 LMS`;
+  document.title = `${VIEW_NAMES[state.view] || "할 일"} · 아유 하기싫어`;
   document.querySelectorAll(".side button").forEach((b) => {
     const selected = b.dataset.view === state.view;
     b.classList.toggle("on", selected);
@@ -457,7 +482,7 @@ function needCred() {
  */
 function viewDashboard() {
   if (needCred()) return;
-  $("#view").innerHTML = `<section id="dashboard-playback" class="panel" aria-label="재생 가능한 강의"></section><div id="week-panel"></div>`;
+  $("#view").innerHTML = `<div id="week-panel"></div><section id="dashboard-playback" class="panel" aria-label="재생 가능한 강의"></section>`;
   loadDashboardPlayback();
   if (typeof renderWeek === "function") renderWeek();
 }
@@ -642,7 +667,7 @@ function renderTodoResults() {
   const filtered = query || state.todoFilter !== "all" || state.todoDeadline !== "all";
   $("#todo-results").innerHTML = groups.size
     ? [...groups.values()].map((g) => `<div class="group-label">${esc(g.label)} · ${g.items.length}개</div><ul class="list">${g.items.map(todoItem).join("")}</ul>`).join("")
-    : `<div class="empty"><strong>${filtered ? "조건에 맞는 할 일이 없어요" : "남은 할 일이 없어요"}</strong><p>${filtered ? "검색어나 필터를 바꿔 다른 할 일을 확인해 보세요." : state.cred?.last_synced_at ? "새로운 할 일이 생기면 이곳에 모아 보여드릴게요." : "첫 동기화가 끝나면 과목과 할 일이 표시됩니다. 잠시 후 지금 동기화를 눌러 주세요."}</p>${filtered ? '<button class="btn" id="reset-todos">전체 할 일 보기</button>' : ""}</div>`;
+    : `<div class="empty"><strong>${filtered ? "조건에 맞는 할 일이 없어요" : "할 거 없음. 누워도 됨"}</strong><p>${filtered ? "검색어나 필터를 바꿔 다른 할 일을 확인해 보세요." : state.cred?.last_synced_at ? "새로운 할 일이 생기면 이곳에 모아 보여드릴게요." : "첫 동기화가 끝나면 과목과 할 일이 표시됩니다. 잠시 후 ‘새로고침이나 하자’를 눌러 주세요."}</p>${filtered ? '<button class="btn" id="reset-todos">전체 할 일 보기</button>' : ""}</div>`;
   $("#reset-todos")?.addEventListener("click", () => { state.todoSearch = ""; state.todoFilter = "all"; state.todoDeadline = "all"; viewTodos(); $("#todo-search").focus(); });
 }
 
@@ -677,7 +702,7 @@ function daysAgo(d) {
 async function viewAssignments() {
   if (needCred()) return;
   if (!state.assignments) {
-    $("#view").innerHTML = `<div class="view-head"><h1>미제출 과제</h1></div><div class="panel empty"><p>불러오는 중</p></div>`;
+    $("#view").innerHTML = `<div class="view-head"><h1>미제출 과제</h1></div><div class="panel empty"><p>불러오는 중… 나도 하기 싫어…</p></div>`;
     try { state.assignments = await api("/assignments"); } catch (err) { toast(err.message, true); return; }
     if (state.view !== "assignments") return;
   }
@@ -703,7 +728,7 @@ async function viewAssignments() {
   $("#view").innerHTML = `
     <div class="view-head"><h1>미제출 과제</h1><div class="filters">${filters}</div></div>
     <div class="panel">${body}</div>
-    <p class="muted small-text">마지막 동기화 기준입니다. 방금 제출했다면 지금 동기화를 누르세요. 제출 여부를 확인할 수 없는 과제는 넣지 않았습니다.</p>`;
+    <p class="muted small-text">마지막 동기화 기준입니다. 방금 제출했다면 ‘새로고침이나 하자’를 눌러 주세요. 제출 여부를 확인할 수 없는 과제는 넣지 않았습니다.</p>`;
   $("#view .filters").addEventListener("click", (e) => {
     const k = e.target.closest("button")?.dataset.f;
     if (k) { state.assignmentFilter = k; viewAssignments(); }
@@ -754,7 +779,7 @@ function viewCourses() {
   $("#view").innerHTML = `
     <div class="view-head"><h1>과목</h1></div>
     <p class="notice-inline">자동 수강을 켜면 동기화할 때마다 새로 열린 영상을 순서대로 재생합니다. 직접 시청하지 않은 수강은 학칙상 문제가 될 수 있으니 확인 후 켜세요.</p>
-    <div class="panel">${rows || `<div class="empty"><p>과목이 없습니다. 지금 동기화를 눌러 불러오세요.</p></div>`}</div>
+    <div class="panel">${rows || `<div class="empty"><p>과목이 없습니다. ‘새로고침이나 하자’를 눌러 불러오세요.</p></div>`}</div>
     <p class="muted small-text">초록 출석, 노랑 지각, 빨강 결석, 회색 기록 없음</p>`;
   $("#view").querySelectorAll("input[data-course]").forEach((el) => el.addEventListener("change", onAutoPlay));
 }
@@ -778,7 +803,7 @@ async function onAutoPlay(e) {
 async function viewAnnouncements() {
   if (needCred()) return;
   if (!state.announcements) {
-    $("#view").innerHTML = `<div class="view-head"><h1>공지</h1></div><div class="panel empty"><p>불러오는 중</p></div>`;
+    $("#view").innerHTML = `<div class="view-head"><h1>공지</h1></div><div class="panel empty"><p>불러오는 중… 나도 하기 싫어…</p></div>`;
     try { state.announcements = await api("/announcements?limit=200"); } catch (err) { if (state.view === "announcements") viewError(err.message, viewAnnouncements); return; }
     if (state.view !== "announcements") return;
   }
@@ -1036,7 +1061,7 @@ async function viewVideos() {
     .filter((v) => !courses.some((c) => c.lms_course_id === v.lms_course_id))
     .map((v) => [v.lms_course_id, v.course_name])).entries()];
   if (!courses.length && !pastCourses.length) {
-    $("#view").innerHTML = `<div class="view-head"><h1>강의 영상</h1></div><div class="panel empty"><p>과목이 없습니다. 지금 동기화를 눌러 불러오세요.</p></div>`;
+    $("#view").innerHTML = `<div class="view-head"><h1>강의 영상</h1></div><div class="panel empty"><p>과목이 없습니다. ‘새로고침이나 하자’를 눌러 불러오세요.</p></div>`;
     return;
   }
   const allIds = [...courses.map((c) => c.lms_course_id), ...pastCourses.map(([id]) => id)];
@@ -1056,7 +1081,7 @@ async function viewVideos() {
     </div>
     <p class="notice-inline">본인이 수강하는 강의와 자료를 개인 복습용으로 받는 기능입니다. 강의 영상과 자료는 교수와 학교의 저작물이므로 다른 사람에게 공유하거나 올리지 마세요. 파일은 서버에 저장하지 않고 학교에서 받는 대로 바로 전달합니다. 동기화 때 영상 주소를 저장해 두므로 시청기간이 끝난 영상도 받을 수 있지만, 학교 서버가 주소를 막거나 영상을 지우면 받을 수 없습니다.</p>
     <p class="bulk-status" id="bulk-status" role="status"></p>
-    <div class="panel" id="video-list"><div class="empty"><p>LMS에서 목록을 불러오는 중</p></div></div>`;
+    <div class="panel" id="video-list"><div class="empty loading"><p>LMS에서 목록을 불러오는 중</p></div></div>`;
   $("#video-course").addEventListener("change", (e) => {
     state.videoCourse = Number(e.target.value); state.videoList = null; state.materialList = null; viewVideos();
   });
@@ -1164,7 +1189,7 @@ function renderVideoList() {
   const bulkGroups = groups.map((g) => g.items.filter((v) => v.linkPath).map((v) => ({
     linkPath: v.linkPath, label: v.title, onDone: () => { v.downloaded_at = new Date().toISOString(); markDownloaded(v); } })));
   box.innerHTML = `<details class="panel-body"><summary>영상 다운로드 · 크롬 확장프로그램 설치 안내</summary>
-    <p>영상은 학교에서 PC로 직접 저장됩니다. 데스크톱 크롬에 SSU 다운로드 확장프로그램을 설치해 주세요.</p>
+    <p>영상은 학교에서 PC로 직접 저장됩니다. 데스크톱 크롬에 아유 하기싫어 확장프로그램을 설치해 주세요.</p>
     <ol><li>운영자가 제공한 확장프로그램 ZIP을 받아 압축을 풉니다.</li>
     <li>크롬 주소창에 chrome://extensions를 입력하고 개발자 모드를 켭니다.</li>
     <li>‘압축해제된 확장 프로그램을 로드합니다’에서 압축을 푼 폴더를 선택합니다.</li>

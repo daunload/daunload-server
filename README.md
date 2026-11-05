@@ -1,6 +1,6 @@
-# SSU LMS 서버
+# LMS 서버
 
-숭실대 LMS(lms.ssu.ac.kr, Canvas + LearningX)에서 수강 과목의 강의·과제·퀴즈·공지·출석을 모아 보여주고,
+LMS에서 수강 과목의 강의·과제·퀴즈·공지·출석을 모아 보여주고,
 기간 안의 미수강 온라인 강의를 헤드리스 Chrome으로 **실제 재생**(1배속, 끝까지)한 뒤 LMS에서 완료로 바뀌었는지 확인하는 서버.
 로그인·조회 흐름은 [chlwhdtn03/LMS-API](https://github.com/chlwhdtn03/LMS-API)(Apache-2.0)를 Python으로 옮겼다.
 

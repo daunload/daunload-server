@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "SSU 강의 직접 다운로드",
+  "name": "아유 하기싫어 다운로더",
   "description": "학교 CDN에서 강의 영상을 PC로 직접 저장합니다.",
-  "version": "1.2.3",
+  "version": "1.2.5",
   "minimum_chrome_version": "120",
   "permissions": [
     "storage",
@@ -33,7 +33,7 @@
     "128": "icons/icon-128.png"
   },
   "action": {
-    "default_title": "SSU 다운로드 창 열기",
+    "default_title": "아유 하기싫어 다운로드 창 열기",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png",

@@ -12,7 +12,7 @@ const week = { data: null, plan: null, error: null, confirming: false, lastActiv
 async function renderWeek() {
   const el = document.getElementById("week-panel");
   if (!el) return;
-  if (!week.data && !week.error) el.innerHTML = `<section class="today"><p class="today-sub">불러오는 중</p></section>`;
+  if (!week.data && !week.error) el.innerHTML = `<section class="today"><p class="today-sub">불러오는 중… 나도 하기 싫어…</p></section>`;
   try {
     week.data = await api("/week");
     week.error = null;
@@ -54,13 +54,18 @@ function drawWeek() {
   const head = !state.cred?.last_synced_at
     ? `<h1 id="week-heading">첫 동기화를 기다리고 있어요</h1><p class="today-sub">학교 LMS에서 과목과 할 일을 가져오는 중이에요.</p>`
     : tasks.length
-      ? `<h1 id="week-heading">이번 주 할 일이 ${tasks.length}개 남았어요</h1><p class="today-sub">가장 빠른 마감은 ${whenText(tasks[0].deadline)}이에요</p>`
-      : `<h1 id="week-heading">이번 주 할 일을 모두 끝냈어요</h1><p class="today-sub">새 강의나 과제가 열리면 여기에 알려 드릴게요.</p>`;
+      ? `<h1 id="week-heading">아유… 이번 주 할 일이 ${tasks.length}개 남았어요</h1><p class="today-sub">가장 빠른 마감은 ${whenText(tasks[0].deadline)}이에요</p>`
+      : `<h1 id="week-heading">이번 주 할 일을 모두 끝냈어요. 누워도 됨</h1><p class="today-sub">새 강의나 과제가 열리면 여기에 알려 드릴게요.</p>`;
 
   el.innerHTML = `
     <section class="today" aria-labelledby="week-heading">
-      <p class="today-date">${today}</p>
-      ${head}
+      <div class="today-head">
+        <div class="today-title">
+          <p class="today-date">${today}</p>
+          ${head}
+        </div>
+        <img class="today-photo" src="/patrick-${!state.cred?.last_synced_at ? "steam" : tasks.length ? "think" : "drool"}.jpg" alt="" width="128" height="128">
+      </div>
       ${tasks.length ? `<ul class="task-list">${tasks.map(taskRow).join("")}</ul>` : ""}
       <div class="cta">${ctaHtml(d)}</div>
       <p class="today-links">

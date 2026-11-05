@@ -23,7 +23,7 @@ def build(origin: str, output: Path):
     manifest = json.loads((source / "manifest.json").read_text())
     manifest["content_scripts"][0]["matches"] = [f"{url.scheme}://{url.netloc}/*"]
     (output / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
-    assets = ["worker.js", "bridge.js", "manager.html", "manager.js", "manager.css", "icon.svg", *manifest["icons"].values()]
+    assets = ["worker.js", "bridge.js", "manager.html", "manager.js", "manager.css", "patrick-drool.jpg", *manifest["icons"].values()]
     for name in assets:
         (output / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source / name, output / name)
