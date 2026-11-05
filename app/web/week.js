@@ -98,12 +98,9 @@ function ctaHtml(d) {
   const a = state.active;
   if (state.playbackStarting) return `<button class="btn primary block" disabled>재생 요청 중…</button>`;
   if (a) {
-    const done = a.done_count + a.skipped_count;
     return `<div class="cta-progress">
-      <div class="row"><strong>강의 듣는 중</strong><span class="today-sub">${done}/${a.total}개 완료</span></div>
-      <progress value="${done}" max="${a.total || 1}" aria-label="강의 재생 진행률"></progress>
-      <p class="today-sub">창을 닫아도 계속 들어요.${a.cancel_requested ? " 중지하는 중이에요." : ""}</p>
-      ${a.cancel_requested ? "" : '<button class="btn ghost block" id="week-stop">중지</button>'}</div>`;
+      <strong>강의 재생 중 ${a.done_count + a.skipped_count}/${a.total}개</strong>
+      <button class="btn" id="week-details">재생 현황 보기</button></div>`;
   }
   if (d.videos.length) {
     const hasAssignments = d.assignments.length > 0;
@@ -121,6 +118,7 @@ function ctaHtml(d) {
 function bindWeek() {
   const on = (id, fn) => document.getElementById(id)?.addEventListener("click", fn);
   on("week-all", () => navigate("todos"));
+  on("week-details", () => navigate("playback"));
   on("week-missed", () => { state.assignmentFilter = "overdue"; navigate("assignments"); });
   on("week-play", async (e) => {
     if (week.busy) return;
@@ -142,18 +140,6 @@ function bindWeek() {
       toast(err.message, true);
     } finally {
       week.busy = false;
-    }
-    drawWeek();
-  });
-  on("week-stop", async (e) => {
-    e.currentTarget.disabled = true;
-    try {
-      await api(`/playback/batches/${state.active.id}`, { method: "DELETE" });
-      state.active = await api(`/playback/batches/${state.active.id}`);
-      if (!["queued", "running"].includes(state.active.status)) state.active = null;
-      toast("지금 듣는 강의가 끝나는 대로 멈출게요");
-    } catch (err) {
-      toast(err.message, true);
     }
     drawWeek();
   });

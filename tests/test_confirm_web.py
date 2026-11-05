@@ -20,7 +20,7 @@ async def test_week_play_confirms_with_warning_then_starts(page):
     await expect(dialog).to_contain_text(WARNING)
     assert page.calls == []
     await dialog.get_by_role("button", name="2개 재생 시작").click()
-    await expect(page.locator(".cta-progress")).to_contain_text("0/2개 완료")
+    await expect(page.locator(".cta-progress")).to_contain_text("강의 재생 중 0/2개")
     assert page.calls == [("POST", "/playback/batches", {"scope": "week"})]
     await expect(dialog).not_to_be_visible()
 
@@ -33,7 +33,7 @@ async def test_all_play_confirms_with_warning(page):
     await expect(dialog).to_contain_text("학칙")
     assert page.calls == []
     await dialog.get_by_role("button", name="2개 재생 시작").click()
-    await expect(page.locator("#dashboard-playback").get_by_role("status")).to_contain_text("0/2개 완료")
+    await expect(page.locator(".cta-progress")).to_contain_text("강의 재생 중 0/2개")
     assert page.calls == [("POST", "/playback/batches", {"scope": "all"})]
 
 
@@ -58,7 +58,7 @@ async def test_double_open_shows_one_dialog(page):
     await expect(dialog).to_be_visible()
     assert await page.locator("dialog[open]").count() == 1
     await dialog.get_by_role("button", name="2개 재생 시작").click()
-    await expect(page.locator(".cta-progress")).to_contain_text("0/2개 완료")
+    await expect(page.locator(".cta-progress")).to_contain_text("강의 재생 중 0/2개")
     assert page.calls == [("POST", "/playback/batches", {"scope": "week"})]
 
 

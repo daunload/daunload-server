@@ -201,6 +201,7 @@ function logout() {
     videoCourse: null, videoList: null, savedVideos: null, materialList: null, bulk: null,
   assignments: null, assignmentFilter: "unsubmitted", noticeCourse: null, todoSearch: "", todoFilter: "all", todoDeadline: "all" });
   closeConfirmDialog();
+  renderTaskPanel();
   $("#password").type = "password";
   $("#password-toggle").textContent = "표시";
   $("#password-toggle").setAttribute("aria-pressed", "false");
@@ -223,6 +224,7 @@ async function loadCore() {
   const running = batches.find((b) => b.status === "queued" || b.status === "running");
   state.active = running ? await api(`/playback/batches/${running.id}`) : null;
   if (state.active) startPolling();
+  renderTaskPanel();
 }
 
 async function boot() {
@@ -564,11 +566,6 @@ function drawDashboardPlayback() {
   const items = plan?.items || [];
   const batch = state.active;
   const jobs = batch?.jobs || [];
-  const progress = batch ? `<div class="dashboard-playback-progress" role="status">
-    <strong>${batch.status === "queued" ? "재생 대기 중" : "강의 재생 중"}</strong>
-    ${playbackProgressHtml(batch)}
-    <p>${batch.status === "queued" && batch.queue_position != null ? `대기 ${batch.queue_position}번째 · ` : ""}창을 닫아도 서버에서 계속 재생합니다.</p>
-    <button class="btn" id="dashboard-playback-details">재생 현황 보기</button></div>` : "";
   const list = items.length ? `<ol class="dashboard-lecture-list">${items.map((item) => {
     const job = jobs.find((j) => j.module_item_id === item.module_item_id && j.lms_course_id === item.lms_course_id);
     return `<li><div><h3>${esc(item.title)}</h3><p>${esc(item.course_name)} · ${esc(item.module_title)} · ${fmtDuration(item.duration)}</p>
@@ -579,7 +576,6 @@ function drawDashboardPlayback() {
     <div class="view-head"><h2>재생 가능한 강의${plan && !state.dashboardLoading ? ` ${items.length}개` : ""}</h2>
       <button class="btn" id="dashboard-playback-refresh" ${state.dashboardLoading || state.playbackStarting ? "disabled" : ""}>목록 다시 불러오기</button></div>
     <p class="dashboard-playback-note">전체 과목에서 지금 열려 있고 마감 전인 미수강 강의입니다. 마지막 동기화 기준이며, 재생 직전에 완료 여부를 다시 확인합니다.</p>
-    ${progress}
     ${state.dashboardLoading ? '<p role="status">강의 목록을 불러오는 중입니다.</p>'
       : state.dashboardError ? `<div role="alert"><p>${esc(state.dashboardError)}</p><button class="btn" id="dashboard-playback-retry">다시 시도</button></div>`
       : `${list}${!batch ? `<button class="btn block" id="dashboard-play-all" ${!items.length || state.playbackStarting ? "disabled" : ""}>
@@ -588,7 +584,6 @@ function drawDashboardPlayback() {
   </div>`;
   $("#dashboard-playback-refresh")?.addEventListener("click", loadDashboardPlayback);
   $("#dashboard-playback-retry")?.addEventListener("click", loadDashboardPlayback);
-  $("#dashboard-playback-details")?.addEventListener("click", () => navigate("playback"));
   $("#dashboard-play-all")?.addEventListener("click", confirmDashboardPlayback);
 }
 
@@ -851,11 +846,7 @@ function viewPlayback() {
       if (details.open && !details.dataset.loaded) loadPlaybackFailure(details);
     });
   });
-  if (state.active) {
-    $("#cancel-batch")?.addEventListener("click", cancelBatch);
-  } else {
-    bindPlanForm();
-  }
+  if (!state.active) bindPlanForm();
 }
 
 function videoTodos() { return state.todos.filter((t) => t.kind === "video"); }
@@ -958,7 +949,6 @@ function activeBatchHtml(b) {
         ${j.status === "playing" ? `<p class="small-text">재생 진행률 ${Math.floor(pct)}%</p><progress value="${pct}" max="100" aria-label="${esc(j.title)} 재생 진행률"></progress>` : ""}</span>
       <span class="status ${j.status}">${JOB_STATUS[j.status] || j.status}</span></li>`;
   }).join("");
-  const cancelling = b.cancel_requested;
   return `<div class="panel">
     <div class="panel-body">
       <div class="summary-line"><span><b>${BATCH_STATUS[b.status]}</b></span>
@@ -973,18 +963,32 @@ function activeBatchHtml(b) {
     </div>
     <div class="panel-body">${playbackProgressHtml(b)}</div>
     <ol class="steps">${steps}</ol>
-    <div class="actions"><button class="btn danger" id="cancel-batch" ${cancelling ? "disabled" : ""}>${cancelling ? "재생 중지 요청됨" : "재생 중지"}</button></div>
   </div>`;
 }
 
-async function cancelBatch() {
+/** 확인 창을 거쳐 진행 중인 묶음을 멈춘다. 창이 열린 동안 묶음이 끝나거나 바뀌었으면 아무것도 보내지 않는다. */
+async function cancelActivePlayback() {
+  const id = state.active?.id;
+  if (id == null) return;
+  const ok = await confirmDialog({
+    title: "재생을 중지할까요?",
+    body: ["지금 재생 중인 강의가 끝나는 대로 멈춰요."],
+    confirmLabel: "재생 중지",
+    danger: true,
+  });
+  if (!ok || state.active?.id !== id) return;
   try {
-    await api(`/playback/batches/${state.active.id}`, { method: "DELETE" });
-    state.active = await api(`/playback/batches/${state.active.id}`);
-    toast("재생 중지를 요청했습니다. 지금 영상이 정리되면 멈춥니다.");
-    if (!["queued", "running"].includes(state.active.status)) await finishActive();
-    viewPlayback();
+    await api(`/playback/batches/${id}`, { method: "DELETE" });
+    if (state.active?.id !== id) return;
+    state.active = { ...state.active, cancel_requested: true };
+    toast("지금 듣는 강의가 끝나는 대로 멈출게요");
+    try {
+      const detail = await api(`/playback/batches/${id}`);
+      if (state.active?.id === id) state.active = detail;
+    } catch { /* 중지는 접수됐다. 진행 상황은 다음 폴링에서 다시 조회한다. */ }
+    if (state.active?.id === id && !["queued", "running"].includes(state.active.status)) await finishActive();
   } catch (err) { toast(err.message, true); }
+  if (state.token) redrawPlayback();
 }
 
 function historyHtml() {
@@ -1023,16 +1027,21 @@ async function loadPlaybackFailure(details) {
 }
 
 let pollTimer = null;
+function redrawPlayback() {
+  renderRail();
+  if (state.view === "playback") viewPlayback();
+  if (state.view === "dashboard" && typeof drawWeek === "function") drawWeek();
+  renderTaskPanel();
+}
 function startPolling() {
+  renderTaskPanel();
   if (pollTimer) return;
   pollTimer = setInterval(async () => {
     if (!state.active) return stopPolling();
     try {
       state.active = await api(`/playback/batches/${state.active.id}`);
       if (!["queued", "running"].includes(state.active.status)) await finishActive();
-      renderRail();
-      if (state.view === "playback") viewPlayback();
-      if (state.view === "dashboard" && typeof drawWeek === "function") drawWeek();
+      redrawPlayback();
     } catch { /* 일시적 오류는 다음 주기에 다시 시도 */ }
   }, 5000);
 }
@@ -1043,7 +1052,9 @@ async function finishActive() {
   stopPolling();
   toast(`강의 재생 ${BATCH_STATUS[b.status]}: 완료 ${b.done_count}, 실패 ${b.failed_count}`, b.status === "failed");
   state.active = null;
+  renderTaskPanel();
   [state.todos, state.batches] = await Promise.all([api("/todos"), api("/playback/batches?limit=10")]);
+  renderTaskPanel();
   if (state.view === "dashboard") {
     loadDashboardPlayback();
     if (typeof renderWeek === "function") renderWeek();

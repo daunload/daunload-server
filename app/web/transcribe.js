@@ -21,7 +21,7 @@ function ensureWorker() {
 }
 
 function onWorkerMessage({ data: m }) {
-  if (m.type === "model-progress") { tx.modelPercent = m.percent; renderTxPanel(); return; }
+  if (m.type === "model-progress") { tx.modelPercent = m.percent; renderTaskPanel(); return; }
   if (m.type === "device") {
     tx.device = m.device;
     tx.modelPercent = null;
@@ -29,12 +29,12 @@ function onWorkerMessage({ data: m }) {
       toast("이 브라우저는 WebGPU를 지원하지 않아 CPU로 텍스트 변환합니다. 강의 길이보다 오래 걸릴 수 있습니다.");
       store.set("whisper-cpu-notice", "1");
     }
-    renderTxPanel();
+    renderTaskPanel();
     return;
   }
   const job = tx.current;
   if (!job || m.jobId !== job.id) return;
-  if (m.type === "progress") { job.seconds = m.seconds; job.wake?.(); renderTxPanel(); }
+  if (m.type === "progress") { job.seconds = m.seconds; job.wake?.(); renderTaskPanel(); }
   else if (m.type === "segment") job.segments.push({ start: m.start, end: m.end, text: m.text });
   else if (m.type === "done") job.resolve();
   else if (m.type === "error") {
@@ -48,7 +48,7 @@ function failAll(message) {
   tx.worker = null;
   tx.current?.reject?.(new Error(message));
   for (const job of tx.queue.splice(0)) tx.finished.push({ ...job, status: "failed", error: message });
-  renderTxPanel();
+  renderTaskPanel();
 }
 
 function enqueueTranscription(items) {
@@ -58,7 +58,7 @@ function enqueueTranscription(items) {
     tx.finished = tx.finished.filter((f) => f.key !== key);
     tx.queue.push({ ...it, key, id: tx.nextId++, status: "queued", seconds: 0, duration: it.duration || null });
   }
-  renderTxPanel();
+  renderTaskPanel();
   if (!tx.current) runNext();
 }
 
@@ -74,7 +74,7 @@ function cancelTranscription() {
 async function runNext() {
   const job = tx.queue.shift() || null;
   tx.current = job;
-  renderTxPanel();
+  renderTaskPanel();
   if (!job) return;
   job.status = "running";
   job.segments = [];
@@ -192,35 +192,6 @@ function wireTranscribe(box, items, courseId) {
     renderVideoList();
   }));
   box.querySelectorAll("[data-tx-open]").forEach((b) => b.addEventListener("click", () => openTranscript(Number(b.dataset.txOpen))));
-}
-
-/* ---------- 진행 패널 ---------- */
-
-function renderTxPanel() {
-  const panel = $("#transcribe-panel");
-  if (!panel) return;
-  const job = tx.current;
-  const failed = tx.finished.filter((f) => f.status === "failed");
-  panel.hidden = !job && !tx.queue.length && !failed.length;
-  if (panel.hidden) return;
-  const pct = job?.duration ? Math.min(100, Math.round((job.seconds / job.duration) * 100)) : null;
-  const model = tx.modelPercent !== null && tx.modelPercent !== undefined ? `<p class="meta">Whisper 모델 받는 중 ${tx.modelPercent}% (처음 한 번만)</p>` : "";
-  panel.innerHTML = `
-    <strong>텍스트 변환</strong>
-    ${job ? `<p class="title">${esc(job.title)}</p>
-      <progress max="100" ${pct === null ? "" : `value="${pct}"`}></progress>
-      <p class="meta">${pct === null ? fmtDuration(job.seconds || 0) + " 처리" : `${pct}%`}${tx.device ? ` · ${tx.device === "webgpu" ? "GPU" : "CPU"}` : ""}</p>
-      ${model}<button class="btn small" id="tx-stop">중지</button>` : ""}
-    ${tx.queue.length ? `<p class="meta">대기 ${tx.queue.length}개</p>` : ""}
-    ${failed.length ? `<details><summary>실패 ${failed.length}개</summary><ul>${failed.map((f) => `<li>${esc(f.title)}: ${esc(f.error)}
-      <button class="btn small" data-tx-retry="${esc(f.key)}">다시</button></li>`).join("")}</ul>
-      <button class="btn small ghost" id="tx-clear">닫기</button></details>` : ""}`;
-  $("#tx-stop")?.addEventListener("click", cancelTranscription);
-  $("#tx-clear")?.addEventListener("click", () => { tx.finished = []; renderTxPanel(); });
-  panel.querySelectorAll("[data-tx-retry]").forEach((b) => b.addEventListener("click", () => {
-    const f = tx.finished.find((x) => x.key === b.dataset.txRetry);
-    if (f) enqueueTranscription([f]);
-  }));
 }
 
 window.addEventListener("beforeunload", (e) => {

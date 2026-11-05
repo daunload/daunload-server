@@ -36,6 +36,7 @@
   --text-lg: 18px;
   --text-xl: 22px;
   --touch: 44px;
+  --ad-inset: 0px;
   --z-nav: 10;
   --z-top: 15;
   --z-skip: 30;
@@ -63,8 +64,6 @@
 .dashboard-lecture-list h3 { font-size: var(--text-md); }
 .dashboard-lecture-list p { color: var(--ink-2); font-size: var(--text-sm); margin-top: 4px; }
 .dashboard-lecture-list .status { flex-shrink: 0; }
-.dashboard-playback-progress { display: grid; gap: 8px; padding: 16px; border-radius: var(--r-btn); background: var(--fill); }
-.dashboard-playback-progress progress { width: 100%; accent-color: var(--blue); }
 .playback-progress { display: grid; gap: 10px; min-width: 0; overflow-wrap: anywhere; }
 .playback-progress h3 { font-size: var(--text-md); }
 .playback-current { display: grid; gap: 8px; }
@@ -313,8 +312,6 @@ progress::-moz-progress-bar { background: var(--blue); }
 .btn.block { width: 100%; min-height: 54px; font-size: var(--text-md); border-radius: 14px; }
 .cta-note { text-align: center; font-size: var(--text-sm); color: var(--ink-3); }
 .cta-progress { display: grid; gap: 10px; padding: 20px; background: var(--surface); border-radius: var(--r-card); }
-.cta-progress .row { justify-content: space-between; }
-.cta-progress .btn.block { min-height: 44px; font-size: var(--text-md); }
 .today-links { display: flex; gap: 16px; margin-top: 8px; }
 .today-links .btn.link { color: var(--ink-3); font-size: var(--text-sm); }
 .today-links .btn.link:hover { color: var(--ink-2); }
@@ -519,10 +516,6 @@ details.notice[open] summary::after { content: "⌃"; }
 .view-head select, .view-head input { background: var(--surface); }
 .view-head label { grid-auto-flow: column; align-items: center; gap: 8px; }
 
-.transcribe-panel { position: fixed; right: 16px; bottom: 16px; z-index: var(--z-panel); width: min(320px, calc(100vw - 32px)); background: var(--surface); border-radius: var(--r-card); padding: 14px 16px; box-shadow: 0 8px 24px rgba(0,0,0,.12); display: grid; gap: 6px; }
-.transcribe-panel progress { width: 100%; }
-.transcribe-panel .title { font-weight: 600; margin: 0; }
-.transcribe-panel .meta { margin: 0; }
 .transcript-dialog { border: 0; border-radius: var(--r-card); padding: 20px; width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 64px); display: grid; gap: 10px; }
 .transcript-dialog:not([open]) { display: none; }
 .transcript-dialog::backdrop { background: rgba(0,0,0,.35); }
@@ -589,7 +582,7 @@ progress { border: 2px solid var(--ink); border-radius: 6px; height: 12px; }
 .side button.on .icon { color: var(--ink); }
 .nav-label, .icon { color: var(--ink-2); }
 
-.panel, .stat, .task-list, .rail-wrap, .cta-progress, .notice-inline, .transcribe-panel, .transcript-dialog, .confirm-dialog {
+.panel, .stat, .task-list, .rail-wrap, .cta-progress, .notice-inline, .transcript-dialog, .confirm-dialog {
   border: 2px solid var(--ink);
 }
 .stat:hover { background: var(--pink-soft); }
@@ -640,3 +633,38 @@ progress { border: 2px solid var(--ink); border-radius: 6px; height: 12px; }
 .confirm-require { display: grid; gap: 6px; font-size: var(--text-sm); }
 .confirm-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 .confirm-actions .btn { min-height: 44px; }
+
+/* 하단 진행 패널 (tasks.js) */
+#task-panel {
+  position: fixed; right: 16px; bottom: calc(8px + var(--ad-inset)); z-index: var(--z-panel);
+  width: 320px; max-height: calc(100dvh - 16px - var(--ad-inset));
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--surface); border: 2px solid var(--ink); border-radius: 12px; box-shadow: 3px 3px 0 var(--ink);
+}
+#task-bar {
+  flex: none; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 48px; padding: 6px 12px;
+  background: none; border: 0; color: var(--ink); font: inherit; font-size: var(--text-sm); font-weight: 600; text-align: left; cursor: pointer;
+}
+#task-bar:hover { background: var(--pink-soft); }
+#task-bar:focus-visible { outline-offset: -4px; }
+#task-bar[aria-expanded="true"] { border-bottom: 2px solid var(--ink); }
+#task-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--red); }
+#task-summary { flex: 1; min-width: 0; }
+#task-toggle { flex: none; }
+#task-sheet { flex: 0 1 auto; min-height: 0; max-height: 80dvh; overflow-y: auto; overscroll-behavior: contain; }
+.tp-list { list-style: none; margin: 0; padding: 0; }
+.tp-row { display: grid; gap: 6px; padding: 10px 12px; }
+.tp-row + .tp-row { border-top: 1px solid var(--line); }
+.tp-row.bad { background: var(--red-soft); }
+.tp-row.bad .tp-title { color: var(--red); }
+.tp-row progress { width: 100%; accent-color: var(--blue); }
+.tp-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.tp-title { flex: 1 1 10em; min-width: 0; margin: 0; font-size: var(--text-md); font-weight: 700; overflow-wrap: anywhere; }
+.tp-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.tp-note { margin: 0; font-size: var(--text-sm); color: var(--ink-2); overflow-wrap: anywhere; }
+/* 바(8px 여백 + 52px 높이)와 그 위 12px 간격만큼 비워 내용과 토스트가 가려지지 않게 한다 */
+body.has-task-bar { padding-bottom: calc(72px + var(--ad-inset)); }
+body.has-task-bar .toast { bottom: calc(72px + var(--ad-inset)); }
+@media (max-width: 760px) {
+  #task-panel { left: 8px; right: 8px; width: auto; }
+}

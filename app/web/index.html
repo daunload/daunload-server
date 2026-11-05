@@ -111,10 +111,14 @@
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <aside class="transcribe-panel" id="transcribe-panel" aria-live="polite" hidden></aside>
+  <aside id="task-panel" aria-label="진행 중인 작업" hidden>
+    <button type="button" id="task-bar" aria-expanded="false" aria-controls="task-sheet"><span id="task-dot" aria-hidden="true" hidden></span><span id="task-summary" aria-live="polite"></span><span id="task-toggle">펼치기</span></button>
+    <div id="task-sheet" hidden></div>
+  </aside>
   <dialog class="transcript-dialog" id="transcript-dialog"></dialog>
   <dialog class="confirm-dialog" id="confirm-dialog"></dialog>
   <script src="/ui.js"></script>
+  <script src="/tasks.js"></script>
   <script src="/calendar.js"></script>
   <script src="/downloads.js"></script>
   <script src="/transcribe.js"></script>

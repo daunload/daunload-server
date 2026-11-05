@@ -122,7 +122,7 @@ async def _start_one(page, data, worker, audio_seconds, duration):
 async def test_failed_job_aborts_audio_stream(dashboard):
     page, data = dashboard
     saved = await _start_one(page, data, FAILING_WORKER, audio_seconds=2, duration=2)
-    await expect(page.locator("#transcribe-panel")).to_contain_text("디코더 오류")
+    await expect(page.locator("#task-sheet")).to_contain_text("디코더 오류")
     # 실패한 작업의 오디오 요청을 끊어야 서버의 동시 실행 자리가 풀린다
     assert await page.evaluate("tx.finished[0].ctrl.signal.aborted") is True
     assert saved == []
@@ -131,5 +131,5 @@ async def test_failed_job_aborts_audio_stream(dashboard):
 async def test_truncated_audio_is_not_saved(dashboard):
     page, data = dashboard
     saved = await _start_one(page, data, FAKE_WORKER, audio_seconds=2, duration=60)
-    await expect(page.locator("#transcribe-panel")).to_contain_text("오디오가 중간에 끊겼습니다")
+    await expect(page.locator("#task-sheet")).to_contain_text("오디오가 중간에 끊겼습니다")
     assert saved == []

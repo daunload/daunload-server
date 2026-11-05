@@ -119,13 +119,16 @@ async def test_one_button_plays_this_weeks_lectures(page, tmp_path):
     await expect(dialog).to_contain_text("학칙")
     await page.screenshot(path=tmp_path / "confirm.png", full_page=True)
     await dialog.get_by_role("button", name="2개 재생 시작").click()
-    await expect(page.locator(".cta-progress")).to_contain_text("0/2개 완료")
+    await expect(page.locator(".cta-progress")).to_contain_text("강의 재생 중 0/2개")
     await expect(page.locator(".task").first).to_contain_text("듣는 중 30%")
     assert page.calls == [("POST", "/playback/batches", {"scope": "week"})]
     await page.screenshot(path=tmp_path / "playing.png", full_page=True)
 
-    await page.get_by_role("button", name="중지").click()
-    await expect(page.locator(".cta-progress")).to_contain_text("중지하는 중이에요")
+    await page.locator("#task-bar").click()
+    sheet = page.locator("#task-sheet")
+    await sheet.get_by_role("button", name="재생 중지").click()
+    await dialog.get_by_role("button", name="재생 중지").click()
+    await expect(sheet).to_contain_text("중지하는 중이에요")
     assert page.calls[-1] == ("DELETE", "/playback/batches/7", None)
 
 
@@ -171,11 +174,12 @@ async def test_dashboard_all_playable_lectures_start_with_one_click(page, tmp_pa
     await page.screenshot(path=tmp_path / "playable-mobile.png", full_page=True)
     await panel.get_by_role("button", name="전체 강의 2개 재생", exact=True).click()
     await page.locator("#confirm-dialog").get_by_role("button", name="2개 재생 시작").click()
-    await expect(panel.get_by_role("status")).to_contain_text("0/2개 완료")
+    progress = page.locator(".cta-progress")
+    await expect(progress).to_contain_text("강의 재생 중 0/2개")
     assert page.calls == [("POST", "/playback/batches", {"scope": "all"})]
     await expect(panel.locator("#dashboard-play-all")).to_have_count(0)
     await expect(panel).to_contain_text("재생 중")
-    await panel.get_by_role("button", name="재생 현황 보기").click()
+    await progress.get_by_role("button", name="재생 현황 보기").click()
     await expect(page).to_have_url("http://dashboard.test/#playback")
 
 
@@ -199,7 +203,8 @@ async def test_dashboard_accepted_job_survives_detail_failure(page):
     panel = page.locator("#dashboard-playback")
     await panel.get_by_role("button", name="전체 강의 2개 재생").click()
     await page.locator("#confirm-dialog").get_by_role("button", name="2개 재생 시작").click()
-    await expect(panel.get_by_role("status")).to_contain_text("0/2개 완료")
+    await expect(page.locator(".cta-progress")).to_contain_text("강의 재생 중 0/2개")
+    await expect(page.locator("#task-bar")).to_contain_text("작업 1개 진행 중")
     await expect(panel.locator("#dashboard-play-all")).to_have_count(0)
     assert page.calls == [("POST", "/playback/batches", {"scope": "all"})]
 
@@ -213,15 +218,15 @@ async def test_dashboard_repeated_click_only_enqueues_once(page):
       button.click();
     }''')
     await page.locator("#confirm-dialog").get_by_role("button", name="2개 재생 시작").click()
-    await expect(page.locator(".dashboard-playback-progress")).to_contain_text("0/2개 완료")
+    await expect(page.locator(".cta-progress")).to_contain_text("강의 재생 중 0/2개")
     assert page.calls == [("POST", "/playback/batches", {"scope": "all"})]
 
 
 async def test_playback_percent_queue_and_live_update(page):
     batch = page.data["/playback/batches/7"]
     page.data["/playback/batches"] = [batch]
-    await page.goto("http://dashboard.test/")
-    panel = page.locator("#dashboard-playback")
+    await page.goto("http://dashboard.test/#playback")
+    panel = page.locator("#view")
     await expect(panel).to_contain_text("전체 재생 진행률 15%")
     await expect(panel.locator(".playback-current")).to_contain_text("아두이노 소개 · 30%")
     await expect(panel.locator(".playback-upcoming li")).to_have_count(1)
@@ -232,8 +237,6 @@ async def test_playback_percent_queue_and_live_update(page):
     await expect(panel).to_contain_text("전체 재생 진행률 75%", timeout=10000)
     await expect(panel.locator(".playback-current")).to_contain_text("버튼과 LED · 50%")
     await expect(panel).to_contain_text("다음 재생 예정 영상이 없습니다")
-    await panel.get_by_role("button", name="재생 현황 보기").click()
-    await expect(page.locator(".playback-progress")).to_contain_text("전체 재생 진행률 75%")
     await page.set_viewport_size({"width": 375, "height": 812})
     assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
 
@@ -243,8 +246,8 @@ async def test_playback_queue_excludes_failed_and_cancelled_jobs(page):
     batch["jobs"][0].update(status="skipped", duration=0)
     batch["jobs"][1].update(status="failed", duration=0)
     page.data["/playback/batches"] = [batch]
-    await page.goto("http://dashboard.test/")
-    panel = page.locator("#dashboard-playback")
+    await page.goto("http://dashboard.test/#playback")
+    panel = page.locator("#view")
     await expect(panel).to_contain_text("전체 재생 진행률 0%")
     await expect(panel).to_contain_text("다음 재생 예정 영상이 없습니다")
     await expect(panel.locator(".playback-upcoming li")).to_have_count(0)
@@ -259,8 +262,8 @@ async def test_reload_shows_saved_progress_and_stale_activity(page):
     page.data["/playback/batches"] = [batch]
     job = batch["jobs"][0]
     job["progress_updated_at"] = datetime.now(UTC).isoformat()
-    await page.goto("http://dashboard.test/")
-    current = page.locator("#dashboard-playback .playback-current")
+    await page.goto("http://dashboard.test/#playback")
+    current = page.locator("#view .playback-current")
     await expect(current).to_contain_text("최근 재생 진행이 확인되었습니다")
     await expect(current).to_contain_text("9분 0초 / 30분 0초")
     job.update(progress_seconds=900, progress_updated_at=(datetime.now(UTC) - timedelta(minutes=2)).isoformat())
