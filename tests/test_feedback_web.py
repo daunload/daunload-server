@@ -70,7 +70,7 @@ async def test_error_toast_stays_until_closed_success_expires(page):
     await expect(page.locator("#toast")).not_to_contain_text("저장했어요")  # 성공은 3.2초 뒤 사라진다
     await page.wait_for_timeout(1000)
     await expect(page.locator("#toast")).to_contain_text("연결이 끊겼어요")  # 오류는 남는다
-    await page.get_by_role("button", name="닫기").click()
+    await page.locator("#toast").get_by_role("button", name="닫기").click()
     await expect(items).to_have_count(0)
 
     await page.evaluate("toast('같은 오류', true); toast('같은 오류', true)")
