@@ -1,7 +1,7 @@
 "use strict";
 
 /* ---------------- 하단 진행 패널 ----------------
- * 강의 재생과 텍스트 변환의 진행과 실패를 한곳(#task-panel)에 모은다. 상태가 바뀔 때마다 renderTaskPanel()을 부른다.
+ * 강의 재생, 텍스트 변환, 여러 개 받기의 진행과 실패를 한곳(#task-panel)에 모은다. 상태가 바뀔 때마다 renderTaskPanel()을 부른다.
  * ui.js 다음에 불러오며, app.js의 state, store, esc, fmtDate, fmtDuration, navigate와 transcribe.js의 tx는
  * 함수를 부를 때만 읽는다.
  *
@@ -74,6 +74,35 @@ function transcribeTask() {
   };
 }
 
+function bulkTask(b) {
+  const done = b.done + b.failed;
+  return {
+    key: "bulk",
+    kind: "bulk",
+    title: `다운로드 ${done}/${b.total}개`,
+    pct: b.total ? Math.round((done / b.total) * 100) : 0,
+    note: b.direct ? "이 탭과 다운로드 창을 열어 두세요" : "이 탭을 열어 두세요",
+    failed: false,
+    actions: [{ label: "다운로드 중지", cls: "btn small", run: stopBulkDownload }],
+  };
+}
+
+function failedBulkTask(b) {
+  return {
+    key: "bulk-failed",
+    kind: "bulk",
+    title: `다운로드 실패 ${b.failedItems.length}개`,
+    pct: null,
+    note: "",
+    failed: true,
+    detail: b.errors,
+    actions: [
+      { label: "다시 시도", cls: "btn small", run: () => runBulkDownload(b.failedItems) },
+      { label: "닫기", cls: "btn small ghost", run: () => { state.bulk = null; renderTaskPanel(); } },
+    ],
+  };
+}
+
 function failedBatchTask(b) {
   return {
     key: `playback-failed-${b.id}`,
@@ -112,7 +141,9 @@ function taskItems() {
   return [
     ...(state.active ? [playbackTask(state.active)] : []),
     ...(tx.current || tx.queue.length ? [transcribeTask()] : []),
+    ...(state.bulk?.running ? [bulkTask(state.bulk)] : []),
     ...failedBatches.map(failedBatchTask),
+    ...(state.bulk && !state.bulk.running && state.bulk.failedItems?.length ? [failedBulkTask(state.bulk)] : []),
     ...tx.finished.filter((f) => f.status === "failed").map(failedTranscribeTask),
   ];
 }
@@ -133,7 +164,7 @@ function taskRowHtml(item) {
     <div class="tp-line"><p class="tp-title" id="${esc(titleId)}">${esc(item.title)}</p>${buttons ? `<div class="tp-actions">${buttons}</div>` : ""}</div>
     ${item.failed ? "" : `<progress max="100" ${item.pct === null ? "" : `value="${item.pct}"`} aria-labelledby="${esc(titleId)}"></progress>`}
     ${item.note ? `<p class="tp-note">${esc(item.note)}</p>` : ""}
-    ${item.detail ? `<p class="tp-note">${esc(item.detail)}</p>` : ""}
+    ${[].concat(item.detail || []).map((d) => `<p class="tp-note">${esc(d)}</p>`).join("")}
   </li>`;
 }
 

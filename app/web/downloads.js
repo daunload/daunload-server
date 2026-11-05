@@ -38,17 +38,24 @@ async function startBulkDownload(items, onUpdate) {
     signal.throwIfAborted();
   } catch (error) { bulk.ctrl = null; throw error; }
   const queue = [...items];
-  const stat = { done: 0, failed: 0, total: items.length, running: true, errors: [] };
+  const stat = { done: 0, failed: 0, total: items.length, running: true, errors: [], failedItems: [], direct };
   onUpdate({ ...stat });
   const pending = [];
+  const managerGone = (err) => ["MANAGER_CLOSED", "MANAGER_RELOADED"].includes(err?.code);
   const failed = (item, err) => {
-    if (signal.aborted) return;
-    if (["MANAGER_CLOSED", "MANAGER_RELOADED"].includes(err.code)) {
+    if (signal.aborted) {
+      // 다운로드 창이 닫혀 멈춘 경우 끝내지 못한 항목은 다시 시도할 수 있게 남긴다. 사용자가 멈춘 경우는 남기지 않는다.
+      if (managerGone(signal.reason)) stat.failedItems.push(item);
+      return;
+    }
+    if (managerGone(err)) {
       stat.errors.push(err.message);
+      stat.failedItems.push(item);
       controller.abort(err);
       return;
     }
     stat.failed++;
+    stat.failedItems.push(item);
     stat.errors.push(`${item.label}: ${err.message}`);
   };
   const track = async (item, task) => {
@@ -80,7 +87,9 @@ async function startBulkDownload(items, onUpdate) {
   } finally {
     bulk.ctrl = null;
     stat.running = false;
-    onUpdate({ ...stat, stopped: signal.aborted });
+    // 창이 닫혀 멈췄다면 아직 시작하지 못한 항목도 다시 시도 대상이다
+    if (managerGone(signal.reason)) stat.failedItems.push(...queue.splice(0));
+    onUpdate({ ...stat, stopped: signal.aborted && !managerGone(signal.reason) });
   }
 }
 

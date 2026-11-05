@@ -98,12 +98,13 @@ async def test_bulk_download_waits_out_busy_server(dashboard):
     await page.goto("http://dashboard.test/#videos")
     await page.get_by_role("tab", name="수업자료").click()
     await page.get_by_role("button", name="1주차 1개 내려받기").click()
-    status = page.locator("#bulk-status")
+    await expect(page.locator("#task-sheet")).to_contain_text("다운로드 0/1개")
     for _ in range(20):
-        if "다 받았습니다" in (await status.text_content() or ""):
+        if await page.locator("#task-panel").is_hidden():
             break
         await page.clock.run_for(5000)
-    await expect(status).to_contain_text("다 받았습니다: 1/1 완료, 실패 0")
+    await expect(page.locator("#task-panel")).to_be_hidden()
+    await expect(page.locator("#toast")).to_contain_text("1개를 모두 받았어요")
     assert await page.evaluate("window.__saved['자료.pdf']") == 1
     assert len(links) == 1  # 기다리는 동안 링크를 새로 발급하지 않는다(이력 횟수가 늘지 않게)
 
@@ -158,27 +159,41 @@ async def test_missing_extension_never_falls_back_to_relay(dashboard):
     assert not any('/download-link' in url or '/direct-download' in url or '/downloads/' in url for url in requested)
 
 
-async def test_bulk_stops_on_closed_manager_and_can_restart(dashboard):
-    page, data = dashboard
+async def _open_panel(page):
+    bar = page.locator("#task-bar")
+    if await bar.get_attribute("aria-expanded") != "true":
+        await bar.click()
+    await expect(page.locator("#task-sheet")).to_be_visible()
+    return page.locator("#task-sheet")
+
+
+async def _bulk_videos(page, data, count=4):
     await page.add_init_script(FAKE_EXTENSION)
     data['/saved-videos'] = []
-    data['/courses/1/videos'] = [_video(mid, f'강의 {mid}') for mid in range(11, 15)]
+    data['/courses/1/videos'] = [_video(mid, f'강의 {mid}') for mid in range(11, 11 + count)]
     data['/downloads/complete'] = {}
-    for mid in range(11, 15):
+    for mid in range(11, 11 + count):
         data[f'/courses/1/videos/{mid}/direct-download'] = {
             'url': f'https://ssuin-object.commonscdn.com/{mid}.mp4', 'file_name': f'{mid}.mp4', 'receipt': 'receipt'}
     await page.goto('http://dashboard.test/#videos')
+
+
+async def test_bulk_stops_on_closed_manager_and_can_restart(dashboard):
+    page, data = dashboard
+    await _bulk_videos(page, data)
     await page.get_by_role('button', name='1주차 4개 내려받기').click()
     await page.wait_for_function("window.__extensionCalls.filter(x => x === 'start').length === 4")
     # All four videos must be registered before any download has completed.
-    await expect(page.locator('#bulk-status')).to_contain_text('여러 개 받는 중: 0/4')
+    sheet = await _open_panel(page)
+    await expect(sheet).to_contain_text('다운로드 0/4개')
     await expect(page.locator('#video-list').get_by_text('✓ 받음')).to_have_count(0)
     await page.evaluate("""() => {
       window.__extensionState = 'interrupted';
       window.__extensionCode = 'MANAGER_CLOSED';
       window.__extensionError = '다운로드 창을 닫았습니다. 다시 내려받기를 눌러 주세요.';
     }""")
-    await expect(page.locator('#bulk-status')).to_contain_text('중지했습니다')
+    await expect(sheet).to_contain_text('다운로드 실패 4개')
+    await expect(sheet).to_contain_text('다운로드 창을 닫았습니다')
     assert await page.evaluate("window.__extensionCalls.filter(x => x === 'start').length") == 4
     assert await page.evaluate("window.__extensionCalls.filter(x => x === 'prepare').length") == 1
     assert await page.evaluate('bulk.ctrl') is None
@@ -188,6 +203,96 @@ async def test_bulk_stops_on_closed_manager_and_can_restart(dashboard):
       window.__extensionCalls = [];
     }""")
     await page.get_by_role('button', name='1주차 4개 내려받기').click()
-    await expect(page.locator('#bulk-status')).to_contain_text('다 받았습니다: 4/4 완료')
+    await expect(page.locator('#toast')).to_contain_text('4개를 모두 받았어요')
+    await expect(page.locator('#task-panel')).to_be_hidden()
     assert await page.evaluate("window.__extensionCalls.filter(x => x === 'prepare').length") == 1
     assert await page.evaluate("window.__extensionCalls.filter(x => x === 'start').length") == 4
+
+
+async def test_bulk_progress_note_and_stop_in_panel(dashboard):
+    page, data = dashboard
+    await page.add_init_script(FAKE_FOLDER)
+    await _bulk_videos(page, data)
+    await page.get_by_role('button', name='1주차 4개 내려받기').click()
+    sheet = await _open_panel(page)
+    await expect(sheet).to_contain_text('다운로드 0/4개')
+    await expect(sheet).to_contain_text('이 탭과 다운로드 창을 열어 두세요')
+    await expect(page.locator('#bulk-status')).to_have_count(0)
+    await sheet.get_by_role('button', name='다운로드 중지').click()
+    await expect(page.locator('#confirm-dialog')).not_to_be_visible()
+    await expect(page.locator('#toast')).to_contain_text('0/4개 받고 중지했어요')
+    await expect(page.locator('#task-panel')).to_be_hidden()
+    assert await page.evaluate('bulk.ctrl') is None
+
+
+async def test_bulk_material_note(dashboard):
+    page, data = dashboard
+    await page.add_init_script(FAKE_FOLDER)
+    data['/saved-videos'] = []
+    data['/courses/1/videos'] = []
+    data['/courses/1/materials'] = [{"key": "c21", "kind": "commons_file", "module_id": 1, "module_title": "1주차",
+        "title": "자료", "file_name": "자료.pdf", "size": 1, "downloaded_at": None}]
+    data["/courses/1/materials/c21/download-link"] = {"url": "/downloads/tok", "file_name": "자료.pdf", "expires_in_minutes": 10}
+
+    async def download(route):  # 응답하지 않고 붙잡아 둔다
+        pass
+
+    await page.route("**/downloads/tok", download)
+    await page.goto("http://dashboard.test/#videos")
+    await page.get_by_role("tab", name="수업자료").click()
+    await page.get_by_role("button", name="1주차 1개 내려받기").click()
+    sheet = await _open_panel(page)
+    await expect(sheet).to_contain_text("이 탭을 열어 두세요")
+    await expect(sheet).not_to_contain_text("다운로드 창")
+
+
+async def test_bulk_failure_can_retry_only_failed_items(dashboard):
+    page, data = dashboard
+    await _bulk_videos(page, data)
+    await page.evaluate("window.__extensionState = 'complete'")
+    fail = {"on": True}
+
+    async def link13(route):
+        if fail["on"]:
+            await route.fulfill(status=502, json={"detail": "링크 <b>오류</b>"})
+        else:
+            await route.fulfill(json=data['/courses/1/videos/13/direct-download'])
+
+    await page.route('**/courses/1/videos/13/direct-download', link13)
+    await page.get_by_role('button', name='1주차 4개 내려받기').click()
+    sheet = await _open_panel(page)
+    await expect(sheet).to_contain_text('다운로드 실패 1개')
+    await expect(sheet).to_contain_text('링크 <b>오류</b>')
+    assert await sheet.locator('b').count() == 0
+    await expect(page.locator('#video-list').get_by_text('✓ 받음')).to_have_count(3)
+    fail["on"] = False
+    await page.evaluate("window.__extensionCalls = []")
+    await sheet.get_by_role('button', name='다시 시도').click()
+    await expect(page.locator('#toast')).to_contain_text('1개를 모두 받았어요')
+    await expect(page.locator('#task-panel')).to_be_hidden()
+    assert await page.evaluate("window.__extensionCalls.filter(x => x === 'start').length") == 1
+    await expect(page.locator('#video-list').get_by_text('✓ 받음')).to_have_count(4)
+
+
+async def test_bulk_success_clears_row_and_toasts(dashboard):
+    page, data = dashboard
+    await _bulk_videos(page, data)
+    await page.evaluate("window.__extensionState = 'complete'")
+    await page.get_by_role('button', name='1주차 4개 내려받기').click()
+    await expect(page.locator('#toast')).to_contain_text('4개를 모두 받았어요')
+    await expect(page.locator('#task-panel')).to_be_hidden()
+
+
+async def test_single_material_not_in_panel(dashboard):
+    page, data = dashboard
+    data["/saved-videos"] = []
+    data["/courses/1/videos"] = []
+    data["/courses/1/materials"] = [{"key": "c21", "kind": "commons_file", "module_id": 1, "module_title": "1주차",
+                                     "title": "1장", "file_name": "1장.pptx", "size": 1, "downloaded_at": None}]
+    data["/courses/1/materials/c21/download-link"] = {"url": "/downloads/tok", "file_name": "1장.pptx", "expires_in_minutes": 10}
+    data["/downloads/tok"] = {}
+    await page.goto("http://dashboard.test/#videos")
+    await page.get_by_role("tab", name="수업자료").click()
+    await page.get_by_role("button", name="내려받기", exact=True).click()
+    await expect(page.locator("#video-list").get_by_text("✓ 받음")).to_be_visible()
+    await expect(page.locator("#task-panel")).to_be_hidden()

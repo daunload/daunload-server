@@ -195,6 +195,10 @@ function logout() {
   state.token = null;
   store.del("token");
   stopPolling();
+  stopBulkDownload();
+  tx.queue = [];  // cancelTranscription은 지금 도는 작업만 멈추므로, 대기열을 먼저 비워 다음 작업이 시작되지 않게 한다
+  cancelTranscription();
+  tx.finished = [];
   Object.assign(state, { me: null, cred: null, todos: [], courses: [], announcements: null,
     dashboardPlan: null, dashboardError: null, dashboardLoading: false, playbackStarting: false,
     batches: [], active: null, plan: null, planForm: null, planQuery: null,
@@ -1097,14 +1101,12 @@ async function viewVideos() {
       <label class="check inline"><input type="checkbox" id="not-downloaded" ${state.notDownloadedOnly ? "checked" : ""}><span>안 받은 것만</span></label>
     </div>
     <p class="notice-inline">본인이 수강하는 강의와 자료를 개인 복습용으로 받는 기능입니다. 강의 영상과 자료는 교수와 학교의 저작물이므로 다른 사람에게 공유하거나 올리지 마세요. 파일은 서버에 저장하지 않고 학교에서 받는 대로 바로 전달합니다. 동기화 때 영상 주소를 저장해 두므로 시청기간이 끝난 영상도 받을 수 있지만, 학교 서버가 주소를 막거나 영상을 지우면 받을 수 없습니다.</p>
-    <p class="bulk-status" id="bulk-status" role="status"></p>
     <div class="panel" id="video-list"><div class="empty loading"><p>LMS에서 목록을 불러오는 중</p></div></div>`;
   $("#video-course").addEventListener("change", (e) => {
     state.videoCourse = Number(e.target.value); state.videoList = null; state.materialList = null; viewVideos();
   });
   document.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => { state.videoTab = b.dataset.tab; viewVideos(); }));
   $("#not-downloaded").addEventListener("change", (e) => { state.notDownloadedOnly = e.target.checked; renderCurrentTab(); });
-  renderBulkStatus();
 
   const courseId = state.videoCourse;
   if (isPast) {  // 지난 과목: 저장된 영상만
@@ -1130,18 +1132,6 @@ function renderCurrentTab() {
   if (state.videoTab === "materials") renderMaterialList(); else renderVideoList();
 }
 
-function renderBulkStatus() {
-  const box = $("#bulk-status");
-  if (!box) return;
-  const b = state.bulk;
-  if (!b) { box.innerHTML = ""; return; }
-  const text = b.running ? `여러 개 받는 중: ${b.done + b.failed}/${b.total} (실패 ${b.failed})`
-    : b.stopped ? `중지했습니다: ${b.done}/${b.total} 완료` : `다 받았습니다: ${b.done}/${b.total} 완료, 실패 ${b.failed}`;
-  box.innerHTML = `${esc(text)} ${b.running ? '<button class="btn small" id="bulk-stop">중지</button>' : ""}
-    ${b.errors?.length ? `<details><summary>실패 항목</summary><ul>${b.errors.map((e) => `<li>${esc(e)}</li>`).join("")}</ul></details>` : ""}`;
-  $("#bulk-stop")?.addEventListener("click", stopBulkDownload);
-}
-
 function bulkButton(items, title) {
   const label = items.length ? `${title} ${items.length}개 내려받기` : `${title} 내려받기`;
   return (state.videoTab !== "materials" || bulkDownloadSupported())
@@ -1149,14 +1139,28 @@ function bulkButton(items, title) {
     : `<button class="btn small" disabled title="폴더에 바로 저장하는 기능은 데스크톱 Chrome·Edge에서만 지원합니다.">${label}</button>`;
 }
 
+/** 여러 개 받기를 시작한다. 진행은 하단 패널에 나오고, 실패한 항목만 다시 시도할 수 있다. */
+async function runBulkDownload(items) {
+  const token = state.token;
+  try {
+    await startBulkDownload(items, (stat) => {
+      if (state.token !== token) return;  // 로그아웃 뒤에 늦게 온 갱신은 버린다
+      state.bulk = stat;
+      if (!stat.running) {
+        if (stat.stopped) toast(`${stat.done}/${stat.total}개 받고 중지했어요`);
+        else if (!stat.failedItems.length) toast(`${stat.done}개를 모두 받았어요`);
+        if (!stat.failedItems.length) state.bulk = null;
+        renderCurrentTab();
+      }
+      renderTaskPanel();
+    });
+  } catch (err) {
+    if (err.name !== "AbortError") toast(err.message, true);  // 폴더 선택 취소는 조용히
+  }
+}
+
 function wireBulk(box, groups) {
-  box.querySelectorAll("[data-bulk]").forEach((b, i) => b.addEventListener("click", async () => {
-    try {
-      await startBulkDownload(groups[i], (stat) => { state.bulk = stat; renderBulkStatus(); if (!stat.running) renderCurrentTab(); });
-    } catch (err) {
-      if (err.name !== "AbortError") toast(err.message, true);  // 폴더 선택 취소는 조용히
-    }
-  }));
+  box.querySelectorAll("[data-bulk]").forEach((b, i) => b.addEventListener("click", () => runBulkDownload(groups[i])));
 }
 
 function groupBy(items, key, title) {

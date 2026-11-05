@@ -380,3 +380,22 @@ async def test_playback_view_keeps_rows_without_stop(page):
     await expect(page.locator("#view .steps li")).to_have_count(2)
     await expect(page.locator("#cancel-batch")).to_have_count(0)
     await expect(page.locator("#view").get_by_role("button", name="재생 중지")).to_have_count(0)
+
+
+async def test_logout_clears_bulk_and_transcribe_tasks(dashboard):
+    page, data = dashboard
+    await _start_one(page, data, FAILING_WORKER, audio_seconds=2, duration=2)
+    await expect(page.locator("#task-panel")).to_be_visible()
+    await page.evaluate("""() => {
+      bulk.ctrl = new AbortController();
+      state.bulk = { done: 0, failed: 0, total: 2, running: true, errors: [], failedItems: [] };
+      tx.queue.push({ key: "1:98", title: "대기", status: "queued" });
+      renderTaskPanel();
+    }""")
+    await page.locator("#logout-btn").click()
+    await expect(page.locator("#auth")).to_be_visible()
+    assert await page.evaluate("bulk.ctrl.signal.aborted") is True
+    await page.wait_for_function("!tx.current")
+    assert await page.evaluate("[tx.queue.length, tx.finished.length, state.bulk]") == [0, 0, None]
+    await page.evaluate("state.token = 'again'; renderTaskPanel()")
+    await expect(page.locator("#task-panel")).to_be_hidden()

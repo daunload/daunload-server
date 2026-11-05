@@ -252,8 +252,6 @@ progress::-moz-progress-bar { background: var(--blue); }
 .badge { font-size: var(--text-xs); font-weight: 600; padding: 1px 6px; border-radius: 6px; }
 .badge.done { color: var(--green); background: var(--green-soft); }
 .badge.transcribed { color: var(--blue); background: var(--blue-soft); }
-.bulk-status:empty { display: none; }
-.bulk-status { font-size: var(--text-sm); color: var(--ink-2); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .kind { display: inline-block; font-size: var(--text-xs); font-weight: 600; padding: 2px 6px; border-radius: 6px; margin-right: 6px; vertical-align: 1px; }
 .kind.video { color: var(--video); background: var(--blue-soft); }
 .kind.assignment { color: var(--assignment); background: #f1edff; }
