@@ -612,7 +612,7 @@ progress { border: 2px solid var(--ink); border-radius: 6px; height: 12px; }
 @media (max-width: 760px) {
   .brand { font-size: var(--text-md); }
   .topbar { gap: 6px; padding: 0 10px; }
-  .topbar .btn.small { padding: 0 8px; font-size: var(--text-xs); }
+  .topbar .btn.small { padding: 0 8px; font-size: var(--text-sm); }
   .mobile-menu { border: 0; border-bottom: 2px solid var(--ink); }
   .side button { border: 2px solid var(--ink); }
   .auth-box { box-shadow: 4px 4px 0 var(--ink); }

@@ -21,7 +21,6 @@ def _video(mid, title, week="1주차", transcript=None):
 def _seed(data, videos):
     data["/saved-videos"] = []
     data["/courses/1/videos"] = videos
-    data["/courses/1/videos/11/audio-link"] = {"url": "/audio/tok", "file_name": "a.mp4", "expires_in_minutes": 10}
     for v in videos:
         data[f"/courses/1/videos/{v['module_item_id']}/audio-link"] = {"url": "/audio/tok", "file_name": "a.mp4", "expires_in_minutes": 10}
     data["/transcripts/9"] = {"id": 9, "lms_course_id": 1, "module_item_id": 13, "course_name": "x", "title": "t", "segments": []}
