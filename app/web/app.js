@@ -1120,6 +1120,7 @@ async function viewVideos() {
   const isPast = !courses.some((c) => c.lms_course_id === state.videoCourse);
   if (isPast) state.videoTab = "videos";  // 지난 과목은 수업자료를 LMS에서 볼 수 없다
   const phone = isPhoneDevice();
+  detectExtension();
   $("#view").innerHTML = `
     <div class="view-head"><h1>내려받기·텍스트 변환</h1>
       <label>과목<select id="video-course">${options}</select></label></div>
@@ -1230,6 +1231,45 @@ const doneBadge = (at) => at ? '<span class="received sr-only">받음</span>' : 
 const downloadFace = (at) => iconOnly(at ? "download-done" : "download", "내려받기");
 const downloadTip = (at) => at ? `${esc(fmtDate(new Date(at)))}에 받음. 누르면 다시 받아요` : "내려받기";
 
+const EXTENSION_STORE_URL = "https://chromewebstore.google.com/detail/ocnolcfmmkkphhkdnmblcdmakaciinda";
+
+/** 설치 안내. 확장프로그램이 응답하기 전까지는 펼쳐 두어 처음 온 사람이 바로 설치할 수 있게 하고, 설치된 사람에게는 접어 둔다. */
+function installGuide() {
+  const ready = state.extensionReady && !state.extensionMissing;
+  const open = state.extensionMissing || (!ready && !state.guideDismissed);
+  return `<details class="guide${ready ? "" : " needs-install"}" ${open ? "open" : ""}>
+    <summary><span class="guide-title">${icon("puzzle")}${ready ? "크롬 확장프로그램 안내" : "크롬 확장프로그램을 설치해 주세요"}</span></summary>
+    <div class="guide-body">${state.extensionMissing ? `<p class="warning" role="alert">${esc(state.extensionMissing)}</p>` : ""}
+    <ol class="install-steps">
+      <li><strong>웹 스토어에서 설치</strong><span>‘Chrome에 추가’를 누르세요.</span>
+        <a class="btn primary" href="${EXTENSION_STORE_URL}" target="_blank" rel="noopener">Chrome 웹 스토어 열기${icon("external")}</a></li>
+      <li><strong>이 페이지 새로고침</strong><span>설치한 뒤 한 번만 하면 돼요.</span>
+        <button class="btn" type="button" data-guide-reload>${icon("refresh")}새로고침</button></li>
+      <li><strong>내려받기</strong><span>처음 열린 창에서 저장 폴더를 고르세요. 진행 상황과 취소도 그 창에서 볼 수 있어요.</span></li>
+    </ol>
+    <p class="guide-note">데스크톱 크롬에서만 쓸 수 있어요. 저장이 끝날 때까지 다운로드 창과 이 탭을 열어 두세요.</p></div></details>`;
+}
+
+function wireInstallGuide(box) {
+  const guide = box.querySelector(".guide");
+  if (!guide) return;
+  guide.addEventListener("toggle", () => { state.guideDismissed = !guide.open; });
+  guide.querySelector("[data-guide-reload]").addEventListener("click", () => location.reload());
+}
+
+/** 확장프로그램이 있으면 응답이 바로 오므로 목록보다 먼저 결과를 안다. 없으면 안내를 그대로 둘 뿐 기다리게 하지 않는다. */
+function detectExtension() {
+  if (state.extensionReady || isPhoneDevice()) return;
+  extensionRequest("ping").then(() => {
+    state.extensionReady = true;
+    const guide = document.querySelector("#video-list .guide");
+    if (!guide || state.extensionMissing) return;
+    guide.insertAdjacentHTML("beforebegin", installGuide());
+    guide.remove();
+    wireInstallGuide($("#video-list"));
+  }).catch(() => {});
+}
+
 const VIDEO_STATUS = {
   done: ["check-circle", "수강 완료"],
   todo: ["circle", "미수강"],
@@ -1294,15 +1334,7 @@ function renderVideoList() {
   const reason = (v) => v.linkPath || phone ? "" : `<span class="reason">${esc(v.savedRow?.resolve_error || "지금은 내려받을 수 없어요")}</span>`;
   const bulkGroups = groups.map((g) => g.items.filter((v) => v.linkPath).map((v) => ({
     linkPath: v.linkPath, label: v.title, onDone: () => { v.downloaded_at = new Date().toISOString(); markDownloaded(v); } })));
-  const guide = phone ? "" : `<details class="guide" ${state.extensionMissing ? "open" : ""}><summary>영상 다운로드 · 크롬 확장프로그램 설치 안내</summary>
-    <div class="guide-body">${state.extensionMissing ? `<p class="error" role="alert">${esc(state.extensionMissing)}</p>` : ""}
-    <p>영상은 학교에서 PC로 직접 저장됩니다. 데스크톱 크롬에 아유 하기싫어 확장프로그램을 설치해 주세요.</p>
-    <ol><li>운영자가 제공한 확장프로그램 ZIP을 받아 압축을 풉니다.</li>
-    <li>크롬 주소창에 chrome://extensions를 입력하고 개발자 모드를 켭니다.</li>
-    <li>‘압축해제된 확장 프로그램을 로드합니다’에서 압축을 푼 폴더를 선택합니다.</li>
-    <li>이 페이지를 새로고침하고 내려받기를 누릅니다.</li></ol>
-    <p>처음 열린 확장프로그램 창에서 저장 폴더를 선택합니다. 진행 상황과 취소는 그 창에서 확인할 수 있습니다.
-    저장이 끝날 때까지 다운로드 창과 이 대시보드 탭을 모두 열어 두세요.</p></div></details>`;
+  const guide = phone ? "" : installGuide();
   box.innerHTML = guide + iconLegend(items, phone) + groups.map((g, i) => `<div class="group-label row"><span class="group-title">${esc(g.title)}</span>
       <span class="group-actions">${bulkButton(bulkGroups[i], g.title, i)}${typeof transcribeGroupButton === "function" ? transcribeGroupButton(g.items, g.title) : ""}</span></div>
     <ul class="list">${g.items.map((v) => `
@@ -1319,6 +1351,7 @@ function renderVideoList() {
       renderVideoList();
     }
   }));
+  wireInstallGuide(box);
   wireBulk(box, bulkGroups);
   if (typeof wireTranscribe === "function") wireTranscribe(box, items, courseId);
 }
@@ -1484,13 +1517,21 @@ async function viewAdmin(query = "", offset = 0) {
         </dl><details class="admin-settings" data-student-id="${esc(u.student_id)}">
           <summary>${esc(u.student_id)} 설정 보기</summary>
           <div class="admin-settings-content" aria-live="polite"></div>
+        </details><details class="admin-settings admin-activity" data-student-id="${esc(u.student_id)}">
+          <summary>${esc(u.student_id)} 작업 내역 보기</summary>
+          <div class="admin-activity-content" aria-live="polite"></div>
         </details></li>`).join("")}</ul>` : `<p class="panel empty">해당하는 사용자가 없습니다.</p>`}
       <div class="admin-pagination"><button class="btn" id="admin-prev" ${offset === 0 ? "disabled" : ""}>이전</button>
         <span>${data.total ? `${offset + 1}–${offset + data.users.length} / ${data.total}명` : "0명"}</span>
         <button class="btn" id="admin-next" ${offset + 25 >= data.total ? "disabled" : ""}>다음</button></div>`;
-    root.querySelectorAll(".admin-settings").forEach((details) => {
+    root.querySelectorAll(".admin-settings:not(.admin-activity)").forEach((details) => {
       details.addEventListener("toggle", () => {
         if (details.open && !details.dataset.loaded && !details.dataset.loading) loadAdminSettings(details);
+      });
+    });
+    root.querySelectorAll(".admin-activity").forEach((details) => {
+      details.addEventListener("toggle", () => {
+        if (details.open && !details.dataset.loaded && !details.dataset.loading) loadAdminActivities(details);
       });
     });
     $("#admin-prev").addEventListener("click", () => viewAdmin(query, Math.max(0, offset - 25)));
@@ -1499,6 +1540,44 @@ async function viewAdmin(query = "", offset = 0) {
     if (!root.isConnected || state.view !== "admin" || !state.me?.is_admin) return;
     root.innerHTML = `<div class="panel empty" role="alert"><p>${esc(err.message)}</p><button class="btn" id="admin-retry">다시 시도</button></div>`;
     $("#admin-retry").addEventListener("click", () => viewAdmin(query, offset));
+  }
+}
+
+async function loadAdminActivities(details, kind = "all", offset = 0) {
+  const panel = $(".admin-activity-content", details);
+  details.dataset.loading = "true";
+  panel.innerHTML = '<p role="status">작업 내역을 불러오는 중입니다.</p>';
+  const kinds = { all: "전체", playback: "강의 재생", download: "다운로드 링크", transcript: "전사 저장" };
+  const statuses = { queued: "대기", playing: "재생 중", done: "완료", failed: "실패", skipped: "건너뜀", locked: "기간 제한", cancelled: "취소", link_issued: "링크 발급", saved: "저장 완료" };
+  const date = (value) => value ? esc(new Date(value).toLocaleString("ko-KR")) : "—";
+  try {
+    const data = await api(`/admin/users/${encodeURIComponent(details.dataset.studentId)}/activities?${new URLSearchParams({ kind, offset, limit: 20 })}`);
+    if (!details.isConnected || state.view !== "admin" || !state.me?.is_admin) return;
+    panel.innerHTML = `
+      <p class="admin-note">저장된 기록 기준 · 재생 ${data.counts.playback}건 · 다운로드 ${data.counts.download}건 · 전사 ${data.counts.transcript}건</p>
+      <p class="admin-note">다운로드는 항목별 최근 링크 발급과 누적 횟수이며 저장 완료 여부는 알 수 없습니다. 전사는 마지막 저장 기록입니다.</p>
+      <div class="admin-search"><label>작업 종류 <select class="admin-activity-kind">${Object.entries(kinds).map(([key, label]) => `<option value="${key}" ${kind === key ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+        <button class="btn admin-activity-refresh">내역 새로고침</button></div>
+      ${data.activities.length ? `<ul class="admin-setting-list">${data.activities.map((item) => `<li><div class="admin-activity-item">
+        <strong>${esc(item.title)}</strong>
+        <p>${esc(kinds[item.kind] || item.kind)} · ${esc(statuses[item.status] || item.status)}${item.kind === "download" ? ` · 발급 ${esc(item.count)}회` : ""}</p>
+        <p class="muted">${esc(item.course_name || "과목 정보 없음")} · 기록 ${date(item.recorded_at)}</p>
+        ${item.kind === "playback" ? `<p class="muted">시작 ${date(item.started_at)} · 종료 ${date(item.finished_at)}</p>` : ""}
+      </div></li>`).join("")}</ul>` : '<p class="empty">저장된 작업 내역이 없습니다.</p>'}
+      <div class="admin-pagination"><button class="btn admin-activity-prev" ${offset === 0 ? "disabled" : ""}>이전 내역</button>
+        <span>${data.total ? `${offset + 1}–${offset + data.activities.length} / ${data.total}건` : "0건"}</span>
+        <button class="btn admin-activity-next" ${offset + 20 >= data.total ? "disabled" : ""}>다음 내역</button></div>`;
+    $(".admin-activity-kind", panel).addEventListener("change", (e) => loadAdminActivities(details, e.target.value));
+    $(".admin-activity-refresh", panel).addEventListener("click", () => loadAdminActivities(details, kind, offset));
+    $(".admin-activity-prev", panel).addEventListener("click", () => loadAdminActivities(details, kind, Math.max(0, offset - 20)));
+    $(".admin-activity-next", panel).addEventListener("click", () => loadAdminActivities(details, kind, offset + 20));
+    details.dataset.loaded = "true";
+  } catch (err) {
+    if (!details.isConnected || state.view !== "admin" || !state.me?.is_admin) return;
+    panel.innerHTML = `<p role="alert">${esc(err.message)}</p><button class="btn admin-activity-retry">다시 시도</button>`;
+    $(".admin-activity-retry", panel).addEventListener("click", () => loadAdminActivities(details, kind, offset));
+  } finally {
+    delete details.dataset.loading;
   }
 }
 

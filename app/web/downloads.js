@@ -152,6 +152,7 @@ function extensionRequest(action, data = {}) {
 
 async function requireDownloadExtension() {
   const result = await extensionRequest("ping");
+  state.extensionReady = true;
   if (result?.version !== 1 || !result.sessions || !result.queue) throw new Error("아유 하기싫어 확장프로그램을 업데이트해 주세요.");
   state.extensionMissing = null;
 }

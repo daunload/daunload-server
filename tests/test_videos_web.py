@@ -399,7 +399,7 @@ async def test_row_buttons_keep_weight_only_on_work_left_to_do(dashboard):
     await expect(rows.nth(0).get_by_role('button', name='내려받기', exact=True)).to_have_class('btn small ghost')
     await expect(rows.nth(1).get_by_role('button', name='내려받기', exact=True)).to_have_class('btn small soft')
     await expect(rows.nth(1).get_by_role('button', name='텍스트로 변환', exact=True)).to_have_class('btn small ghost')
-    for button in await page.locator('#video-list .btn').all():
+    for button in await page.locator('#video-list .video-row .btn').all():
         assert (await button.bounding_box())['height'] >= 44
 
 
@@ -425,3 +425,38 @@ async def test_rows_use_icons_and_explain_them_once(dashboard):
     for label in ('내려받기', '받음', '텍스트로 변환', '수강 완료', '미수강'):
         await expect(legend.get_by_text(label, exact=True)).to_be_visible()
     await expect(legend).not_to_contain_text('아직 열리지 않음')  # 목록에 없는 아이콘은 설명하지 않는다
+
+
+STORE_URL = "https://chromewebstore.google.com/detail/ocnolcfmmkkphhkdnmblcdmakaciinda"
+
+
+async def test_guide_leads_to_the_web_store_when_extension_is_missing(dashboard):
+    page, data = dashboard
+    data['/saved-videos'] = []
+    data['/courses/1/videos'] = [_video(12, '안 받은 강의')]
+    await page.goto('http://dashboard.test/#videos')
+    guide = page.locator('#video-list .guide')
+    await expect(guide).to_have_attribute('open', '')
+    store = guide.get_by_role('link', name='Chrome 웹 스토어 열기')
+    await expect(store).to_have_attribute('href', STORE_URL)
+    await expect(store).to_have_attribute('target', '_blank')
+    await expect(store).to_have_attribute('rel', 'noopener')
+    await expect(guide).not_to_contain_text('ZIP')
+    await expect(guide).not_to_contain_text('개발자 모드')
+    await guide.locator('summary').click()  # 접으면 목록을 다시 그려도 다시 펼치지 않는다
+    await page.wait_for_function('state.guideDismissed === true')  # toggle 이벤트는 다음 작업에서 온다
+    await page.evaluate('renderVideoList()')
+    await expect(guide).not_to_have_attribute('open', '')
+
+
+async def test_guide_stays_folded_when_extension_answers(dashboard):
+    page, data = dashboard
+    await page.add_init_script(FAKE_EXTENSION)
+    data['/saved-videos'] = []
+    data['/courses/1/videos'] = [_video(12, '안 받은 강의')]
+    await page.goto('http://dashboard.test/#videos')
+    guide = page.locator('#video-list .guide')
+    await expect(guide).not_to_have_attribute('open', '')
+    await expect(guide.locator('summary')).to_contain_text('크롬 확장프로그램 안내')
+    await guide.locator('summary').click()
+    await expect(guide.get_by_role('link', name='Chrome 웹 스토어 열기')).to_be_visible()

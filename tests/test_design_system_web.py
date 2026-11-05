@@ -3,6 +3,7 @@
 import pytest
 from playwright.async_api import expect
 
+from tests.test_videos_web import FAKE_EXTENSION
 from tests.test_web import dashboard  # noqa: F401  (fixture)
 
 pytestmark = pytest.mark.browser
@@ -51,6 +52,7 @@ async def test_mobile_touch_targets_and_type(dashboard):
 
 async def test_mobile_video_density(dashboard):
     page, data = dashboard
+    await page.add_init_script(FAKE_EXTENSION)  # 설치한 사용자: 안내가 접혀 있다
     _seed(data, [_video(11 + i, f"{i + 1}강 재귀") for i in range(6)])
     await page.set_viewport_size({"width": 375, "height": 812})
     await page.goto("http://dashboard.test/#videos")
@@ -94,8 +96,10 @@ async def test_mobile_edges_line_up(dashboard):
 
 async def test_disclosure_arrow_is_an_icon_that_turns(dashboard):
     page, data = dashboard
+    await page.add_init_script(FAKE_EXTENSION)  # 설치한 사용자: 안내가 접힌 채 시작한다
     _seed(data, [_video(11, "2강 재귀")])
     await page.goto("http://dashboard.test/#videos")
+    await expect(page.locator("#video-list .guide:not(.needs-install)")).to_be_visible()
     summary = page.locator("#video-list .guide > summary")
     arrow = lambda prop: summary.evaluate(f"e => getComputedStyle(e, '::after').{prop}")
     assert await arrow("content") == '""' and "svg" in await arrow("maskImage")

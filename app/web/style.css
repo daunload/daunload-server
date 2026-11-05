@@ -773,3 +773,31 @@ details.notice summary:hover { background: var(--pink-soft); }
 #todo-results .list > li, .cal-item { position: relative; }
 #todo-results .title a::after, .cal-item .task-title a::after { content: ""; position: absolute; inset: 0; }
 #todo-results .list > li:has(a):hover, .cal-item:has(a):hover { background: var(--pink-soft); }
+
+/* ---------- 확장프로그램 설치 안내: 할 일 세 칸을 만화 칸처럼 나란히 ---------- */
+.guide-title { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.guide-title .icon { color: currentColor; }
+.guide.needs-install > summary { background: var(--pink-soft); font-size: var(--text-md); font-weight: 700; }
+.guide.needs-install > summary:hover { background: var(--pink); }
+.guide .warning { margin: 0; }
+.guide-body ol.install-steps {
+  counter-reset: step; list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;
+}
+.install-steps li {
+  counter-increment: step; position: relative; display: flex; flex-direction: column; gap: 4px;
+  padding: 12px 12px 12px 48px; border: 2px solid var(--ink); border-radius: var(--r-btn); color: var(--ink-2); background: var(--surface);
+}
+.install-steps li::before {
+  content: counter(step); position: absolute; left: 12px; top: 11px; width: 26px; height: 26px; display: grid; place-items: center;
+  font: 400 var(--text-sm)/1 var(--display); color: var(--ink); background: var(--pink); border: 2px solid var(--ink); border-radius: 50%;
+}
+.install-steps strong { color: var(--ink); font-size: var(--text-md); }
+.install-steps .btn { margin-top: auto; align-self: flex-start; gap: 6px; }
+.install-steps span { margin-bottom: 8px; }
+.guide-note { color: var(--ink-3); }
+
+.admin-activity-content { min-width: 0; overflow-wrap: anywhere; }
+.admin-activity-item { min-width: 0; width: 100%; }
+.admin-activity-item p { margin: 6px 0; }
+.admin-activity-content .admin-pagination { flex-wrap: wrap; }
