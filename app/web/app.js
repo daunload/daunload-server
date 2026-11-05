@@ -1102,7 +1102,7 @@ function renderBulkStatus() {
 
 function bulkButton(items) {
   const label = items.length ? `전체 받기 (${items.length})` : "전체 받기";
-  return bulkDownloadSupported()
+  return (state.videoTab !== "materials" || bulkDownloadSupported())
     ? `<button class="btn small" data-bulk ${items.length && !state.bulk?.running ? "" : "disabled"}>${label}</button>`
     : `<button class="btn small" disabled title="폴더에 바로 저장하는 기능은 데스크톱 Chrome·Edge에서만 지원합니다.">${label}</button>`;
 }
@@ -1142,8 +1142,8 @@ function renderVideoList() {
     v.courseName = course?.name || v.savedRow?.course_name || "";
     v.downloaded_at = v.downloaded_at || v.savedRow?.downloaded_at || null;
     v.transcript_id = v.transcript_id ?? v.savedRow?.transcript_id ?? null;
-    v.linkPath = v.available ? `/courses/${courseId}/videos/${v.module_item_id}/download-link`
-      : v.savedRow?.saved ? `/saved-videos/${v.savedRow.id}/download-link` : null;
+    v.linkPath = v.available ? `/courses/${courseId}/videos/${v.module_item_id}/direct-download`
+      : v.savedRow?.saved ? `/saved-videos/${v.savedRow.id}/direct-download` : null;
     v.audioPath = v.available ? `/courses/${courseId}/videos/${v.module_item_id}/audio-link`
       : v.savedRow?.saved ? `/saved-videos/${v.savedRow.id}/audio-link` : null;
   }
@@ -1163,7 +1163,14 @@ function renderVideoList() {
     : `<button class="btn small" disabled title="${esc(v.savedRow?.resolve_error || "")}">내려받기</button>`;
   const bulkGroups = groups.map((g) => g.items.filter((v) => v.linkPath).map((v) => ({
     linkPath: v.linkPath, label: v.title, onDone: () => { v.downloaded_at = new Date().toISOString(); markDownloaded(v); } })));
-  box.innerHTML = groups.map((g, i) => `<div class="group-label row">${esc(g.title)}
+  box.innerHTML = `<details class="panel-body"><summary>영상 다운로드 · 크롬 확장프로그램 설치 안내</summary>
+    <p>영상은 학교에서 PC로 직접 저장됩니다. 데스크톱 크롬에 SSU 다운로드 확장프로그램을 설치해 주세요.</p>
+    <ol><li>운영자가 제공한 확장프로그램 ZIP을 받아 압축을 풉니다.</li>
+    <li>크롬 주소창에 chrome://extensions를 입력하고 개발자 모드를 켭니다.</li>
+    <li>‘압축해제된 확장 프로그램을 로드합니다’에서 압축을 푼 폴더를 선택합니다.</li>
+    <li>이 페이지를 새로고침하고 내려받기를 누릅니다.</li></ol>
+    <p>처음 열린 확장프로그램 창에서 저장 폴더를 선택합니다. 진행 상황과 취소는 그 창에서 확인할 수 있습니다.
+    저장이 끝날 때까지 다운로드 창과 이 대시보드 탭을 모두 열어 두세요.</p></details>` + groups.map((g, i) => `<div class="group-label row">${esc(g.title)}
       <span class="group-actions">${bulkButton(bulkGroups[i])}${typeof transcribeGroupButton === "function" ? transcribeGroupButton(g.items) : ""}</span></div>
     <ul class="list">${g.items.map((v) => `
     <li class="video-row">
@@ -1228,6 +1235,13 @@ async function downloadVideo(btn, linkPath) {
   btn.disabled = true;
   btn.textContent = "준비 중";
   try {
+    if (linkPath.endsWith("/direct-download")) {
+      await requireDownloadExtension();
+      btn.textContent = "다운로드 중";
+      await downloadDirectVideo({ linkPath }, new AbortController().signal);
+      toast("영상 저장이 완료되었습니다.");
+      return true;
+    }
     const link = await api(linkPath, { method: "POST" });
     const a = document.createElement("a");
     a.href = link.url;

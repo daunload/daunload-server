@@ -1,9 +1,9 @@
 """강의 영상·수업자료 내려받기 (개인 복습용).
 
 - 본인이 수강하는 과목에서, LMS 모듈 목록으로 확인된 영상·자료만 받을 수 있다(임의 content_id·file_id 불가).
-- 파일은 서버에 저장하지 않는다. 학교 서버에서 받는 대로 브라우저로 넘긴다.
+- 영상은 주소만 발급하고 확장프로그램에서 직접 받는다. 자료·오디오는 서버 저장 없이 중계한다.
 - 동기화 때 저장해 둔 mp4 주소(saved_videos)로는 시청기간이 끝난 뒤에도 본인이 받을 수 있다.
-- 브라우저 다운로드는 Authorization 헤더를 보낼 수 없으므로 10분짜리 서명 링크를 따로 발급한다.
+- 자료와 호환용 영상 중계는 10분짜리 서명 링크를 쓴다. 영상 중계는 기본 차단이다.
 """
 
 from collections import defaultdict
@@ -14,6 +14,7 @@ import anyio
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from starlette.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from starlette.background import BackgroundTask
@@ -67,6 +68,65 @@ class LinkOut(BaseModel):
     url: str
     file_name: str
     expires_in_minutes: int = DOWNLOAD_LINK_MINUTES
+
+
+class DirectDownloadOut(BaseModel):
+    url: str
+    file_name: str
+    receipt: str
+
+
+class DownloadCompleteIn(BaseModel):
+    receipt: str
+
+
+def _direct_download(user, course_id: int, item_id: int, title: str, url: str, file_name: str):
+    # This receipt cannot be used as an API login or a relay token. No LMS credentials leave the server.
+    receipt = create_download_token(user.id, {
+        "kind": "direct_receipt", "version": user.token_version,
+        "course_id": course_id, "item_id": item_id, "title": title,
+    }, minutes=7 * 24 * 60)
+    return DirectDownloadOut(url=check_media_host(url), file_name=file_name, receipt=receipt)
+
+
+@router.post("/courses/{course_id}/videos/{module_item_id}/direct-download", response_model=DirectDownloadOut)
+async def direct_video(course_id: int, module_item_id: int, user: CurrentUser, db: Db, response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    video = await _open_video(db, user.id, course_id, module_item_id)
+    try:
+        async with _relay_client() as http:
+            url = await resolve_media_url(http, video.content_id)
+        return _direct_download(user, course_id, module_item_id, video.title, url, video.file_name)
+    except MediaError as e:
+        raise HTTPException(422, str(e)) from e
+    except httpx.HTTPError as e:
+        raise HTTPException(502, "학교 서버에서 영상 주소를 가져오지 못했습니다.") from e
+
+
+@router.post("/saved-videos/{saved_id}/direct-download", response_model=DirectDownloadOut)
+async def direct_saved_video(saved_id: int, user: CurrentUser, db: Db, response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    row = await db.get(SavedVideo, saved_id)
+    if row is None or row.user_id != user.id:
+        raise HTTPException(404, "저장된 영상이 아닙니다.")
+    if not row.media_url:
+        raise HTTPException(409, "아직 영상 주소를 저장하지 못했습니다. 동기화 뒤 다시 시도하세요.")
+    try:
+        return _direct_download(user, row.lms_course_id, row.module_item_id, row.title, row.media_url, row.file_name)
+    except MediaError as e:
+        raise HTTPException(422, str(e)) from e
+
+
+@router.post("/downloads/complete", status_code=204)
+async def complete_direct_download(body: DownloadCompleteIn, user: CurrentUser, db: Db):
+    decoded = decode_download_token(body.receipt)
+    if decoded is None or decoded[0] != user.id:
+        raise HTTPException(401, "다운로드 완료 확인 정보가 만료되었거나 올바르지 않습니다.")
+    data = decoded[1]
+    if data.get("kind") != "direct_receipt" or data.get("version") != user.token_version:
+        raise HTTPException(401, "다운로드 완료 확인 정보가 올바르지 않습니다.")
+    # Client-reported completion, not independent proof that the file exists on disk.
+    await record_download(db, user.id, data["course_id"], video_key(data["item_id"]), "video", data["title"])
 
 
 class SavedVideoOut(BaseModel):
@@ -152,6 +212,7 @@ async def _open_video(db, user_id: int, course_id: int, module_item_id: int) -> 
 
 @router.post("/courses/{course_id}/videos/{module_item_id}/download-link", response_model=LinkOut)
 async def create_link(course_id: int, module_item_id: int, user: CurrentUser, db: Db, request: Request):
+    _require_video_relay()
     video = await _open_video(db, user.id, course_id, module_item_id)
     token = create_download_token(user.id, {"content_id": video.content_id, "file_name": video.file_name})
     await record_download(db, user.id, course_id, video_key(module_item_id), "video", video.title)
@@ -210,6 +271,7 @@ async def list_saved_videos(user: CurrentUser, db: Db, course_id: int | None = N
 
 @router.post("/saved-videos/{saved_id}/download-link", response_model=LinkOut)
 async def create_saved_link(saved_id: int, user: CurrentUser, db: Db, request: Request):
+    _require_video_relay()
     row = await db.get(SavedVideo, saved_id)
     if row is None or row.user_id != user.id:
         raise HTTPException(404, "저장된 영상이 아닙니다.")
@@ -237,6 +299,11 @@ async def create_saved_audio_link(saved_id: int, user: CurrentUser, db: Db, requ
 # ----------------------------------------------------------------------
 
 RELAY_KINDS = {"video", "commons_file", "canvas_file"}
+
+
+def _require_video_relay():
+    if not get_settings().allow_video_relay:
+        raise HTTPException(410, "영상 중계는 종료되었습니다. 페이지를 새로고침하고 다운로드 확장프로그램을 이용하세요.")
 
 
 async def _check_hop(request: httpx.Request) -> None:
@@ -323,6 +390,8 @@ async def download_video(token: str, request: Request):
     if decoded is None or decoded[1].get("kind", "video") not in RELAY_KINDS:
         raise HTTPException(401, "다운로드 링크가 만료되었거나 올바르지 않습니다. 목록에서 다시 받으세요.")
     user_id, data = decoded
+    if data.get("kind", "video") == "video":
+        _require_video_relay()
     slot = _Slot(user_id, "진행 중인 다운로드가 끝난 뒤 다시 시도하세요.")
     try:
         try:
