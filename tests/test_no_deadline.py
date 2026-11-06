@@ -153,3 +153,18 @@ async def test_playback_plan_says_no_deadline(dashboard):  # noqa: F811
       expected_end: new Date().toISOString(), deadline: null, at_risk: false }], warnings: [], total_seconds: 60,
       expected_end: new Date().toISOString() })""")
     assert "마감 없음" in html and "1970" not in html
+
+
+@pytest.mark.browser
+async def test_rail_and_stats_skip_no_deadline(dashboard):  # noqa: F811
+    page, data = dashboard
+    data["/todos"] = [NO_DEADLINE]
+    await page.goto("http://dashboard.test/#todos")
+    await expect(page.locator("#todo-count")).to_have_text("1개")
+    # 7일 칸은 비고, 빈 칸 문구는 할 일의 '마감 없음' 표시와 겹치지 않는다
+    await expect(page.locator("#rail .day-empty")).to_have_count(7)
+    await expect(page.locator("#rail .day-empty").first).to_have_text("마감 일정 없음")
+    await expect(page.locator("#rail .chip")).to_have_count(0)
+    await expect(page.locator(".band-note")).to_have_text("앞으로 7일 안에 마감되는 할 일이 없습니다.")
+    await expect(page.locator('#stats [data-shortcut="soon"] strong')).to_have_text("0")
+    await expect(page.locator('#stats [data-shortcut="all"] strong')).to_have_text("1")

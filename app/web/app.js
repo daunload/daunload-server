@@ -281,7 +281,7 @@ function renderAll() {
 function renderOverview() {
   const now = new Date();
   $("#today-label").textContent = `${now.getMonth() + 1}월 ${now.getDate()}일 ${WEEKDAY[now.getDay()]}요일`;
-  const soon = state.todos.filter((t) => { const ms = new Date(t.deadline) - now; return ms > 0 && ms <= DAY; }).length;
+  const soon = state.todos.filter((t) => { const ms = dueTime(t) - now; return ms > 0 && ms <= DAY; }).length;
   const videos = state.todos.filter((t) => t.kind === "video");
   const stats = [
     ["24시간 내 마감", soon, "개", soon ? "먼저 확인해 주세요" : "급한 마감 없이 여유로워요", "urgent"],
@@ -371,6 +371,7 @@ function renderRail() {
 
   const cols = days.map((d, i) => {
     const items = state.todos
+      .filter((t) => t.deadline)
       .map((t) => ({ ...t, at: new Date(t.deadline) }))
       .filter((t) => t.at >= d && t.at < new Date(d.getTime() + DAY))
       .sort((a, b) => a.at - b.at || a.title.localeCompare(b.title, "ko"));
@@ -387,7 +388,7 @@ function renderRail() {
     const weekend = d.getDay() === 0 || d.getDay() === 6;
     return `<div class="day${i === 0 ? " today" : ""}${weekend ? " weekend" : ""}">
       <div class="day-label"><span>${i === 0 ? "오늘" : WEEKDAY[d.getDay()]}</span><b>${d.getDate()}</b></div>
-      <div class="chips">${chips || '<span class="day-empty">마감 없음</span>'}</div></div>`;
+      <div class="chips">${chips || '<span class="day-empty">마감 일정 없음</span>'}</div></div>`;
   }).join("");
 
   let band = "";
@@ -414,7 +415,7 @@ function renderRail() {
     noteEl.className = "band-note";
     rail.after(noteEl);
   }
-  noteEl.textContent = note || (state.todos.some((t) => new Date(t.deadline) >= today && new Date(t.deadline).getTime() < end) ? "" : "앞으로 7일 안에 마감되는 할 일이 없습니다.");
+  noteEl.textContent = note || (state.todos.some((t) => dueTime(t) >= today.getTime() && dueTime(t) < end) ? "" : "앞으로 7일 안에 마감되는 할 일이 없습니다.");
   noteEl.classList.toggle("risk", /마감 전에 끝나지 않습니다/.test(note));
 }
 
@@ -659,7 +660,7 @@ function viewTodos() {
 function renderTodoResults() {
   const query = state.todoSearch.trim().toLocaleLowerCase();
   const todos = state.todos.filter((t) => {
-    const ms = new Date(t.deadline) - Date.now();
+    const ms = dueTime(t) - Date.now();
     return (state.todoFilter === "all" || t.kind === state.todoFilter)
       && (!query || `${t.title} ${t.course_name}`.toLocaleLowerCase().includes(query))
       && (state.todoDeadline !== "soon" || (ms > 0 && ms <= DAY));
