@@ -23,12 +23,20 @@ const store = {
 
 const PRIVACY_NOTICE_KEY = "privacy-notice-2026-11";
 const VIEW_NAMES = { dashboard: "학습 현황", todos: "할 일", assignments: "미제출 과제", calendar: "캘린더", courses: "과목", announcements: "공지", playback: "강의 재생", videos: "내려받기·텍스트 변환", notifications: "알림", account: "계정", admin: "사용자 관리" };
-const initialView = location.hash.slice(1) || "dashboard";
+/** 주소의 해시를 화면 이름과 하위 경로로 나눈다. `#admin/users/2020%201234` → { view: "admin", path: ["users", "2020 1234"] } */
+function parseHash(hash) {
+  const parts = String(hash || "").replace(/^#/, "").split("/").filter(Boolean).map((part) => {
+    try { return decodeURIComponent(part); } catch { return part; }
+  });
+  return { view: parts[0] || "", path: parts.slice(1) };
+}
+const initialView = parseHash(location.hash);
 
 const state = {
   token: store.get("token"),
   dashboardPlan: null, dashboardError: null, dashboardLoading: false, playbackStarting: false,
-  view: Object.hasOwn(VIEW_NAMES, initialView) ? initialView : "dashboard",
+  view: Object.hasOwn(VIEW_NAMES, initialView.view) ? initialView.view : "dashboard",
+  adminPath: initialView.view === "admin" && initialView.path.length ? initialView.path : ["overview"],
   me: null, cred: null, todos: [], courses: [], announcements: null,
   batches: [], active: null, plan: null, todoFilter: "all", noticeCourse: null,
   videoCourse: null, videoList: null, savedVideos: null,
@@ -253,7 +261,7 @@ async function boot() {
   $("#startup").hidden = true;
   $("#auth").hidden = true;
   $("#app").hidden = false;
-  history.replaceState(null, "", `#${state.view}`);
+  history.replaceState(null, "", viewHash());
   renderAll();
   $("#privacy-notice").hidden = store.get(PRIVACY_NOTICE_KEY) === "1";
 }
@@ -416,18 +424,28 @@ function closeMenu() {
   $(".navigation").classList.remove("expanded");
   $("#menu-toggle").setAttribute("aria-expanded", "false");
 }
-function navigate(view, push = true) {
+/** 지금 화면의 주소. 관리자 화면만 하위 경로(`#admin/overview`)를 붙인다. */
+function viewHash() {
+  if (state.view !== "admin") return `#${state.view}`;
+  return `#admin/${state.adminPath.map(encodeURIComponent).join("/")}`;
+}
+/** target은 화면 이름이나 해시(`admin/users`). focus가 false면 포커스를 옮기지 않는다(관리자 탭 이동). */
+function navigate(target, push = true, { focus = true } = {}) {
+  const { view, path } = parseHash(target);
   state.view = Object.hasOwn(VIEW_NAMES, view) ? view : "todos";
+  if (state.view === "admin") state.adminPath = path.length ? path : ["overview"];
   store.set("view", state.view);
   if (state.view === "videos") state.savedVideos = null;  // 동기화로 새로 저장된 주소 반영
-  if (push && location.hash !== `#${state.view}`) history.pushState(null, "", `#${state.view}`);
+  if (push && location.hash !== viewHash()) history.pushState(null, "", viewHash());
+  else if (!push && state.view === "admin" && location.hash !== viewHash()) history.replaceState(null, "", viewHash());  // #admin → #admin/overview
   closeMenu();
   renderView();
+  if (!focus) return;
   $("#view").focus({ preventScroll: true });
   $("#view").scrollIntoView({ block: "start" });
 }
 window.addEventListener("popstate", () => {
-  if (!$("#app").hidden) navigate(location.hash.slice(1) || "todos", false);
+  if (!$("#app").hidden) navigate(location.hash || "todos", false);
 });
 $("#menu-toggle").addEventListener("click", () => {
   const open = $(".navigation").classList.toggle("expanded");
@@ -465,7 +483,8 @@ $("#calendar-toggle").addEventListener("click", () => setCalendar($("#calendar-c
 function renderView() {
   $(".overview").hidden = state.view !== "todos";
   $(".workspace").classList.toggle("dashboard-workspace", state.view === "dashboard");
-  $("#stats").hidden = state.view === "dashboard";
+  $(".workspace").classList.toggle("admin-workspace", state.view === "admin");
+  $("#stats").hidden = state.view === "dashboard" || state.view === "admin";
   $(".rail-wrap").hidden = !["todos", "playback"].includes(state.view);
   $("#current-view").textContent = VIEW_NAMES[state.view] || "할 일";
   document.title = `${VIEW_NAMES[state.view] || "할 일"} · 아유 하기싫어`;
@@ -475,7 +494,7 @@ function renderView() {
     if (selected) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
   });
   const views = { dashboard: viewDashboard, todos: viewTodos, assignments: viewAssignments, calendar: () => viewCalendar(), // calendar.js에 있다. 불러오지 못해도 다른 화면은 동작하도록 실행할 때 찾는다
-    courses: viewCourses, announcements: viewAnnouncements, playback: viewPlayback, videos: viewVideos, notifications: viewNotifications, account: viewAccount, admin: viewAdmin };
+    courses: viewCourses, announcements: viewAnnouncements, playback: viewPlayback, videos: viewVideos, notifications: viewNotifications, account: viewAccount, admin: () => viewAdmin(state.adminPath) };  // viewAdmin은 admin.js에 있다
   (views[state.view] || viewTodos)();
 }
 
@@ -1488,148 +1507,6 @@ async function viewNotifications() {
     try { await withPending(b, "처리 중", () => api(`/notifications/channels/${b.dataset.del}`, { method: "DELETE" })); toast("삭제했습니다"); viewNotifications(); }
     catch (err) { toast(err.message, true); }
   }));
-}
-
-/* ---------------- 관리자 ---------------- */
-
-async function viewAdmin(query = "", offset = 0) {
-  if (!state.me?.is_admin) {
-    $("#view").innerHTML = `<div class="panel empty" role="alert">관리자 권한이 필요합니다.</div>`;
-    return;
-  }
-  $("#view").innerHTML = `
-    <div class="view-head"><h1>사용자 관리</h1><button class="btn" id="admin-refresh">새로고침</button></div>
-    <p class="admin-note">사이트 로그인에 성공한 기록입니다. 현재 접속 여부를 나타내지는 않습니다. 기존 계정의 기록은 기능 추가 후 로그인부터 집계됩니다.</p>
-    <form id="admin-search" class="admin-search">
-      <label for="admin-query">학번 검색</label>
-      <input id="admin-query" type="search" maxlength="32" value="${esc(query)}" placeholder="학번 전체 또는 일부">
-      <button class="btn" type="submit">검색</button>
-    </form>
-    <div id="admin-content" aria-live="polite"><p class="panel empty" role="status">사용자 정보를 불러오는 중입니다.</p></div>`;
-  const root = $("#admin-content");
-  $("#admin-search").addEventListener("submit", (e) => {
-    e.preventDefault();
-    viewAdmin($("#admin-query").value.trim());
-  });
-  $("#admin-refresh").addEventListener("click", () => viewAdmin(query, offset));
-  try {
-    const data = await api(`/admin/users?${new URLSearchParams({ q: query, offset, limit: 25 })}`);
-    if (!root.isConnected || state.view !== "admin" || !state.me?.is_admin) return;
-    const date = (value) => value ? esc(new Date(value).toLocaleString("ko-KR")) : "기록 없음";
-    const statuses = { ok: "정상", invalid: "재로그인 필요", error: "오류" };
-    root.innerHTML = `<p class="admin-note">${query ? "검색 결과" : "전체 사용자"} ${data.total}명 · 최근 로그인 순</p>
-      ${data.users.length ? `<ul class="admin-users">${data.users.map((u) => `
-        <li class="panel panel-body"><h2>${esc(u.student_id)}</h2><dl class="admin-details">
-          <div><dt>최근 사이트 로그인</dt><dd>${date(u.last_login_at)}</dd></div>
-          <div><dt>가입일</dt><dd>${date(u.created_at)}</dd></div>
-          <div><dt>로그인 횟수</dt><dd>${esc(u.login_count)}회</dd></div>
-          <div><dt>LMS 연결</dt><dd>${esc(statuses[u.lms_status] || "연결 정보 없음")}</dd></div>
-        </dl><details class="admin-settings" data-student-id="${esc(u.student_id)}">
-          <summary>${esc(u.student_id)} 설정 보기</summary>
-          <div class="admin-settings-content" aria-live="polite"></div>
-        </details><details class="admin-activity" data-student-id="${esc(u.student_id)}">
-          <summary>${esc(u.student_id)} 작업 내역 보기</summary>
-          <div class="admin-activity-content" aria-live="polite"></div>
-        </details></li>`).join("")}</ul>` : `<p class="panel empty">해당하는 사용자가 없습니다.</p>`}
-      <div class="admin-pagination"><button class="btn" id="admin-prev" ${offset === 0 ? "disabled" : ""}>이전</button>
-        <span>${data.total ? `${offset + 1}–${offset + data.users.length} / ${data.total}명` : "0명"}</span>
-        <button class="btn" id="admin-next" ${offset + 25 >= data.total ? "disabled" : ""}>다음</button></div>`;
-    root.querySelectorAll(".admin-settings:not(.admin-activity)").forEach((details) => {
-      details.addEventListener("toggle", () => {
-        if (details.open && !details.dataset.loaded && !details.dataset.loading) loadAdminSettings(details);
-      });
-    });
-    root.querySelectorAll(".admin-activity").forEach((details) => {
-      details.addEventListener("toggle", () => {
-        if (details.open && !details.dataset.loaded && !details.dataset.loading) loadAdminActivities(details);
-      });
-    });
-    $("#admin-prev").addEventListener("click", () => viewAdmin(query, Math.max(0, offset - 25)));
-    $("#admin-next").addEventListener("click", () => viewAdmin(query, offset + 25));
-  } catch (err) {
-    if (!root.isConnected || state.view !== "admin" || !state.me?.is_admin) return;
-    root.innerHTML = `<div class="panel empty" role="alert"><p>${esc(err.message)}</p><button class="btn" id="admin-retry">다시 시도</button></div>`;
-    $("#admin-retry").addEventListener("click", () => viewAdmin(query, offset));
-  }
-}
-
-async function loadAdminActivities(details, kind = "all", offset = 0) {
-  const panel = $(".admin-activity-content", details);
-  details.dataset.loading = "true";
-  panel.innerHTML = '<p role="status">작업 내역을 불러오는 중입니다.</p>';
-  const kinds = { all: "전체", playback: "강의 재생", download: "다운로드 링크", transcript: "전사 저장" };
-  const statuses = { queued: "대기", playing: "재생 중", done: "완료", failed: "실패", skipped: "건너뜀", locked: "기간 제한", cancelled: "취소", link_issued: "링크 발급", saved: "저장 완료" };
-  const date = (value) => value ? esc(new Date(value).toLocaleString("ko-KR")) : "—";
-  try {
-    const data = await api(`/admin/users/${encodeURIComponent(details.dataset.studentId)}/activities?${new URLSearchParams({ kind, offset, limit: 20 })}`);
-    if (!details.isConnected || state.view !== "admin" || !state.me?.is_admin) return;
-    panel.innerHTML = `
-      <p class="admin-note">저장된 기록 기준 · 재생 ${data.counts.playback}건 · 다운로드 ${data.counts.download}건 · 전사 ${data.counts.transcript}건</p>
-      <p class="admin-note">다운로드는 항목별 최근 링크 발급과 누적 횟수이며 저장 완료 여부는 알 수 없습니다. 전사는 마지막 저장 기록입니다.</p>
-      <div class="admin-search"><label>작업 종류 <select class="admin-activity-kind">${Object.entries(kinds).map(([key, label]) => `<option value="${key}" ${kind === key ? "selected" : ""}>${label}</option>`).join("")}</select></label>
-        <button class="btn admin-activity-refresh">내역 새로고침</button></div>
-      ${data.activities.length ? `<ul class="admin-setting-list">${data.activities.map((item) => `<li><div class="admin-activity-item">
-        <strong>${esc(item.title)}</strong>
-        <p>${esc(kinds[item.kind] || item.kind)} · ${esc(statuses[item.status] || item.status)}${item.kind === "download" ? ` · 발급 ${esc(item.count)}회` : ""}</p>
-        <p class="muted">${esc(item.course_name || "과목 정보 없음")} · 기록 ${date(item.recorded_at)}</p>
-        ${item.kind === "playback" ? `<p class="muted">시작 ${date(item.started_at)} · 종료 ${date(item.finished_at)}</p>` : ""}
-      </div></li>`).join("")}</ul>` : '<p class="empty">저장된 작업 내역이 없습니다.</p>'}
-      <div class="admin-pagination"><button class="btn admin-activity-prev" ${offset === 0 ? "disabled" : ""}>이전 내역</button>
-        <span>${data.total ? `${offset + 1}–${offset + data.activities.length} / ${data.total}건` : "0건"}</span>
-        <button class="btn admin-activity-next" ${offset + 20 >= data.total ? "disabled" : ""}>다음 내역</button></div>`;
-    $(".admin-activity-kind", panel).addEventListener("change", (e) => loadAdminActivities(details, e.target.value));
-    $(".admin-activity-refresh", panel).addEventListener("click", () => loadAdminActivities(details, kind, offset));
-    $(".admin-activity-prev", panel).addEventListener("click", () => loadAdminActivities(details, kind, Math.max(0, offset - 20)));
-    $(".admin-activity-next", panel).addEventListener("click", () => loadAdminActivities(details, kind, offset + 20));
-    details.dataset.loaded = "true";
-  } catch (err) {
-    if (!details.isConnected || state.view !== "admin" || !state.me?.is_admin) return;
-    panel.innerHTML = `<p role="alert">${esc(err.message)}</p><button class="btn admin-activity-retry">다시 시도</button>`;
-    $(".admin-activity-retry", panel).addEventListener("click", () => loadAdminActivities(details, kind, offset));
-  } finally {
-    delete details.dataset.loading;
-  }
-}
-
-async function loadAdminSettings(details) {
-  const panel = $(".admin-settings-content", details);
-  details.dataset.loading = "true";
-  panel.innerHTML = '<p role="status">설정을 불러오는 중입니다.</p>';
-  try {
-    const data = await api(`/admin/users/${encodeURIComponent(details.dataset.studentId)}/settings`);
-    if (!details.isConnected || state.view !== "admin" || !state.me?.is_admin) return;
-    const date = (value) => value ? esc(new Date(value).toLocaleString("ko-KR")) : "기록 없음";
-    const status = { ok: "정상", invalid: "재로그인 필요", error: "오류" };
-    const kinds = { discord: "Discord", telegram: "Telegram" };
-    panel.innerHTML = `
-      <section><h3>계정 및 LMS 연결</h3><dl class="admin-details">
-        <div><dt>권한</dt><dd>${data.is_admin ? "관리자" : "일반 사용자"}</dd></div>
-        <div><dt>이용 동의</dt><dd>${date(data.consent_at)}</dd></div>
-        <div><dt>LMS 연결 상태</dt><dd>${esc(status[data.lms?.status] || "연결 정보 없음")}</dd></div>
-        <div><dt>마지막 LMS 로그인</dt><dd>${date(data.lms?.last_login_at)}</dd></div>
-        <div><dt>마지막 동기화</dt><dd>${date(data.lms?.last_synced_at)}</dd></div>
-        <div><dt>다음 동기화 예정</dt><dd>${date(data.lms?.next_sync_at)}</dd></div>
-      </dl></section>
-      <section><h3>과목별 자동 재생</h3>
-        ${data.courses.length ? `<ul class="admin-setting-list">${data.courses.map((c) => `<li>
-          <span>${esc(c.name)}${c.active ? "" : " · 비활성 과목"}</span>
-          <strong>자동 재생 ${c.auto_play ? "켜짐" : "꺼짐"}</strong>
-        </li>`).join("")}</ul>` : "<p>동기화된 과목이 없습니다.</p>"}
-      </section>
-      <section><h3>알림 설정</h3>
-        ${data.channels.length ? `<ul class="admin-setting-list">${data.channels.map((c) => `<li>
-          <span>${esc(kinds[c.kind] || c.kind)} · 등록 ${date(c.created_at)}</span>
-          <strong>${c.enabled ? "사용 중" : "사용 안 함"}</strong>
-        </li>`).join("")}</ul>` : "<p>등록된 알림 채널이 없습니다.</p>"}
-      </section>`;
-    details.dataset.loaded = "true";
-  } catch (err) {
-    if (!details.isConnected || state.view !== "admin" || !state.me?.is_admin) return;
-    panel.innerHTML = `<p role="alert">${esc(err.message)}</p><button class="btn admin-settings-retry">다시 시도</button>`;
-    $(".admin-settings-retry", panel).addEventListener("click", () => loadAdminSettings(details));
-  } finally {
-    delete details.dataset.loading;
-  }
 }
 
 /* ---------------- 계정 ---------------- */

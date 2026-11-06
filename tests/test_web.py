@@ -209,82 +209,40 @@ async def test_playback_queue_shows_wait_and_deadline_risk(dashboard):
     assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
 
 
-async def test_admin_users_search_mobile_and_access(dashboard, tmp_path):
+async def test_admin_shell_mobile_and_access(dashboard, tmp_path):
     page, data = dashboard
     data["/me"]["is_admin"] = True
-    now = datetime.now(UTC).isoformat()
-    data["/admin/users"] = {"total": 1, "users": [{
-        "student_id": "20201234", "created_at": now, "last_login_at": now,
-        "login_count": 3, "lms_status": "ok",
-    }]}
-    await page.goto("http://dashboard.test/#admin")
-    await expect(page.get_by_role("heading", name="사용자 관리", exact=True)).to_be_visible()
-    await expect(page.locator(".admin-users")).to_contain_text("20201234")
-    await expect(page.locator(".admin-users")).to_contain_text("3회")
-    await expect(page.locator("#admin-prev")).to_be_disabled()
-    await expect(page.locator("#admin-next")).to_be_disabled()
+    data["/admin/overview"] = {
+        "days": 7, "total_users": 1, "active_users": 1, "playback_done": 0, "playback_auto": 0,
+        "playback_seconds": 0, "downloads": 0, "playback_failed": 0, "failure_rate": None,
+        "tracking_since": None, "problem_count": 0, "recent_activity": [], "recent_problems": [],
+        "series": [{"day": (datetime.now(UTC).date() - timedelta(days=6 - i)).isoformat(),
+                    "playback_done": 0, "logins": 0, "downloads": 0} for i in range(7)],
+    }
+    await page.goto("http://dashboard.test/#todos")
+    await page.locator("#admin-menu").click()
+    await expect(page).to_have_url("http://dashboard.test/#admin/overview")
+    view = page.locator("#view")
+    await expect(view.get_by_role("heading", name="사용자 관리", exact=True)).to_be_visible()
+    await expect(view.locator(".admin-kpi")).to_have_count(4)
     await page.screenshot(path=tmp_path / "admin-desktop.png", full_page=True)
     await page.emulate_media(reduced_motion="reduce")
-    for width, height in ((375, 812), (812, 375)):
-        await page.set_viewport_size({"width": width, "height": height})
-        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-        await expect(page.locator(".admin-users")).to_contain_text("20201234")
+    for tab in ("users", "activity", "problems", "overview"):
+        await page.goto(f"http://dashboard.test/#admin/{tab}")
+        await expect(view.locator(".admin-tabs [aria-current='page']")).to_have_attribute("href", f"#admin/{tab}")
+        for width, height in ((375, 812), (768, 1024), (1024, 768), (1440, 900), (812, 375)):
+            await page.set_viewport_size({"width": width, "height": height})
+            assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (tab, width)
     await page.set_viewport_size({"width": 375, "height": 812})
     await page.screenshot(path=tmp_path / "admin-mobile.png", full_page=True)
-    await page.get_by_label("학번 검색").fill("9999")
-    data["/admin/users"] = {"total": 0, "users": []}
-    async with page.expect_request(lambda r: "/admin/users?" in r.url and "q=9999" in r.url):
-        await page.get_by_role("button", name="검색", exact=True).click()
-    await expect(page.get_by_text("해당하는 사용자가 없습니다.")).to_be_visible()
-    for width, height in ((375, 812), (812, 375)):
-        await page.set_viewport_size({"width": width, "height": height})
-        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     data["/me"]["is_admin"] = False
+    admin_requests = []
+    page.on("request", lambda r: admin_requests.append(r.url) if urlparse(r.url).path.startswith("/admin/") else None)
     await page.reload()
-    await expect(page.get_by_text("관리자 권한이 필요합니다.", exact=True)).to_be_visible()
+    await expect(view.get_by_text("관리자 권한이 필요합니다.", exact=True)).to_be_visible()
     await expect(page.locator("#admin-menu")).to_be_hidden()
-
-
-async def test_admin_settings_disclosure_retry_and_mobile(dashboard, tmp_path):
-    page, data = dashboard
-    now = datetime.now(UTC).isoformat()
-    data["/me"]["is_admin"] = True
-    data["/admin/users"] = {"total": 1, "users": [{
-        "student_id": "20209999", "created_at": now, "last_login_at": now,
-        "login_count": 2, "lms_status": "ok",
-    }]}
-    settings_url = "/admin/users/20209999/settings"
-    data[settings_url] = {
-        "student_id": "20209999", "is_admin": False, "consent_at": now,
-        "lms": {"status": "ok", "last_login_at": now, "last_synced_at": now, "next_sync_at": None},
-        "courses": [{"name": "<img src=x onerror=alert(1)> 긴 과목 이름 " * 3, "active": True, "auto_play": True},
-                    {"name": "이전 과목", "active": False, "auto_play": False}],
-        "channels": [{"kind": "telegram", "enabled": False, "created_at": now}],
-    }
-    await page.route("**" + settings_url, lambda route: route.fulfill(status=503, json={"detail": "잠시 후 다시 시도하세요."}))
-    await page.goto("http://dashboard.test/#admin")
-    details = page.locator(".admin-settings")
-    await expect(details.locator("h3")).to_have_count(0)
-    await page.get_by_text("20209999 설정 보기", exact=True).click()
-    await expect(details.get_by_role("alert")).to_contain_text("잠시 후")
-    await page.unroute("**" + settings_url)
-    await details.get_by_role("button", name="다시 시도", exact=True).click()
-    await expect(details.get_by_role("heading", name="과목별 자동 재생")).to_be_visible()
-    await expect(details).to_contain_text("자동 재생 켜짐")
-    await expect(details).to_contain_text("이전 과목 · 비활성 과목")
-    await expect(details).to_contain_text("Telegram")
-    await expect(details).to_contain_text("사용 안 함")
-    await expect(details.locator("img")).to_have_count(0)
-    for width, height in ((1440, 1100), (375, 812), (812, 375)):
-        await page.set_viewport_size({"width": width, "height": height})
-        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-    await page.set_viewport_size({"width": 375, "height": 812})
-    await page.screenshot(path=tmp_path / "admin-settings-mobile.png", full_page=True)
-    await details.locator("summary").focus()
-    await page.keyboard.press("Enter")
-    await expect(details).not_to_have_attribute("open", "")
-    await page.keyboard.press("Enter")
-    await expect(details.get_by_role("heading", name="알림 설정")).to_be_visible()
+    await page.wait_for_load_state("networkidle")
+    assert admin_requests == []
 
 
 async def test_lms_links_only_allow_https(dashboard):
@@ -326,45 +284,6 @@ async def test_playback_history_reveals_item_error_and_retries_loading(dashboard
     await expect(details.locator("script")).to_have_count(0)
     await page.set_viewport_size({"width": 375, "height": 844})
     assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-
-
-async def test_admin_activity_filter_retry_pagination_and_mobile(dashboard):
-    page, data = dashboard
-    now = datetime.now(UTC).isoformat()
-    data["/me"]["is_admin"] = True
-    data["/admin/users"] = {"total": 1, "users": [{
-        "student_id": "20209999", "created_at": now, "last_login_at": now,
-        "login_count": 2, "lms_status": "ok",
-    }]}
-    url = "/admin/users/20209999/activities"
-    activity = {"id": 1, "kind": "download", "title": "<img src=x>" + "긴 제목 " * 30,
-                "course_name": "사용자 과목", "status": "link_issued", "count": 3,
-                "recorded_at": now, "started_at": None, "finished_at": None}
-    data[url] = {"total": 21, "counts": {"playback": 20, "download": 1, "transcript": 0},
-                 "activities": [activity]}
-    await page.route("**" + url + "?*", lambda route: route.fulfill(status=503, json={"detail": "조회 실패"}))
-    await page.goto("http://dashboard.test/#admin")
-    await page.get_by_text("20209999 작업 내역 보기", exact=True).click()
-    panel = page.locator(".admin-activity")
-    await expect(panel.get_by_role("alert")).to_contain_text("조회 실패")
-    await page.unroute("**" + url + "?*")
-    await panel.get_by_role("button", name="다시 시도").click()
-    await expect(panel).to_contain_text("발급 3회")
-    await expect(panel.locator("img")).to_have_count(0)
-    async with page.expect_request(lambda r: "offset=20" in r.url):
-        await panel.get_by_role("button", name="다음 내역").click()
-    await expect(panel.get_by_role("button", name="이전 내역")).to_be_enabled()
-    data[url] = {"total": 1, "counts": {"playback": 20, "download": 1, "transcript": 0}, "activities": [activity]}
-    async with page.expect_request(lambda r: "kind=download" in r.url and "offset=0" in r.url):
-        await panel.get_by_label("작업 종류").select_option("download")
-    await expect(panel.get_by_role("button", name="다음 내역")).to_be_disabled()
-    for width in (1440, 375):
-        await page.set_viewport_size({"width": width, "height": 900})
-        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-    data[url]["activities"] = []
-    data[url]["total"] = 0
-    await panel.get_by_role("button", name="내역 새로고침").click()
-    await expect(panel).to_contain_text("저장된 작업 내역이 없습니다.")
 
 
 async def test_privacy_notice_shows_once(dashboard):
