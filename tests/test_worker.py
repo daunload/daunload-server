@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from app.db import base as db_base
 from app.db.base import utcnow
-from app.db.models import LmsCredential, PlaybackBatch, PlaybackJob, TodoRow, User
+from app.db.models import CourseRow, LmsCredential, PlaybackBatch, PlaybackJob, TodoRow, User
 from app.worker import main as worker
 from tests.test_api import COURSE_ID, WEBHOOK, LmsMock, _signup, env  # noqa: F401  (env는 fixture)
 
@@ -328,3 +328,69 @@ async def test_jobs_denied_for_unapproved_user(env):
         await db.commit()
     assert await worker.sync_user_job({}, 1) == "denied"
     assert await worker.auto_sync_user_job({}, 1) == "denied"
+
+
+class FakeRedis:
+    """arq 락에 쓰는 redis 명령(set nx/ex, exists, delete)만 흉내 낸다."""
+
+    def __init__(self):
+        self.keys: dict[str, str] = {}
+
+    async def set(self, key, value, nx=False, ex=None):
+        if nx and key in self.keys:
+            return None
+        self.keys[key] = value
+        return True
+
+    async def exists(self, *keys):
+        return sum(k in self.keys for k in keys)
+
+    async def delete(self, *keys):
+        for k in keys:
+            self.keys.pop(k, None)
+
+
+async def test_auto_sync_waits_for_queued_or_running_full_sync(env):
+    api, _ = env
+    await _setup(api)
+    redis = FakeRedis()
+    redis.keys["arq:job:sync:1"] = "queued"  # 전체 동기화가 큐에 있거나 돌고 있다
+    assert await worker.auto_sync_user_job({"redis": redis}, 1) == "busy"
+    assert "synclock:1" not in redis.keys  # 락을 남기지 않는다
+
+
+async def test_full_sync_deferred_not_dropped_while_auto_sync_runs(env, monkeypatch):
+    """자동 동기화가 도는 중에 전체 동기화가 들어오면 Retry로 미뤄지고, 끝난 뒤에는 돈다."""
+    import asyncio
+
+    from arq.worker import Retry
+
+    api, _ = env
+    await _setup(api)
+    redis = FakeRedis()
+    ctx = {"redis": redis, "queue": Q()}
+    entered, release, calls = asyncio.Event(), asyncio.Event(), []
+
+    async def gated_sync(db, user_id, now=None, course_ids=None):
+        calls.append(course_ids)
+        entered.set()
+        await release.wait()
+        from app.services.sync import SyncResult
+        return SyncResult(first_sync=False)
+
+    async with db_base.sessionmaker()() as db:
+        db.add(CourseRow(user_id=1, lms_course_id=COURSE_ID, term_id=46, name="A", auto_play=True, active=True))
+        await db.commit()
+    monkeypatch.setattr(worker, "sync_user", gated_sync)
+
+    auto = asyncio.create_task(worker.auto_sync_user_job(ctx, 1))
+    await entered.wait()
+    import pytest
+    with pytest.raises(Retry):  # 전체 동기화는 버려지지도 실패하지도 않고 미뤄진다
+        await worker.sync_user_job(ctx, 1)
+    assert calls == [{COURSE_ID}]  # 겹쳐 돌지 않았다
+    release.set()
+    assert await auto == "ok"
+    assert "synclock:1" not in redis.keys
+    assert await worker.sync_user_job(ctx, 1) == "ok"
+    assert calls == [{COURSE_ID}, None]

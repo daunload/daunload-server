@@ -15,7 +15,7 @@ from datetime import timedelta
 
 from arq import cron
 from arq.connections import RedisSettings
-from arq.worker import func
+from arq.worker import Retry, func
 from sqlalchemy import func as sql_func, select
 
 from app.api.deps import Queue
@@ -36,14 +36,42 @@ AUTO_MAX_FAILURES = 3  # 자동 묶음에서 이만큼 시도해 실패한 영�
 AUTO_GIVE_UP_WINDOW = timedelta(days=7)  # 실패 횟수는 이 기간 안의 것만 센다. 지나면 다시 자동으로 시도한다
 
 
+# 같은 사용자의 두 동기화가 동시에 돌면 같은 줄을 함께 넣다가 유니크 제약으로 실패한다. 아래로 막는다.
+# - 자동 동기화는 락을 잡고 돈다. 전체 동기화가 큐에 있거나 돌고 있으면(arq:job:sync:{uid}) 시작하지 않는다.
+# - 전체 동기화는 락이 잡혀 있으면 Retry로 미룬다. 전체 동기화는 버려지지 않고 자동 동기화 뒤에 돈다.
+# Redis를 쓰므로 워커 프로세스가 여럿이어도 동작한다.
+SYNC_LOCK_TTL = 700  # 작업 제한 시간(600초)보다 길게
+FULL_SYNC_RETRY_DELAY = 15
+FULL_SYNC_MAX_TRIES = 60  # 15초 x 60 = 15분. 자동 동기화 제한 시간보다 길다
+
+
+def _sync_lock_key(user_id: int) -> str:
+    return f"synclock:{user_id}"
+
+
 async def sync_user_job(ctx, user_id: int) -> str:
     """전체 동기화. 로그인·`LMS 동기화` 버튼·승인 직후에만 큐에 들어간다(작업 ID sync:{uid})."""
+    redis = ctx.get("redis")
+    if redis is not None and await redis.exists(_sync_lock_key(user_id)):
+        raise Retry(defer=FULL_SYNC_RETRY_DELAY)  # 자동 동기화가 끝난 뒤 다시 돈다
     return await _run_sync(user_id, None)
 
 
 async def auto_sync_user_job(ctx, user_id: int) -> str:
-    """자동 재생 과목만 동기화한다(작업 ID autosync:{uid}). 주기 작업이 넣는다."""
-    return await _run_sync(user_id, "auto")
+    """자동 재생 과목만 동기화한다(작업 ID autosync:{uid}). 주기 작업이 넣는다.
+    전체 동기화가 있으면 "busy"로 끝낸다. next_sync_at을 그대로 두므로 다음 크론 때 다시 시도한다."""
+    redis = ctx.get("redis")
+    if redis is None:
+        return await _run_sync(user_id, "auto")
+    key = _sync_lock_key(user_id)
+    if not await redis.set(key, "1", nx=True, ex=SYNC_LOCK_TTL):
+        return "busy"
+    try:
+        if await redis.exists(f"arq:job:sync:{user_id}"):  # 전체 동기화가 큐에 있거나 돌고 있다
+            return "busy"
+        return await _run_sync(user_id, "auto")
+    finally:
+        await redis.delete(key)
 
 
 async def _run_sync(user_id: int, only: str | None) -> str:
@@ -159,7 +187,7 @@ async def startup(ctx) -> None:
 
 class WorkerSettings:
     functions = [
-        func(sync_user_job, timeout=600),
+        func(sync_user_job, timeout=600, max_tries=FULL_SYNC_MAX_TRIES),
         func(auto_sync_user_job, timeout=600),
     ]
     cron_jobs = [
