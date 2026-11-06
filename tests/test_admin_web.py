@@ -35,7 +35,7 @@ def overview(days=7, **over):
             {"kind": "lms", "occurred_at": None, "student_id": "20231877", "course_name": None,
              "title": "LMS 연결", "error": "비밀번호 변경 추정", "not_run": 0},
             {"kind": "batch", "occurred_at": now.isoformat(), "student_id": "20210092", "course_name": None,
-             "title": "재생 묶음 (all)", "error": "중단됨", "not_run": 3},
+             "title": "all", "error": "중단됨", "not_run": 3},
         ],
     }
     data.update(over)
@@ -46,6 +46,8 @@ def as_admin(data, **over):
     data["/me"]["is_admin"] = True
     data["/admin/overview"] = overview(**over)
     data["/admin/users"] = {"total": 0, "users": []}
+    data["/admin/activities"] = {"total": 0, "counts": {"playback": 0, "download": 0, "transcript": 0}, "activities": []}
+    data["/admin/problems"] = {"total": 0, "counts": {"playback": 0, "batch": 0, "lms": 0, "resolve": 0}, "problems": []}
 
 
 async def test_admin_tabs_routes_and_back(dashboard):  # noqa: F811
@@ -144,6 +146,8 @@ async def test_overview_cards_chart_and_problems(dashboard):  # noqa: F811
     await expect(problems).to_contain_text("플레이어 로딩 시간 초과")
     await expect(problems).to_contain_text("시각 기록 없음")
     await expect(problems).to_contain_text("미실행 3개")
+    await expect(problems).to_contain_text("전체 재생 묶음")
+    await expect(problems).not_to_contain_text("(all)")
     await expect(view.locator("img")).to_have_count(0)
 
     async with page.expect_request(lambda r: "/admin/overview?" in r.url and "days=30" in r.url):
@@ -201,7 +205,7 @@ async def test_stale_response_does_not_overwrite(dashboard):  # noqa: F811
         release.set()
     await page.evaluate("() => new Promise((r) => requestAnimationFrame(() => setTimeout(() => setTimeout(r))))")
     await expect(page).to_have_url(BASE + "#admin/activity")
-    await expect(page.locator("#view")).to_contain_text("준비 중")
+    await expect(page.locator("#view")).to_contain_text("기간 안에 활동이 없습니다")
     await expect(page.locator("#view .admin-kpi")).to_have_count(0)
     # 늦은 응답이 살아 있는 탭 이름(문제 N건)을 바꾸지 않는다
     await expect(tabs.locator('[data-admin-tab="problems"]')).to_have_text("문제")
@@ -245,7 +249,7 @@ async def test_admin_shared_pieces(dashboard):  # noqa: F811
     page, data = dashboard
     as_admin(data)
     await page.goto(BASE + "#admin/activity")
-    await expect(page.locator("#view")).to_contain_text("준비 중")
+    await expect(page.locator("#view")).to_contain_text("기간 안에 활동이 없습니다")
     result = await page.evaluate("""() => {
         const host = document.createElement("div");
         document.querySelector("#view").append(host);
@@ -632,3 +636,193 @@ async def test_detail_tables_fit_mobile(dashboard, tmp_path):  # noqa: F811
             "els => els.map((e) => e.getBoundingClientRect().height)")
         assert min(links) >= 44
     await page.screenshot(path=tmp_path / "users-detail-375.png", full_page=True)
+
+
+# ---------------- 활동과 문제 (Task 8) ----------------
+
+def seed_feeds(data):
+    """전체 활동과 문제 응답. 경로는 픽스처처럼 쿼리 없이 키로 쓴다."""
+    iso = datetime.now(UTC).isoformat()
+    data["/admin/activities"] = {"total": 45, "counts": {"playback": 30, "download": 10, "transcript": 5}, "activities": [
+        {"id": 1, "kind": "playback", "title": f"7강 스케줄링 {XSS}", "course_name": "운영체제", "status": "failed",
+         "recorded_at": iso, "started_at": iso, "finished_at": iso, "count": 1, "student_id": SID},
+        {"id": 2, "kind": "download", "title": "6강 프로세스", "course_name": None, "status": "done",
+         "recorded_at": iso, "started_at": None, "finished_at": None, "count": 2, "student_id": "20231234"},
+        {"id": 3, "kind": "transcript", "title": "5강 스레드", "course_name": "운영체제", "status": "done",
+         "recorded_at": iso, "started_at": None, "finished_at": None, "count": 1, "student_id": "20231877"},
+    ]}
+    data["/admin/problems"] = {"total": 45, "counts": {"playback": 30, "batch": 5, "lms": 4, "resolve": 6}, "problems": [
+        {"kind": "playback", "occurred_at": iso, "student_id": SID, "course_name": "운영체제",
+         "title": "7강 스케줄링", "error": f"플레이어 로딩 시간 초과 {XSS}", "not_run": 0},
+        {"kind": "batch", "occurred_at": iso, "student_id": "20210092", "course_name": None,
+         "title": "all", "error": "중단됨", "not_run": 3},
+        {"kind": "lms", "occurred_at": None, "student_id": "20231877", "course_name": None,
+         "title": "LMS 연결", "error": "비밀번호 변경 추정", "not_run": 0},
+        {"kind": "resolve", "occurred_at": iso, "student_id": SID, "course_name": "자료구조",
+         "title": "3강 스택", "error": None, "not_run": 0},
+    ]}
+    data[f"/admin/users/{SID}/courses"] = page_of([
+        {"lms_course_id": 11, "name": "운영체제", "professors": None, "active": True, "auto_play": False, "attendance": None},
+        {"lms_course_id": 12, "name": "자료구조", "professors": None, "active": True, "auto_play": False, "attendance": None},
+    ])
+
+
+def feed_query(path):
+    def query(r):
+        return parse_qs(urlparse(r.url).query) if urlparse(r.url).path == path else None
+    return query
+
+
+async def test_activity_tab_filters_and_links_student(dashboard):  # noqa: F811
+    page, data = dashboard
+    as_admin(data)
+    seed_feeds(data)
+    query = feed_query("/admin/activities")
+    async with page.expect_request(lambda r: query(r) is not None) as req:
+        await page.goto(BASE + "#admin/activity")
+    first = query(await req.value)
+    assert first["days"] == ["7"] and first["offset"] == ["0"] and first["limit"] == ["20"] and "kind" not in first
+    view = page.locator("#view")
+    rows = view.locator(".admin-activities tbody tr")
+    await expect(rows).to_have_count(3)
+    await expect(rows.nth(0)).to_contain_text("재생 실패")
+    await expect(rows.nth(0)).to_contain_text(f"운영체제 · 7강 스케줄링 {XSS}")
+    await expect(rows.nth(1)).to_contain_text("다운로드 2회")
+    await expect(rows.nth(2)).to_contain_text("전사 저장")
+    await expect(view.locator("img")).to_have_count(0)
+    await expect(view.get_by_role("button", name="전체 45")).to_have_attribute("aria-pressed", "true")
+
+    async with page.expect_request(lambda r: (query(r) or {}).get("kind") == ["playback"]):
+        await view.get_by_role("button", name="재생 30").click()
+    await expect(view.get_by_role("button", name="재생 30")).to_have_attribute("aria-pressed", "true")
+    async with page.expect_request(lambda r: (query(r) or {}).get("student_id") == [SID]) as req:
+        await view.get_by_label("학번").fill(SID)
+    assert query(await req.value)["kind"] == ["playback"]
+    async with page.expect_request(lambda r: (query(r) or {}).get("days") == ["30"]) as req:
+        await view.get_by_label("기간").select_option("30")
+    assert query(await req.value)["student_id"] == [SID]
+    async with page.expect_request(lambda r: (query(r) or {}).get("offset") == ["20"]):
+        await view.get_by_role("button", name="다음").click()
+    # 학번을 고치자마자 다른 조건을 눌러도 고친 학번으로 요청한다
+    await view.get_by_label("학번").fill("2023")
+    async with page.expect_request(lambda r: query(r) is not None and "kind" not in query(r)) as req:
+        await view.get_by_role("button", name="전체 45").click()
+    assert query(await req.value)["student_id"] == ["2023"]
+
+    await rows.nth(0).get_by_role("link", name=SID).click()
+    await expect(page).to_have_url(BASE + f"#admin/users/{SID}")
+    await page.go_back()
+    await expect(page).to_have_url(BASE + "#admin/activity")
+    await expect(view.get_by_label("학번")).to_have_value("2023")  # 조건이 남는다
+
+
+async def test_problems_tab_filters_and_shows_error(dashboard):  # noqa: F811
+    page, data = dashboard
+    as_admin(data)
+    seed_feeds(data)
+    query = feed_query("/admin/problems")
+    async with page.expect_request(lambda r: query(r) is not None) as req:
+        await page.goto(BASE + "#admin/problems")
+    first = query(await req.value)
+    assert first["days"] == ["7"] and first["offset"] == ["0"] and "kind" not in first and "lms_course_id" not in first
+    view = page.locator("#view")
+    table = view.locator(".admin-problem-list")
+    rows = table.locator("tbody tr")
+    await expect(rows).to_have_count(4)
+    assert await table.locator("thead th").all_text_contents() == ["시각", "사용자", "과목 · 영상", "종류", "오류 내용"]
+    await expect(rows.nth(0)).to_contain_text("운영체제 · 7강 스케줄링")
+    await expect(rows.nth(0)).to_contain_text("재생 실패")
+    await expect(rows.nth(0)).to_contain_text(f"플레이어 로딩 시간 초과 {XSS}")
+    await expect(rows.nth(1)).to_contain_text("전체 재생 묶음")
+    await expect(rows.nth(1)).to_contain_text("재생 묶음 오류")
+    await expect(rows.nth(1)).to_contain_text("미실행 3개")
+    await expect(rows.nth(2)).to_contain_text("LMS 문제")
+    await expect(rows.nth(3)).to_contain_text("영상 주소 확보 실패")
+    await expect(rows.nth(3)).to_contain_text("오류 내용 없음")
+    await expect(rows.nth(0)).not_to_contain_text("미실행")
+    await expect(view.locator("img")).to_have_count(0)
+    await expect(view.get_by_role("button", name="LMS 문제 4")).to_be_visible()
+
+    async with page.expect_request(lambda r: (query(r) or {}).get("kind") == ["lms"]):
+        await view.get_by_role("button", name="LMS 문제 4").click()
+    course = view.get_by_label("과목")
+    await expect(course).to_be_disabled()  # 과목은 학번을 고른 뒤에 고른다
+    async with page.expect_request(lambda r: (query(r) or {}).get("student_id") == [SID]):
+        await view.get_by_label("학번").fill(SID)
+    await expect(course).to_be_enabled()
+    assert await course.locator("option").all_text_contents() == ["전체", "운영체제", "자료구조"]
+    async with page.expect_request(lambda r: (query(r) or {}).get("lms_course_id") == ["11"]) as req:
+        await course.select_option("11")
+    q = query(await req.value)
+    assert q["student_id"] == [SID] and q["kind"] == ["lms"] and q["offset"] == ["0"]
+    async with page.expect_request(lambda r: (query(r) or {}).get("days") == ["90"]) as req:
+        await view.get_by_label("기간").select_option("90")
+    assert query(await req.value)["lms_course_id"] == ["11"]
+    # 학번을 바꾸면 그 사람의 과목이 아니므로 과목 조건을 지운다
+    async with page.expect_request(lambda r: query(r) is not None and query(r).get("student_id") == ["2023"]) as req:
+        await view.get_by_label("학번").fill("2023")
+    assert "lms_course_id" not in query(await req.value)
+    await expect(course).to_have_value("")
+    await rows.nth(2).get_by_role("link", name="20231877").click()
+    await expect(page).to_have_url(BASE + "#admin/users/20231877")
+
+
+async def test_problem_without_time_says_no_record(dashboard):  # noqa: F811
+    page, data = dashboard
+    as_admin(data)
+    seed_feeds(data)
+    await page.goto(BASE + "#admin/problems")
+    rows = page.locator("#view .admin-problem-list tbody tr")
+    await expect(rows).to_have_count(4)
+    await expect(rows.nth(2).locator("td").first).to_have_text("시각 기록 없음")
+    await expect(rows.nth(0).locator("td").first.locator("time")).to_have_count(1)
+
+
+async def test_problem_tab_count_label(dashboard):  # noqa: F811
+    page, data = dashboard
+    as_admin(data, problem_count=15, playback_failed=12)
+    seed_feeds(data)
+    filtered = {**data["/admin/problems"], "total": 2, "counts": {"playback": 2, "batch": 0, "lms": 0, "resolve": 0}}
+
+    async def by_filter(route):
+        q = parse_qs(urlparse(route.request.url).query)
+        await route.fulfill(json=filtered if "student_id" in q else data["/admin/problems"])
+
+    await page.route("**/admin/problems?*", by_filter)
+    await page.goto(BASE + "#admin/problems")
+    tab = page.locator("#view nav.admin-tabs [data-admin-tab='problems']")
+    await expect(tab).to_have_text("문제 45건")  # 네 종류의 합
+    await expect(page.locator("#view .admin-problem-list tbody tr")).to_have_count(4)
+    # 조건을 건 결과는 탭 숫자를 바꾸지 않는다
+    async with page.expect_event("requestfinished", lambda r: "student_id=" in r.url):
+        await page.locator("#view").get_by_label("학번").fill(SID)
+    await expect(page.locator("#admin-problems-title .admin-count")).to_have_text("2건")
+    await expect(tab).to_have_text("문제 45건")
+    await page.locator("#view").get_by_label("학번").fill("")
+    await expect(page.locator("#admin-problems-title .admin-count")).to_have_text("45건")
+    # 종류 버튼은 서버가 종류별 건수를 그대로 주므로 탭 숫자가 그대로다
+    async with page.expect_event("requestfinished", lambda r: "kind=playback" in r.url):
+        await page.locator("#view").get_by_role("button", name="재생 실패 30").click()
+    await expect(tab).to_have_text("문제 45건")
+    # 현황의 재생 실패 카드는 문제 건수와 따로 센다
+    await page.locator("#view nav.admin-tabs").get_by_role("link", name="현황").click()
+    await expect(page.locator("#view .admin-kpi").nth(3)).to_contain_text("12")
+    await expect(tab).to_have_text("문제 15건")
+
+
+async def test_feed_tabs_fit_every_width(dashboard):  # noqa: F811
+    page, data = dashboard
+    long = "아주 긴 강의 제목이 표를 밀어내지 않아야 합니다 " * 4
+    as_admin(data)
+    seed_feeds(data)
+    data["/admin/activities"]["activities"][0]["title"] = long
+    data["/admin/problems"]["problems"][0]["error"] = long
+    for width in (375, 768, 1024, 1440):
+        await page.set_viewport_size({"width": width, "height": 900})
+        for tab, table in (("activity", ".admin-activities"), ("problems", ".admin-problem-list")):
+            await page.goto(BASE + f"#admin/{tab}")
+            await expect(page.locator(f"#view {table} tbody tr").first).to_be_visible()
+            assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (tab, width)
+            heights = await page.locator("#view .admin-seg button, #view .admin-filters input, #view .admin-filters select").evaluate_all(
+                "els => els.map((e) => e.getBoundingClientRect().height)")
+            assert min(heights) >= 44, (tab, width)

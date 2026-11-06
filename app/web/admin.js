@@ -20,7 +20,7 @@ const ADMIN_PROBLEM_KIND = {
   lms: { label: "LMS 문제", tone: "warn" },
   resolve: { label: "영상 주소 확보 실패", tone: "warn" },
 };
-/** 재생 묶음 범위(PlaybackBatch.scope)의 화면 이름. 문제 탭(Task 8)도 이것을 쓴다. */
+/** 재생 묶음 범위(PlaybackBatch.scope)의 화면 이름. 묶음 문제 줄의 제목도 이 값이다. */
 const ADMIN_BATCH_SCOPE = { item: "한 개", module: "주차", course: "과목", all: "전체", auto: "자동", week: "이번 주" };
 const ADMIN_BATCH_STATUS = {
   queued: { label: "대기", tone: "" }, running: { label: "진행 중", tone: "" }, done: { label: "완료", tone: "ok" },
@@ -85,14 +85,14 @@ function adminState(el, kind, { message = "", retry, rows = 3 } = {}) {
 }
 
 /**
- * 표 HTML. columns: [{ label, render(row) → 이미 이스케이프한 HTML, cls? }].
+ * 표 HTML. columns: [{ label, render(row) → 이미 이스케이프한 HTML, cls? }]. cls는 감싸는 div에 붙는다.
  * 760px 이하에서는 각 칸이 data-label을 머리글로 단 카드가 된다.
  */
-function adminTable(columns, rows, { caption = "" } = {}) {
+function adminTable(columns, rows, { caption = "", cls = "" } = {}) {
   const head = columns.map((c) => `<th scope="col"${c.cls ? ` class="${c.cls}"` : ""}>${esc(c.label)}</th>`).join("");
   const body = rows.map((row) => `<tr>${columns.map((c) =>
     `<td data-label="${esc(c.label)}"${c.cls ? ` class="${c.cls}"` : ""}><div>${c.render(row)}</div></td>`).join("")}</tr>`).join("");
-  return `<div class="admin-table-wrap"><table class="admin-table">${caption ? `<caption class="sr-only">${esc(caption)}</caption>` : ""}
+  return `<div class="admin-table-wrap${cls ? ` ${cls}` : ""}"><table class="admin-table">${caption ? `<caption class="sr-only">${esc(caption)}</caption>` : ""}
     <thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
@@ -109,6 +109,23 @@ function adminPager(total, offset, limit, onPage) {
   prev.addEventListener("click", () => onPage(Math.max(0, offset - limit)));
   next.addEventListener("click", () => onPage(offset + limit));
   return nav;
+}
+
+/** 문제 탭 이름의 건수를 바꾼다. 조건 없이 센 네 종류의 합만 넣는다(현황의 재생 실패 카드와 다르다). */
+function adminSetProblemCount(n) {
+  adminUi.problemCount = n;
+  adminUi.problemCountFor = state.me.student_id;
+  const tab = $('#view .admin-tabs [data-admin-tab="problems"]');
+  if (tab) tab.innerHTML = adminTabLabel(ADMIN_TABS[3]);
+}
+
+/** 머리의 기간 고르기와 다시 불러오기. 기간은 현황, 활동, 문제 탭이 함께 쓴다. */
+function adminPeriodActions(onPeriod, onReload) {
+  $("#admin-actions").innerHTML = `<label class="admin-period">기간
+      <select id="admin-days">${ADMIN_PERIODS.map((d) => `<option value="${d}"${d === adminUi.days ? " selected" : ""}>최근 ${d}일</option>`).join("")}</select></label>
+    <button class="btn small" type="button" id="admin-reload">${icon("refresh")}다시 불러오기</button>`;
+  $("#admin-days").addEventListener("change", (e) => { adminUi.days = Number(e.target.value); onPeriod(); });
+  $("#admin-reload").addEventListener("click", onReload);
 }
 
 function adminTabLabel(tab) {
@@ -148,22 +165,19 @@ function viewAdmin(path = state.adminPath) {
   if (tab === "overview") adminOverview(body);
   else if (tab === "users" && path.length > 1) adminUserDetail(body, path[1], path[2]);
   else if (tab === "users") adminUsers(body);
-  else adminState(body, "empty", { message: "이 탭은 준비 중입니다." });
+  else if (tab === "activity") adminActivity(body);  // admin-feeds.js
+  else adminProblems(body);  // admin-feeds.js
 }
 
 /* ---------- 현황 ---------- */
 
 function adminOverview(body) {
-  $("#admin-actions").innerHTML = `<label class="admin-period">기간
-      <select id="admin-days">${ADMIN_PERIODS.map((d) => `<option value="${d}"${d === adminUi.days ? " selected" : ""}>최근 ${d}일</option>`).join("")}</select></label>
-    <button class="btn small" type="button" id="admin-reload">${icon("refresh")}다시 불러오기</button>`;
   const load = () => {
     adminState(body, "loading", { rows: 4 });
     adminRequest(`/admin/overview?days=${adminUi.days}`, (data) => drawOverview(body, data), "overview")
       .catch((err) => adminState(body, "error", { message: err.message, retry: load }));
   };
-  $("#admin-days").addEventListener("change", (e) => { adminUi.days = Number(e.target.value); load(); });
-  $("#admin-reload").addEventListener("click", load);
+  adminPeriodActions(load, load);
   load();
 }
 
@@ -179,24 +193,28 @@ function adminActivityLabel(item) {
   return item.kind;
 }
 
+/** 문제 한 줄의 과목·영상. 묶음 줄의 제목은 범위 값이라 이름(전체 재생 묶음 등)으로 바꾼다. */
+function adminProblemTitle(p) {
+  return adminCourseTitle(p.course_name, p.kind === "batch" ? `${ADMIN_BATCH_SCOPE[p.title] || p.title} 재생 묶음` : p.title);
+}
+const adminProblemTag = (p) => {
+  const kind = ADMIN_PROBLEM_KIND[p.kind] || { label: p.kind, tone: "warn" };
+  return adminTag(kind.label, kind.tone);
+};
+const adminProblemError = (p) => `${esc(p.error || "오류 내용 없음")}${p.not_run ? ` · 미실행 ${adminNumber(p.not_run)}개` : ""}`;
+
 function drawOverview(body, d) {
   body.removeAttribute("aria-busy");
-  adminUi.problemCount = d.problem_count;
-  adminUi.problemCountFor = state.me.student_id;
-  const problemTab = $('#view .admin-tabs [data-admin-tab="problems"]');
-  if (problemTab) problemTab.innerHTML = adminTabLabel(ADMIN_TABS[3]);
+  adminSetProblemCount(d.problem_count);
   const rate = d.failure_rate == null ? "-" : `${(d.failure_rate * 100).toFixed(1)}%`;
   const kpi = (label, value, sub, cls = "") =>
     `<div class="panel admin-kpi${cls}"><span class="admin-kpi-label">${label}</span><strong>${value}</strong><span class="admin-kpi-sub">${sub}</span></div>`;
   const problems = d.recent_problems.length ? adminTable([
     { label: "시각", render: (p) => adminTime(p.occurred_at), cls: "admin-nowrap" },
     { label: "사용자", render: (p) => adminUserLink(p.student_id) },
-    { label: "과목 · 영상", render: (p) => esc(p.course_name ? `${p.course_name} · ${p.title}` : p.title) },
-    { label: "오류", render: (p) => {
-      const kind = ADMIN_PROBLEM_KIND[p.kind] || { label: p.kind, tone: "warn" };
-      return `<span class="admin-tag ${kind.tone}">${esc(kind.label)}</span> ${esc(p.error || "오류 내용 없음")}${p.not_run ? ` · 미실행 ${adminNumber(p.not_run)}개` : ""}`;
-    } },
-  ], d.recent_problems, { caption: "확인이 필요한 문제" }) : '<p class="admin-empty">확인할 문제가 없습니다.</p>';
+    { label: "과목 · 영상", render: adminProblemTitle },
+    { label: "오류", render: (p) => `${adminProblemTag(p)} ${adminProblemError(p)}` },
+  ], d.recent_problems, { caption: "확인이 필요한 문제", cls: "admin-linked" }) : '<p class="admin-empty">확인할 문제가 없습니다.</p>';
   body.innerHTML = `
     <section class="admin-kpis" aria-label="주요 지표 (최근 ${adminNumber(d.days)}일)">
       ${kpi("활동 사용자", adminNumber(d.active_users), `전체 ${adminNumber(d.total_users)}명`)}
@@ -360,8 +378,7 @@ function drawUsers(list, d, load) {
       { label: "다운로드", render: (u) => adminNumber(u.download_count) },
       { label: "전사", render: (u) => adminNumber(u.transcript_count) },
       { label: "알림", render: (u) => u.channels.length ? esc(u.channels.map((c) => ADMIN_CHANNEL[c] || c).join(", ")) : "없음" },
-    ], d.users, { caption: "사용자 목록" });
-    list.firstElementChild.classList.add("admin-users");
+    ], d.users, { caption: "사용자 목록", cls: "admin-users" });
   }
   if (d.total > ADMIN_USERS_LIMIT || f.offset) {
     list.append(adminPager(d.total, f.offset, ADMIN_USERS_LIMIT, (o) => { f.offset = o; load(); $("#admin-users-title").focus(); }));

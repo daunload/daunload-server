@@ -863,6 +863,10 @@ details.notice summary:hover { background: var(--pink-soft); }
 .admin-users td { vertical-align: middle; }
 .admin-users th { white-space: normal; }  /* 8칸이 768px에서도 들어가도록 머리글은 줄을 바꾼다 */
 .admin-bad { color: var(--red); font-weight: 700; }
+.admin-linked td a { display: inline-flex; align-items: center; min-height: var(--touch); font-weight: 700; }
+.admin-linked td { vertical-align: middle; }
+.admin-hint { flex: 1 1 220px; align-self: center; font-size: var(--text-xs); color: var(--ink-3); }
+.admin-filters select:disabled { color: var(--ink-3); border-color: var(--line); cursor: not-allowed; }
 
 /* 사용자 상세 */
 .admin-back { display: inline-flex; align-items: center; gap: 4px; min-height: var(--touch); justify-self: start; font-size: var(--text-sm); font-weight: 600; }
@@ -916,6 +920,7 @@ details.notice summary:hover { background: var(--pink-soft); }
   .admin-subtabs .admin-tab { padding: 0 10px; }
   .admin-dl > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .admin-users td a { min-height: 0; }
+  .admin-linked td:has(> div > a:only-child)::before { align-self: center; padding-top: 0; }  /* 44px 학번 링크와 머리글을 같은 줄에 */
 }
 @media (prefers-reduced-motion: reduce) {
   .admin-alt summary::after { transition: none; }

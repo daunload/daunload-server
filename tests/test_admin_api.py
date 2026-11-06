@@ -149,6 +149,7 @@ async def test_failure_counts_only_attempted_jobs(env, monkeypatch):
     assert {p["title"] for p in body["problems"] if p["kind"] == "playback"} == {"영상1", "영상2"}
     line = next(p for p in body["problems"] if p["kind"] == "batch")
     assert line["not_run"] == 3 and line["error"] == "중단됨"
+    assert line["title"] == "all"  # 묶음 줄의 제목은 범위 값이고, 화면이 이름(전체 재생 묶음)을 붙인다
 
 
 async def test_problems_lms_ignores_period_and_resolve_respects_it(env, monkeypatch):
@@ -332,6 +333,8 @@ async def test_user_detail_routes_require_admin_and_404(env, monkeypatch):
             assert (await api.get(path + "?limit=101", headers=admin)).status_code == 422
             assert (await api.get(path + "?offset=-1", headers=admin)).status_code == 422
             assert set(r.json()) >= {"total", "items"}
+    # 예전 설정 경로는 새 화면이 쓰지 않아 지웠다
+    assert (await api.get("/admin/users/20209999/settings", headers=admin)).status_code == 404
 
 
 async def test_user_detail_never_exposes_private_fields(env, monkeypatch):

@@ -137,10 +137,10 @@ async def test_every_admin_get_route_runs_on_postgres(database, monkeypatch):
         assert (await get("/admin/users?q=9999"))["total"] == 1
 
         base = "/admin/users/20209999"
-        assert (await get(f"{base}/settings"))["lms"]["status"] == "error"
         for kind, expected in (("all", 5), ("playback", 3), ("download", 1), ("transcript", 1)):
             assert (await get(f"{base}/activities?kind={kind}"))["total"] == expected, kind
         summary = await get(f"{base}/summary")
+        assert summary["lms"]["status"] == "error"
         assert summary["counts"]["playback_done"] == 1 and summary["counts"]["playback_failed"] == 2
         for sub in ("courses", "todos", "assignments", "downloads", "saved-videos", "transcripts"):
             assert (await get(f"{base}/{sub}"))["total"] == 1, sub

@@ -362,58 +362,6 @@ async def test_site_login_activity_counts_success_only(env, monkeypatch):
     assert legacy["lms_status"] is None
 
 
-async def test_admin_user_settings_are_scoped_read_only_and_hide_secrets(env, monkeypatch):
-    from app.db.models import CourseRow, NotificationChannel
-    api, _ = env
-    monkeypatch.setattr(get_settings(), "admin_student_ids", ["20201234"])
-    admin = await _signup(api)
-    other = await _signup(api, "20209999")
-    async with db_base.sessionmaker()() as db:
-        db.add_all([
-            CourseRow(user_id=1, lms_course_id=1, name="관리자 과목", auto_play=False),
-            CourseRow(user_id=2, lms_course_id=1, name="자동 재생 과목", auto_play=True),
-            CourseRow(user_id=2, lms_course_id=2, name="이전 과목", auto_play=False, active=False),
-            NotificationChannel(user_id=1, kind="discord", target_enc="ADMIN-SECRET"),
-            NotificationChannel(user_id=2, kind="telegram", target_enc="BOT-SECRET", enabled=False),
-        ])
-        await db.commit()
-    url = "/admin/users/20209999/settings"
-    assert (await api.get(url)).status_code == 401
-    assert (await api.get(url, headers=other)).status_code == 403
-    r = await api.get(url, headers=admin)
-    assert r.status_code == 200 and r.headers["cache-control"] == "no-store"
-    body = r.json()
-    assert body["student_id"] == "20209999" and body["is_admin"] is False
-    assert body["consent_at"] and body["lms"]["status"] == "ok"
-    assert set(body["lms"]) == {"status", "last_login_at", "last_synced_at", "next_sync_at"}
-    assert body["courses"] == [
-        {"name": "자동 재생 과목", "active": True, "auto_play": True},
-        {"name": "이전 과목", "active": False, "auto_play": False},
-    ]
-    assert len(body["channels"]) == 1
-    assert body["channels"][0]["kind"] == "telegram" and body["channels"][0]["enabled"] is False
-    assert set(body["channels"][0]) == {"kind", "enabled", "created_at"}
-    for secret in ("SECRET", "password", "session", "target_enc", "bearer_token"):
-        assert secret not in r.text
-    assert (await api.get("/admin/users/unknown/settings", headers=admin)).status_code == 404
-    mine = (await api.get("/admin/users/20201234/settings", headers=admin)).json()
-    assert mine["is_admin"] is True and mine["courses"][0]["name"] == "관리자 과목"
-    assert (await api.patch(url, headers=admin, json={"is_admin": True})).status_code == 405
-
-
-async def test_admin_settings_empty_user(env, monkeypatch):
-    from app.db.models import User
-    api, _ = env
-    monkeypatch.setattr(get_settings(), "admin_student_ids", ["20201234"])
-    admin = await _signup(api)
-    async with db_base.sessionmaker()() as db:
-        db.add(User(student_id="legacy", password_hash="unused", consent_at=datetime.now(UTC)))
-        await db.commit()
-    r = await api.get("/admin/users/legacy/settings", headers=admin)
-    assert r.status_code == 200
-    assert r.json()["lms"] is None and r.json()["courses"] == [] and r.json()["channels"] == []
-
-
 async def test_malformed_student_id_is_rejected_without_lms(env):
     api, _ = env
     for bad in ("abc", "2020/../1", "2020123", "20201234567", ""):

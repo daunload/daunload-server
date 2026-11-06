@@ -38,34 +38,6 @@ class AdminUsersOut(BaseModel):
     users: list[AdminUserOut]
 
 
-class AdminCourseSettingsOut(BaseModel):
-    name: str
-    active: bool
-    auto_play: bool
-
-
-class AdminChannelSettingsOut(BaseModel):
-    kind: str
-    enabled: bool
-    created_at: datetime
-
-
-class AdminLmsSettingsOut(BaseModel):
-    status: str
-    last_login_at: datetime | None
-    last_synced_at: datetime | None
-    next_sync_at: datetime | None
-
-
-class AdminSettingsOut(BaseModel):
-    student_id: str
-    is_admin: bool
-    consent_at: datetime
-    lms: AdminLmsSettingsOut | None
-    courses: list[AdminCourseSettingsOut]
-    channels: list[AdminChannelSettingsOut]
-
-
 def _recent_failure(user_col):
     """최근 7일 안에 4장 정의의 재생 실패가 있는 사용자 조건."""
     return exists().where(
@@ -123,31 +95,6 @@ async def list_users(
                      transcript_count=transcripts.get(u.id, 0), channels=channels.get(u.id, []))
         for u, status in rows
     ])
-
-
-@router.get("/users/{student_id}/settings", response_model=AdminSettingsOut)
-async def user_settings(student_id: str, admin: AdminUser, db: Db, response: Response):
-    response.headers["Cache-Control"] = "no-store"
-    user = await db.scalar(select(User).where(User.student_id == student_id))
-    if user is None:
-        raise HTTPException(404, "사용자를 찾을 수 없습니다.")
-    # Select only display fields; credentials and notification targets are never decrypted.
-    lms = (await db.execute(select(
-        LmsCredential.status, LmsCredential.last_login_at,
-        LmsCredential.last_synced_at, LmsCredential.next_sync_at,
-    ).where(LmsCredential.user_id == user.id))).mappings().one_or_none()
-    courses = (await db.execute(select(
-        CourseRow.name, CourseRow.active, CourseRow.auto_play,
-    ).where(CourseRow.user_id == user.id).order_by(CourseRow.active.desc(), CourseRow.name, CourseRow.id))).mappings().all()
-    channels = (await db.execute(select(
-        NotificationChannel.kind, NotificationChannel.enabled, NotificationChannel.created_at,
-    ).where(NotificationChannel.user_id == user.id).order_by(NotificationChannel.id))).mappings().all()
-    return AdminSettingsOut(
-        student_id=user.student_id, is_admin=is_admin(user), consent_at=user.consent_at,
-        lms=AdminLmsSettingsOut(**lms) if lms is not None else None,
-        courses=[AdminCourseSettingsOut(**row) for row in courses],
-        channels=[AdminChannelSettingsOut(**row) for row in channels],
-    )
 
 
 class AdminActivityOut(BaseModel):
@@ -218,7 +165,7 @@ class AdminProblemOut(BaseModel):
     occurred_at: datetime | None
     student_id: str
     course_name: str | None
-    title: str
+    title: str  # kind가 batch면 묶음 범위(PlaybackBatch.scope) 값이다. 화면이 이름을 붙인다.
     error: str | None
     not_run: int
 
@@ -268,10 +215,9 @@ async def _all_activities(db, activities, start, kind: str, student_id: str | No
 def _problem_rows(rows) -> list[AdminProblemOut]:
     out = []
     for row in rows:
-        title = f"재생 묶음 ({row['title']})" if row["kind"] == "batch" else row["title"]
         out.append(AdminProblemOut(
             kind=row["kind"], occurred_at=row["occurred_at"] and as_utc(row["occurred_at"]),
-            student_id=row["student_id"], course_name=row["course_name"], title=title,
+            student_id=row["student_id"], course_name=row["course_name"], title=row["title"],
             error=clean_error(row["error"]), not_run=row["not_run"]))
     return out
 
@@ -504,6 +450,12 @@ class AdminBatchOut(BaseModel):
     jobs: list[AdminJobOut]
 
 
+class AdminChannelOut(BaseModel):
+    kind: str
+    enabled: bool
+    created_at: datetime
+
+
 class AdminNotificationLogOut(BaseModel):
     key: str
     created_at: datetime
@@ -517,7 +469,7 @@ def _page_out[T: BaseModel](model: type[T]):
 
 
 class AdminNotificationsOut(_page_out(AdminNotificationLogOut)):  # type: ignore[misc]
-    channels: list[AdminChannelSettingsOut]
+    channels: list[AdminChannelOut]
 
 
 async def _target_user(db, student_id: str) -> User:

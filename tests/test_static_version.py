@@ -25,7 +25,7 @@ def test_index_links_every_local_script_and_style_with_version():
     assert res.headers["cache-control"] == "no-cache"
     assert "content-security-policy" in res.headers
     assert f'href="/style.css?v={version}"' in res.text
-    for name in ("ui", "tasks", "calendar", "downloads", "transcribe", "app", "admin", "week"):
+    for name in ("ui", "tasks", "calendar", "downloads", "transcribe", "app", "admin", "admin-feeds", "week"):
         assert f'src="/{name}.js?v={version}"' in res.text
     assert not re.search(r'(?:src|href)="/[\w.-]+\.(?:js|css)"', res.text)
     assert 'src="/mark.png"' in res.text  # 이미지와 외부 주소는 그대로 둔다
