@@ -1558,4 +1558,6 @@ function viewAccount() {
 /* ---------------- 시작 ---------------- */
 
 setInterval(() => { if (!$("#app").hidden && !document.activeElement.closest("#stats, #rail, #todo-results")) { renderOverview(); renderRail(); if (state.view === "todos" && $("#todo-results")) renderTodoResults(); if (state.view === "dashboard" && typeof drawWeek === "function") drawWeek(); } }, 60000); // 남은 시간·오늘 표시 갱신
-boot();
+// 모든 스크립트가 올라온 뒤에 시작한다: /me가 빨리 답해도 access.js 같은 뒤쪽 스크립트의 함수가 있어야 한다
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+else boot();

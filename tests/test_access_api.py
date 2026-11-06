@@ -466,3 +466,41 @@ async def test_concurrent_decisions_conflict(env, admins):
     assert (await _decide(api, admin_h, "approve")).status_code == 200
     assert (await _decide(api, admin_h, "reject")).status_code == 409
     assert (await _user("20201234")).access_status == "approved"
+
+
+async def test_approve_still_succeeds_when_queue_is_down(env, admins, monkeypatch, caplog):
+    api, queue = env
+    admin_h, _ = await _admin_and_target(api, "pending")
+
+    async def down(*args, **kwargs):
+        raise ConnectionError("redis://:s3cret@redis:6379 refused")
+
+    monkeypatch.setattr(queue, "enqueue", down)
+    with caplog.at_level("WARNING"):
+        r = await _decide(api, admin_h, "approve")
+    assert r.status_code == 200, r.text
+    assert r.json()["access_status"] == "approved" and r.json()["sync_queued"] is False
+    assert (await _user("20201234")).access_status == "approved"
+    assert "s3cret" not in caplog.text and "동기화" in caplog.text
+    assert (await _decide(api, admin_h, "approve")).status_code == 409  # 승인은 저장됐다
+
+
+async def test_decision_reports_sync_queued(env, admins):
+    api, _ = env
+    admin_h, _ = await _admin_and_target(api, "pending")
+    assert (await _decide(api, admin_h, "approve")).json()["sync_queued"] is True
+
+
+@respx.mock
+async def test_webhook_url_never_reaches_logs(env, admins, clock, caplog):
+    api, _ = env
+    secret = "SECRET-TOKEN-123"
+    hook = f"https://discord.com/api/webhooks/9/{secret}"
+    await _signup(api, ADMIN_ID)
+    await _add_channel(ADMIN_ID, "discord", hook)
+    respx.post(hook).respond(500)
+    h = await _signup(api)
+    with caplog.at_level("DEBUG"):
+        assert (await api.post("/access/request", headers=h)).status_code == 200
+    assert secret not in caplog.text and "discord.com/api/webhooks" not in caplog.text
+    assert "500" in caplog.text  # 상태 코드는 남는다

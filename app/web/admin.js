@@ -214,10 +214,12 @@ function adminBindAccess(root, reload) {
     const mates = [...btn.closest(".admin-acts").querySelectorAll("button")].filter((b) => b !== btn);
     mates.forEach((b) => { b.disabled = true; });
     try {
-      await withPending(btn, "처리 중", () => api(`${adminUserPath(id)}/access`, { method: "POST", json: { action } }));
+      const done = await withPending(btn, "처리 중", () => api(`${adminUserPath(id)}/access`, { method: "POST", json: { action } }));
       toast(ADMIN_ACCESS_DONE[action](id));
+      if (done?.sync_queued === false) toast("동기화는 대기열에 넣지 못했어요. 사용자의 정보는 다음 로그인이나 동기화 때 불러와요");
     } catch (err) {
-      toast(err.message, true);
+      if (err.status === 409) toast("이미 처리된 요청이라 최신 상태로 다시 불러왔어요");
+      else toast(err.message, true);
       if (err.status !== 409) { mates.forEach((b) => { b.disabled = false; }); return; }  // 409는 상태가 바뀐 것이므로 목록을 새로 본다
     }
     reload();

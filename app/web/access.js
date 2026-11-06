@@ -98,7 +98,15 @@ async function recheckAccess() {
 $("#access-recheck").addEventListener("click", (e) => withPending(e.currentTarget, "확인 중", recheckAccess));
 
 $("#access-logout").addEventListener("click", logout);
-$("#access-delete").addEventListener("click", async () => {
+$("#access-delete").addEventListener("click", async (e) => {
+  // 학번을 모르면(열린 탭에서 /me가 실패해 전환된 경우) 입력 확인을 건너뛰지 않고 먼저 학번을 알아낸다
+  if (!accessMe.student_id) {
+    try {
+      const me = await withPending(e.currentTarget, "확인 중", () => api("/me"));
+      accessMe = { ...accessMe, ...me };
+    } catch (err) { if (err.code !== "ACCESS_REQUIRED") toast(err.message, true); }
+    if (!accessMe.student_id) return;
+  }
   const ok = await confirmDialog({
     title: "계정을 삭제할까요?",
     body: ["저장된 학교 비밀번호와 동기화한 과목·할 일·공지, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다."],

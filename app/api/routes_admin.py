@@ -1,3 +1,4 @@
+import logging
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Annotated, Literal
@@ -18,6 +19,7 @@ from app.services.activity import local_day
 from app.services.admin_data import (activity_union, as_utc, clean_error, failed_at, failed_job_filter,
                                      period_start, problem_union)
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
@@ -709,13 +711,20 @@ class AccessDecisionOut(BaseModel):
     access_status: str
     access_decided_at: datetime | None
     access_decided_by: str | None
+    sync_queued: bool = True  # 승인 뒤 전체 동기화를 큐에 넣지 못했으면 False
 
 
 @router.post("/users/{student_id}/access", response_model=AccessDecisionOut)
 async def decide_user_access(student_id: str, body: AccessDecisionIn, admin: AdminUser, db: Db, queue: JobQueue):
     """관리자 API 중 유일한 쓰기 경로."""
     user = await _target_user(db, student_id)
+    sync_queued = True
     if await decide_access(db, user, body.action, admin):
-        await queue.enqueue("sync_user_job", user.id, job_id=f"sync:{user.id}")
+        try:
+            await queue.enqueue("sync_user_job", user.id, job_id=f"sync:{user.id}")
+        except Exception as e:  # 승인은 이미 저장됐다. 큐 오류로 500을 돌려주면 재시도가 409가 된다.
+            sync_queued = False
+            log.warning("승인 뒤 동기화 큐 등록 실패 user=%s: %s", user.id, type(e).__name__)
     return AccessDecisionOut(student_id=user.student_id, access_status=user.access_status,
-                             access_decided_at=user.access_decided_at, access_decided_by=user.access_decided_by)
+                             access_decided_at=user.access_decided_at, access_decided_by=user.access_decided_by,
+                             sync_queued=sync_queued)

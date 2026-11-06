@@ -16,6 +16,15 @@ from app.db.models import AnnouncementRow, NotificationChannel, NotificationLog,
 from app.security import decrypt
 
 log = logging.getLogger(__name__)
+# 웹훅 주소에는 토큰이 들어 있다. httpx는 INFO로 요청 주소를 그대로 남기므로 경고 이상만 남긴다.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+def _safe_error(e: Exception) -> str:
+    """로그용 오류 설명. httpx 오류 메시지에는 웹훅 주소(토큰)가 들어 있으므로 종류와 상태 코드만 남긴다."""
+    if isinstance(e, httpx.HTTPStatusError):
+        return f"{type(e).__name__} {e.response.status_code}"
+    return type(e).__name__
 
 REMINDER_HOURS = (24, 3)
 KIND_LABEL = {"video": "영상", "assignment": "과제", "quiz": "퀴즈"}
@@ -61,7 +70,7 @@ async def notify_user(db: AsyncSession, user_id: int, text: str, key: str | None
         try:
             await send_to_channel(ch, text)
         except Exception as e:  # 한 채널 실패가 다른 채널을 막지 않게
-            log.warning("알림 발송 실패 user=%s channel=%s: %s", user_id, ch.id, e)
+            log.warning("알림 발송 실패 user=%s channel=%s: %s", user_id, ch.id, _safe_error(e))
     return True
 
 
@@ -77,7 +86,7 @@ async def notify_admins_of_request(db: AsyncSession, user: User) -> None:
         try:
             await send_to_channel(ch, text)
         except Exception as e:
-            log.warning("승인 요청 알림 실패 channel=%s: %s", ch.id, e)
+            log.warning("승인 요청 알림 실패 channel=%s: %s", ch.id, _safe_error(e))
 
 
 # notify_user는 중복이면 롤백하고, 롤백은 세션의 ORM 객체를 모두 만료시킨다.

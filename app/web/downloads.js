@@ -118,6 +118,10 @@ async function saveToFolder(dir, item, signal) {
     }
     if (!res.ok) {
       const data = await res.json().catch(() => null);
+      if (res.status === 403 && data?.detail?.code === "ACCESS_REQUIRED") {
+        showAccessScreen();  // 화면을 접으면서 여러 개 받기도 멈춘다
+        throw new ApiError(403, data.detail.message, "ACCESS_REQUIRED");
+      }
       throw new Error(typeof data?.detail === "string" ? data.detail : `요청 실패 (${res.status})`);
     }
     const handle = await dir.getFileHandle(link.file_name, { create: true });

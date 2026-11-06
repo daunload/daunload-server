@@ -845,7 +845,7 @@ def with_requests(data, *rows):
     data["/admin/overview"]["pending_count"] = len(rows)
 
 
-async def decisions(page, data, *, status=200, gate=None):
+async def decisions(page, data, *, status=200, gate=None, sync_queued=True):
     """POST /admin/users/{id}/access를 가로채 기록한다. 성공하면 대기 목록에서 그 줄을 뺀다."""
     calls = []
 
@@ -864,9 +864,22 @@ async def decisions(page, data, *, status=200, gate=None):
             pending["items"] = [r for r in pending["items"] if r["student_id"] != sid]
             pending["total"] = len(pending["items"])
         await route.fulfill(json={"student_id": sid, "access_status": {"approve": "approved", "reject": "rejected", "revoke": "revoked"}[action],
-                                  "access_decided_at": "2026-11-06T07:00:00+00:00", "access_decided_by": "20200001"})
+                                  "access_decided_at": "2026-11-06T07:00:00+00:00", "access_decided_by": "20200001", "sync_queued": sync_queued})
     await page.route("**/admin/users/*/access", handle)
     return calls
+
+
+async def test_approval_without_queued_sync_tells_admin_neutrally(dashboard):  # noqa: F811
+    page, data = dashboard
+    as_admin(data)
+    with_requests(data, request_row("20231877"))
+    await decisions(page, data, sync_queued=False)
+    await page.goto(BASE + "#admin/overview")
+    box = page.locator("#admin-body .admin-access")
+    await box.get_by_role("button", name="승인").click()
+    await expect(page.locator("#toast")).to_contain_text("20231877을 승인했습니다")
+    await expect(page.locator("#toast")).to_contain_text("동기화는 대기열에 넣지 못했어요")
+    await expect(page.locator("#toast .bad")).to_have_count(0)
 
 
 async def test_overview_shows_access_requests(dashboard):  # noqa: F811
@@ -993,7 +1006,7 @@ async def test_revoke_needs_confirmation(dashboard):  # noqa: F811
     assert calls == [("20231234", "revoke")]
 
 
-async def test_decision_conflict_shows_error_and_reloads(dashboard):  # noqa: F811
+async def test_decision_conflict_shows_neutral_toast_and_reloads(dashboard):  # noqa: F811
     page, data = dashboard
     as_admin(data)
     with_requests(data, request_row("20231877"))
@@ -1006,7 +1019,8 @@ async def test_decision_conflict_shows_error_and_reloads(dashboard):  # noqa: F8
     before = loads.count("/admin/access-requests")
     data["/admin/access-requests"] = {"total": 0, "items": []}  # 다른 관리자가 먼저 처리했다
     await box.get_by_role("button", name="승인").click()
-    await expect(page.locator("#toast .bad")).to_contain_text("이미 처리된 요청입니다.")
+    await expect(page.locator("#toast")).to_contain_text("이미 처리된 요청이라 최신 상태로 다시 불러왔어요")
+    await expect(page.locator("#toast .bad")).to_have_count(0)  # 409는 오류가 아니다
     await expect(box).to_have_count(0)
     assert loads.count("/admin/access-requests") == before + 1
     # 사용자 탭도 다시 불러온다

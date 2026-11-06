@@ -1,5 +1,6 @@
 """승인 전 사용자 화면: 상태별 문구, 요청 보내기, 열어 둔 탭에서 권한이 회수될 때의 전환."""
 
+import asyncio
 import json
 from pathlib import Path
 from urllib.parse import urlparse
@@ -213,3 +214,97 @@ async def test_access_screen_no_sideways_scroll(stage, me, tmp_path):
             assert (await button.bounding_box())["height"] >= 44
         if me["access_status"] == "none":
             await stage.screenshot(path=tmp_path / f"access-{width}.png")
+
+
+REQUIRED = (403, {"detail": {"code": "ACCESS_REQUIRED", "message": "관리자 승인이 필요합니다."}})
+FAKE_FOLDER = """
+window.__saved = {};
+window.showDirectoryPicker = async () => ({ getFileHandle: async (name) => ({
+  createWritable: async () => new WritableStream({ close: () => { window.__saved[name] = 1; } }) }) });
+"""
+COURSE = {"lms_course_id": 1, "name": "컴퓨터프로그래밍", "professors": "김교수", "attendance": [], "auto_play": False}
+
+
+async def test_boot_waits_for_every_script_before_reading_me(stage):
+    """/me가 뒤에 오는 스크립트보다 먼저 답해도 showAccessScreen이 있어야 한다."""
+    stage.me = me_of("none")
+
+    async def slow(r):
+        await asyncio.sleep(0.4)
+        await r.fulfill(body=(WEB / "access.js").read_text(), content_type="application/javascript")
+
+    await stage.route("**/access.js", slow)
+    await stage.goto("http://dashboard.test/")
+    await expect(stage.get_by_role("heading", name="아직 권한이 없어요")).to_be_visible()
+    await expect(stage.locator("#startup-message")).not_to_contain_text("불러오지 못했습니다")
+
+
+async def test_bulk_download_signed_link_403_switches_to_access_screen(stage):
+    stage.me = me_of("approved")
+    await stage.add_init_script(FAKE_FOLDER)
+    material = {"kind": "commons_file", "module_id": 1, "module_title": "1주차", "size": 1, "downloaded_at": None}
+    stage.handlers[("GET", "/courses")] = (200, [COURSE])
+    stage.handlers[("GET", "/saved-videos")] = (200, [])
+    stage.handlers[("GET", "/courses/1/videos")] = (200, [])
+    stage.handlers[("GET", "/courses/1/materials")] = (200, [
+        {**material, "key": "c21", "title": "자료", "file_name": "자료.pdf"},
+        {**material, "key": "c22", "title": "자료2", "file_name": "자료2.pdf"}])
+    stage.handlers[("POST", "/courses/1/materials/c21/download-link")] = (200, {"url": "/downloads/tok", "file_name": "자료.pdf", "expires_in_minutes": 10})
+    stage.handlers[("POST", "/courses/1/materials/c22/download-link")] = (200, {"url": "/downloads/tok", "file_name": "자료2.pdf", "expires_in_minutes": 10})
+    stage.handlers[("GET", "/downloads/tok")] = REQUIRED
+    await stage.goto("http://dashboard.test/#videos")
+    await stage.get_by_role("tab", name="수업자료").click()
+    stage.me = me_of("revoked")
+    await stage.get_by_role("button", name="1주차 전체 내려받기 (2)").click()
+    await expect(stage.get_by_role("heading", name="권한이 회수됐어요")).to_be_visible()
+    await expect(stage.locator("#toast")).not_to_contain_text("요청 실패")
+    await expect(stage.locator("#toast")).not_to_contain_text("관리자 승인이 필요합니다")
+
+
+async def test_transcribe_audio_403_switches_to_access_screen(stage):
+    stage.me = me_of("approved")
+    video = {"module_item_id": 12, "module_id": 1, "module_title": "1주차", "title": "2강 재귀", "content_type": "movie",
+             "duration": 2, "size": 1, "completed": False, "available": True, "thumbnail_url": None,
+             "downloaded_at": None, "transcript_id": None}
+    stage.handlers[("GET", "/courses")] = (200, [COURSE])
+    stage.handlers[("GET", "/saved-videos")] = (200, [])
+    stage.handlers[("GET", "/courses/1/videos")] = (200, [video])
+    stage.handlers[("POST", "/courses/1/videos/12/audio-link")] = (200, {"url": "/audio/tok", "file_name": "a.mp4", "expires_in_minutes": 10})
+    stage.handlers[("GET", "/audio/tok")] = REQUIRED
+    await stage.goto("http://dashboard.test/#videos")
+    stage.me = me_of("revoked")
+    await stage.get_by_role("button", name="텍스트로 변환", exact=True).click()
+    await expect(stage.get_by_role("heading", name="권한이 회수됐어요")).to_be_visible()
+    await expect(stage.locator("#toast")).not_to_contain_text("오디오를 받지 못했습니다")
+
+
+async def test_access_screen_delete_without_known_student_id_still_types_confirmation(stage):
+    """state.me가 비어 있어 학번을 모르면 /me로 학번을 알아낸 뒤 입력 확인을 받는다."""
+    mes = iter([me_of("approved"), None])  # 첫 /me는 통과, 전환 중 /me는 실패, 그 뒤는 정상
+    seen = []
+
+    async def me_route(r):
+        n = len(seen)
+        seen.append(1)
+        if n == 1:
+            return await r.fulfill(status=503, json={"detail": "잠시 후 다시 시도하세요."})
+        return await r.fulfill(json=me_of("approved") if n == 0 else me_of("none"))
+
+    await stage.route("**/me", me_route)
+    stage.handlers[("GET", "/todos")] = REQUIRED
+    stage.handlers[("DELETE", "/me")] = (204, None)
+    await stage.goto("http://dashboard.test/")
+    await expect(stage.get_by_role("heading", name="권한이 회수됐어요")).to_be_visible()
+    await stage.get_by_role("button", name="계정 삭제", exact=True).click()
+    dialog = stage.locator("#confirm-dialog")
+    await expect(dialog.get_by_label("확인을 위해 학번을 입력하세요")).to_be_visible()
+    await expect(dialog.get_by_role("button", name="계정 삭제")).to_be_disabled()
+    assert ("DELETE", "/me") not in stage.calls
+
+
+async def test_access_screen_links_to_privacy_policy(stage):
+    stage.me = me_of("none")
+    await stage.goto("http://dashboard.test/")
+    link = stage.locator("#access").get_by_role("link", name="개인정보처리방침")
+    await expect(link).to_have_attribute("href", "/privacy.html")
+    assert (await link.bounding_box())["height"] >= 44
