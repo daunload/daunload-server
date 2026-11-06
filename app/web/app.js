@@ -768,14 +768,18 @@ function assignmentItem(a) {
 
 /* ---------------- 과목 ---------------- */
 
+/** 주차별 출석 칸. 과목 화면과 관리자 상세가 같이 쓴다. 기록이 없으면 empty 문구를 쓴다. */
+function attendanceHtml(attendance, empty = "출석 기록이 아직 없습니다.") {
+  const weeks = (attendance || []).filter((w) => w.statuses?.length);
+  if (!weeks.length) return `<p class="muted small-text">${esc(empty)}</p>`;
+  return `<div class="attend" aria-label="주차별 출석">${weeks.map((w) => `<div class="week"><div class="cells">${w.statuses
+    .map((s) => `<i class="cell ${esc(s)}" title="${esc(w.week)}주차 ${({ attendance: "출석", late: "지각", absent: "결석" })[s] || "기록 없음"}"></i>`).join("")}</div><small>${esc(w.week)}</small></div>`).join("")}</div>`;
+}
+
 function viewCourses() {
   if (needCred()) return;
   const rows = state.courses.map((c) => {
-    const weeks = (c.attendance || []).filter((w) => w.statuses.length);
-    const grid = weeks.length
-      ? `<div class="attend" aria-label="주차별 출석">${weeks.map((w) => `<div class="week"><div class="cells">${w.statuses
-          .map((s) => `<i class="cell ${esc(s)}" title="${w.week}주차 ${({ attendance: "출석", late: "지각", absent: "결석" })[s] || "기록 없음"}"></i>`).join("")}</div><small>${w.week}</small></div>`).join("")}</div>`
-      : `<p class="muted small-text">출석 기록이 아직 없습니다.</p>`;
+    const grid = attendanceHtml(c.attendance);
     const pending = state.todos.filter((t) => t.lms_course_id === c.lms_course_id && t.kind === "video").length;
     return `<div class="course">
       <div class="course-head"><h3>${esc(c.name)}</h3><span class="muted small-text">${esc(c.professors || "")}</span>

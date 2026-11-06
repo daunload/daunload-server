@@ -2,7 +2,7 @@
 
 /* ---------------- 관리자 ----------------
  * app.js 다음에 불러온다(state, api, esc, fmtDate, navigate, viewHash를 쓴다).
- * 탭 상태는 주소에 둔다: #admin/overview, #admin/users, #admin/users/{학번}, #admin/activity, #admin/problems
+ * 탭 상태는 주소에 둔다: #admin/overview, #admin/users, #admin/users/{학번}[/{상세 탭}], #admin/activity, #admin/problems
  * 서버 문자열은 모두 esc()를 거친다.
  */
 
@@ -20,8 +20,32 @@ const ADMIN_PROBLEM_KIND = {
   lms: { label: "LMS 문제", tone: "warn" },
   resolve: { label: "영상 주소 확보 실패", tone: "warn" },
 };
-/** nav: 화면을 그릴 때마다 오른다. seq: 같은 자리(key)의 요청 번호. 둘 중 하나라도 바뀌면 늦은 응답을 버린다. */
-const adminUi = { nav: 0, seq: {}, days: 7, metric: "playback_done", problemCount: null, problemCountFor: null };
+/** 재생 묶음 범위(PlaybackBatch.scope)의 화면 이름. 문제 탭(Task 8)도 이것을 쓴다. */
+const ADMIN_BATCH_SCOPE = { item: "한 개", module: "주차", course: "과목", all: "전체", auto: "자동", week: "이번 주" };
+const ADMIN_BATCH_STATUS = {
+  queued: { label: "대기", tone: "" }, running: { label: "진행 중", tone: "" }, done: { label: "완료", tone: "ok" },
+  partial: { label: "일부 실패", tone: "bad" }, failed: { label: "실패", tone: "bad" }, cancelled: { label: "취소", tone: "" },
+};
+const ADMIN_LMS_STATUS = { ok: { label: "정상", tone: "ok" }, invalid: { label: "비밀번호가 바뀜", tone: "bad" }, error: { label: "최근 오류", tone: "warn" } };
+const ADMIN_CHANNEL = { discord: "Discord", telegram: "Telegram" };
+const ADMIN_USER_SORTS = { activity: "최근 활동순", created: "가입일순", student_id: "학번순" };
+const ADMIN_USERS_LIMIT = 25;
+const ADMIN_DETAIL_LIMIT = 20;
+const ADMIN_DETAIL_TABS = [
+  { key: "timeline", label: "전체 타임라인" }, { key: "courses", label: "과목·출석" }, { key: "todos", label: "할 일·과제" },
+  { key: "playback", label: "재생" }, { key: "downloads", label: "다운로드" }, { key: "saved", label: "저장 영상" },
+  { key: "transcripts", label: "전사" }, { key: "notifications", label: "알림" }, { key: "lms", label: "LMS" },
+];
+
+/**
+ * nav: 화면을 그릴 때마다 오른다. seq: 같은 자리(key)의 요청 번호. 둘 중 하나라도 바뀌면 늦은 응답을 버린다.
+ * users: 사용자 목록 조건(상세에 다녀와도 남는다). detail: 지금 보는 사용자 한 명의 요약과 탭별 조건(viewer가 다르면 버린다).
+ */
+const adminUi = {
+  nav: 0, seq: {}, days: 7, metric: "playback_done", problemCount: null, problemCountFor: null,
+  users: { q: "", lms_status: "", has_problem: false, sort: "activity", offset: 0 },
+  detail: null,
+};
 
 const adminNumber = (n) => Number(n || 0).toLocaleString("ko-KR");
 const adminUserLink = (id) => `<a href="#admin/users/${encodeURIComponent(id)}">${esc(id)}</a>`;
@@ -115,12 +139,15 @@ function viewAdmin(path = state.adminPath) {
     const link = e.target.closest('a[href^="#admin/"]');
     if (!link || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     e.preventDefault();
-    const isTab = link.hasAttribute("data-admin-tab");
-    navigate(link.getAttribute("href"), true, { focus: !isTab });
-    if (isTab) $("#view .admin-tabs [aria-current='page']")?.focus();
+    // 탭을 누르면 포커스를 새로 그린 같은 탭에 둔다. 다른 링크는 본문으로 옮긴다.
+    const tabAttr = ["data-admin-tab", "data-admin-subtab"].find((a) => link.hasAttribute(a));
+    navigate(link.getAttribute("href"), true, { focus: !tabAttr });
+    if (tabAttr) $(`#view [${tabAttr}][aria-current='page']`)?.focus();
   });
   const body = $("#admin-body");
   if (tab === "overview") adminOverview(body);
+  else if (tab === "users" && path.length > 1) adminUserDetail(body, path[1], path[2]);
+  else if (tab === "users") adminUsers(body);
   else adminState(body, "empty", { message: "이 탭은 준비 중입니다." });
 }
 
@@ -231,4 +258,382 @@ function drawBars(chart, d) {
   }).join("");
   const since = d.tracking_since ? ` · 로그인·다운로드 추이는 ${esc(d.tracking_since)}부터 집계` : " · 로그인·다운로드 기록은 아직 없습니다";
   $(".admin-caption", chart).innerHTML = `최대 ${adminNumber(max)}건${since}`;
+}
+
+/* ---------- 사용자 ---------- */
+
+const ADMIN_BACK_ICON = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 5l-7 7 7 7"/></svg>';
+const ADMIN_PLAYBACK_FILTER = ["failed", "locked", "done", "queued", "playing", "skipped", "cancelled"];  // API가 받는 job 상태 순서
+const ADMIN_SUBMISSION = { unsubmitted: "미제출", submitted: "제출함", excused: "면제", unknown: "확인 불가" };
+const ADMIN_DOWNLOAD_KIND = { video: "영상", commons_file: "강의 자료", canvas_file: "첨부 파일" };
+
+const adminTag = (label, tone = "") => `<span class="admin-tag${tone ? ` ${tone}` : ""}">${esc(label)}</span>`;
+const adminWhen = (iso, none = "-") => iso ? adminTime(iso) : esc(none);
+/** 날짜만(2026/03/04). 가입일·동의일처럼 해가 중요한 곳에 쓴다. */
+function adminDay(iso) {
+  if (!iso) return "기록 없음";
+  const d = new Date(iso);
+  return `<time datetime="${esc(iso)}">${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}</time>`;
+}
+function adminLmsTag(status, prefix = "") {
+  if (!status) return adminTag(`${prefix}연결 안 함`);
+  const s = ADMIN_LMS_STATUS[status] || { label: status, tone: "warn" };
+  return adminTag(prefix + s.label, s.tone);
+}
+/** 재생 job 상태. 실패했지만 시작한 적이 없으면(앞 영상 실패로 멈춘 묶음 등) "미실행"이다. */
+function adminJobTag(job) {
+  if (job.status === "failed" && !job.started_at) return adminTag("미실행");
+  const tone = ["failed", "locked"].includes(job.status) ? "bad" : job.status === "done" ? "ok" : "";
+  return adminTag(ADMIN_PLAYBACK_STATUS[job.status] || job.status, tone);
+}
+const adminUserPath = (id) => `/admin/users/${encodeURIComponent(id)}`;
+const adminSubtabHref = (id, key) => `#admin/users/${encodeURIComponent(id)}/${key}`;
+const adminCourseTitle = (course, title) => esc(course ? `${course} · ${title}` : title);
+
+function adminUsers(body) {
+  adminUi.detail = null;
+  const f = adminUi.users;
+  const nav = adminUi.nav;
+  $("#admin-actions").innerHTML = `<button class="btn small" type="button" id="admin-reload">${icon("refresh")}다시 불러오기</button>`;
+  body.innerHTML = `
+    <form class="admin-filters" role="search" aria-label="사용자 찾기">
+      <label class="admin-search">학번 검색<input type="search" name="q" maxlength="32" autocomplete="off" value="${esc(f.q)}"></label>
+      <label>LMS 상태<select name="lms_status"><option value="">전체</option>${Object.entries(ADMIN_LMS_STATUS).map(([k, s]) =>
+        `<option value="${k}"${f.lms_status === k ? " selected" : ""}>${s.label}</option>`).join("")}</select></label>
+      <label>정렬<select name="sort">${Object.entries(ADMIN_USER_SORTS).map(([k, label]) =>
+        `<option value="${k}"${f.sort === k ? " selected" : ""}>${label}</option>`).join("")}</select></label>
+      <label class="check"><input type="checkbox" name="has_problem"${f.has_problem ? " checked" : ""}><span>문제 있음만</span></label>
+    </form>
+    <section class="panel admin-box" aria-labelledby="admin-users-title">
+      <div class="admin-box-head"><h2 id="admin-users-title" tabindex="-1">사용자 <span class="admin-count" id="admin-user-count" role="status"></span></h2></div>
+      <div id="admin-user-list"></div>
+    </section>`;
+  const form = $(".admin-filters", body);
+  const list = $("#admin-user-list");
+  const load = () => {
+    const params = new URLSearchParams({ sort: f.sort, offset: f.offset, limit: ADMIN_USERS_LIMIT });
+    if (f.q.trim()) params.set("q", f.q.trim());
+    if (f.lms_status) params.set("lms_status", f.lms_status);
+    if (f.has_problem) params.set("has_problem", "true");
+    adminState(list, "loading", { rows: 4 });
+    adminRequest(`/admin/users?${params}`, (d) => drawUsers(list, d, load), "users")
+      .catch((err) => adminState(list, "error", { message: err.message, retry: load }));
+  };
+  const apply = () => {
+    clearTimeout(adminUi.searchTimer);
+    f.q = form.q.value;
+    f.lms_status = form.lms_status.value;
+    f.sort = form.sort.value;
+    f.has_problem = form.has_problem.checked;
+    f.offset = 0;
+    load();
+  };
+  form.addEventListener("submit", (e) => { e.preventDefault(); apply(); });
+  form.addEventListener("change", (e) => { if (e.target.name !== "q") apply(); });
+  form.q.addEventListener("input", () => {
+    clearTimeout(adminUi.searchTimer);
+    adminUi.searchTimer = setTimeout(() => { if (nav === adminUi.nav) apply(); }, 300);
+  });
+  $("#admin-reload").addEventListener("click", load);
+  // 학번 링크가 실제 컨트롤이고, 줄의 다른 곳을 눌러도 그 링크를 누른 것으로 친다
+  list.addEventListener("click", (e) => {
+    if (e.target.closest("a, button") || String(getSelection())) return;
+    e.target.closest("tbody tr")?.querySelector('a[href^="#admin/users/"]')?.click();
+  });
+  load();
+}
+
+function drawUsers(list, d, load) {
+  const f = adminUi.users;
+  list.removeAttribute("aria-busy");
+  $("#admin-user-count").textContent = `${adminNumber(d.total)}명`;
+  if (!d.users.length) {
+    list.innerHTML = '<p class="admin-empty">조건에 맞는 사용자가 없습니다.</p>';
+  } else {
+    list.innerHTML = adminTable([
+      { label: "학번", render: (u) => adminUserLink(u.student_id), cls: "admin-nowrap" },
+      { label: "최근 로그인", render: (u) => adminWhen(u.last_login_at, "로그인 기록 없음"), cls: "admin-nowrap" },
+      { label: "LMS", render: (u) => adminLmsTag(u.lms_status) },
+      { label: "과목", render: (u) => adminNumber(u.course_count) },
+      { label: "재생 (완료/실패)", render: (u) =>
+        `${adminNumber(u.playback_done)} / ${u.playback_failed ? `<span class="admin-bad">${adminNumber(u.playback_failed)}</span>` : "0"}` },
+      { label: "다운로드", render: (u) => adminNumber(u.download_count) },
+      { label: "전사", render: (u) => adminNumber(u.transcript_count) },
+      { label: "알림", render: (u) => u.channels.length ? esc(u.channels.map((c) => ADMIN_CHANNEL[c] || c).join(", ")) : "없음" },
+    ], d.users, { caption: "사용자 목록" });
+    list.firstElementChild.classList.add("admin-users");
+  }
+  if (d.total > ADMIN_USERS_LIMIT || f.offset) {
+    list.append(adminPager(d.total, f.offset, ADMIN_USERS_LIMIT, (o) => { f.offset = o; load(); $("#admin-users-title").focus(); }));
+  }
+}
+
+/* ---------- 사용자 상세 ---------- */
+
+function adminUserDetail(body, id, tabKey) {
+  let tab = tabKey || "timeline";
+  if (!ADMIN_DETAIL_TABS.some((t) => t.key === tab)) {
+    tab = "timeline";
+    state.adminPath = ["users", id];
+    history.replaceState(null, "", viewHash());
+  }
+  const viewer = state.me.student_id;
+  if (adminUi.detail?.viewer !== viewer || adminUi.detail.id !== id) adminUi.detail = { viewer, id, summary: null, tabs: {} };
+  const detail = adminUi.detail;
+  const st = (detail.tabs[tab] ||= { offset: 0, offsets: {} });
+  const label = ADMIN_DETAIL_TABS.find((t) => t.key === tab).label;
+  $("#admin-actions").innerHTML = `<button class="btn small" type="button" id="admin-reload">${icon("refresh")}다시 불러오기</button>`;
+  body.innerHTML = `
+    <a class="admin-back" href="#admin/users">${ADMIN_BACK_ICON}사용자 목록</a>
+    <section class="admin-user-head" aria-label="사용자 요약"></section>
+    <nav class="admin-subtabs" aria-label="사용자 기록">${ADMIN_DETAIL_TABS.map((t) =>
+      `<a class="admin-tab" href="${adminSubtabHref(id, t.key)}" data-admin-subtab="${t.key}"${t.key === tab ? ' aria-current="page"' : ""}>${t.label}</a>`).join("")}</nav>
+    <section class="panel admin-box admin-user-tab" aria-label="${esc(label)}"></section>`;
+  const head = $(".admin-user-head", body);
+  const box = $(".admin-user-tab", body);
+  $("#admin-reload").addEventListener("click", () => {
+    adminUi.detail = null;
+    viewAdmin();
+    $("#admin-reload")?.focus();
+  });
+  const loadSummary = () => {
+    adminState(head, "loading", { rows: 2 });
+    if (tab === "lms") adminState(box, "loading");
+    adminRequest(`${adminUserPath(id)}/summary`, (s) => {
+      detail.summary = s;
+      drawUserHead(head, s);
+      if (tab === "lms") drawUserLms(box, s);
+    }, "summary").catch((err) => {
+      if (err.status === 404) return adminNotFound(body);
+      adminState(head, "error", { message: err.message, retry: loadSummary });
+      if (tab === "lms") adminState(box, "error", { message: err.message, retry: loadSummary });
+    });
+  };
+  if (detail.summary) {
+    drawUserHead(head, detail.summary);
+    if (tab === "lms") drawUserLms(box, detail.summary);
+  } else {
+    loadSummary();
+  }
+  if (tab !== "lms") ADMIN_TAB_VIEWS[tab](box, id, st);
+}
+
+function adminNotFound(body) {
+  $("#admin-actions").innerHTML = "";
+  body.innerHTML = `<div class="panel admin-box" role="alert"><p><strong>사용자를 찾을 수 없습니다.</strong> 학번을 확인하세요.</p>
+    <a class="admin-more" href="#admin/users">사용자 목록으로</a></div>`;
+}
+
+function drawUserHead(head, s) {
+  head.removeAttribute("aria-busy");
+  const lms = s.lms;
+  const kpi = (label, value, cls = "") =>
+    `<div class="panel admin-kpi${cls}"><span class="admin-kpi-label">${label}</span><strong>${adminNumber(value)}</strong></div>`;
+  head.innerHTML = `
+    <div class="admin-who"><h2>${esc(s.student_id)}</h2>${s.is_admin ? adminTag("관리자", "warn") : adminTag("일반 사용자")}</div>
+    <p class="admin-sub">가입 ${adminDay(s.created_at)} · 로그인 ${adminNumber(s.login_count)}회 · 최근 로그인 ${adminWhen(s.last_login_at, "기록 없음")} · 이용 동의 ${adminDay(s.consent_at)}</p>
+    <p class="admin-sub">${adminLmsTag(lms?.status, "LMS ")}${lms ? ` 동기화 ${adminWhen(lms.last_synced_at, "기록 없음")}` : ""}
+      ${lms?.last_error ? `<span class="admin-err">마지막 오류: ${esc(lms.last_error)}</span>` : ""}</p>
+    <div class="admin-kpis admin-sum">
+      ${kpi("수강 과목", s.counts.courses)}${kpi("남은 할 일", s.counts.todos)}${kpi("재생 완료", s.counts.playback_done)}
+      ${kpi("재생 실패", s.counts.playback_failed, s.counts.playback_failed ? " bad" : "")}${kpi("다운로드", s.counts.downloads)}
+    </div>`;
+}
+
+function drawUserLms(box, s) {
+  box.removeAttribute("aria-busy");
+  const l = s.lms;
+  if (!l) { box.innerHTML = '<p class="admin-empty">LMS 계정을 연결하지 않았습니다.</p>'; return; }
+  const row = (k, v) => `<div><dt>${k}</dt><dd>${v}</dd></div>`;
+  box.innerHTML = `<h3 class="sr-only">LMS</h3><dl class="admin-dl">
+    ${row("상태", adminLmsTag(l.status))}
+    ${row("마지막 오류", l.last_error ? `<span class="admin-err">${esc(l.last_error)}</span> ${adminWhen(l.last_error_at, "")}` : "없음")}
+    ${row("마지막 로그인", adminWhen(l.last_login_at, "기록 없음"))}
+    ${row("마지막 동기화", adminWhen(l.last_synced_at, "기록 없음"))}
+    ${row("다음 동기화", adminWhen(l.next_sync_at, "예정 없음"))}</dl>`;
+}
+
+/**
+ * 상세 탭의 한 목록을 페이지 단위로 그린다. el 안을 draw(data)의 HTML로 채우고, 넘칠 때만 페이지 버튼을 붙인다.
+ * st.offsets[key]에 지금 위치를 둔다(같은 사용자의 다른 탭에 다녀와도 남는다). params()는 추가 조건, drawn()은 그린 뒤에 부른다.
+ * 다시 불러오는 함수를 돌려준다.
+ */
+function adminPaged(el, path, st, key, draw, { params = () => ({}), drawn } = {}) {
+  const load = () => {
+    const offset = st.offsets[key] || 0;
+    const q = new URLSearchParams({ ...params(), offset, limit: ADMIN_DETAIL_LIMIT });
+    adminState(el, "loading");
+    adminRequest(`${path}?${q}`, (d) => {
+      el.removeAttribute("aria-busy");
+      el.innerHTML = draw(d);
+      if (d.total > ADMIN_DETAIL_LIMIT || offset) {
+        el.append(adminPager(d.total, offset, ADMIN_DETAIL_LIMIT, (o) => { st.offsets[key] = o; load(); }));
+      }
+      drawn?.();
+    }, key).catch((err) => adminState(el, "error", { message: err.message, retry: load }));
+  };
+  load();
+  return load;
+}
+
+const adminEmptyRows = (rows, message, html) => rows.length ? html() : `<p class="admin-empty">${esc(message)}</p>`;
+
+const ADMIN_TAB_VIEWS = {
+  timeline(box, id, st) {
+    st.kind ||= "all";
+    box.innerHTML = '<div class="admin-paged"></div>';
+    const el = $(".admin-paged", box);
+    const kinds = { all: "전체", playback: "재생", download: "다운로드", transcript: "전사" };
+    let reload;
+    let refocus = false;
+    el.addEventListener("click", (e) => {
+      const k = e.target.closest("[data-kind]")?.dataset.kind;
+      if (!k || k === st.kind) return;
+      st.kind = k;
+      st.offsets.timeline = 0;
+      refocus = true;
+      reload();
+    });
+    reload = adminPaged(el, `${adminUserPath(id)}/activities`, st, "timeline", (d) => {
+      const all = Object.values(d.counts).reduce((a, b) => a + b, 0);
+      const seg = `<div class="admin-seg" role="group" aria-label="활동 종류">${Object.entries(kinds).map(([k, label]) =>
+        `<button class="btn small" type="button" data-kind="${k}" aria-pressed="${k === st.kind}">${label} ${adminNumber(k === "all" ? all : d.counts[k])}</button>`).join("")}</div>`;
+      return seg + adminEmptyRows(d.activities, "기록된 활동이 없습니다.", () => adminTable([
+        { label: "시각", render: (a) => adminTime(a.recorded_at), cls: "admin-nowrap" },
+        { label: "종류", render: (a) => a.kind === "playback" ? adminJobTag(a) : adminTag(adminActivityLabel(a)) },
+        { label: "과목 · 제목", render: (a) => adminCourseTitle(a.course_name, a.title) },
+      ], d.activities, { caption: "전체 타임라인" }));
+    }, {
+      params: () => st.kind === "all" ? {} : { kind: st.kind },
+      // 종류를 바꾸면 다시 그린 같은 버튼으로 포커스를 돌린다
+      drawn: () => { if (refocus) $(`[data-kind="${st.kind}"]`, el)?.focus(); refocus = false; },
+    });
+  },
+
+  courses(box, id, st) {
+    adminPaged(box, `${adminUserPath(id)}/courses`, st, "courses", (d) => adminEmptyRows(d.items, "과목이 없습니다.", () => adminTable([
+      { label: "과목", render: (c) => esc(c.name) },
+      { label: "교수", render: (c) => esc(c.professors || "-") },
+      { label: "학기", render: (c) => c.active ? adminTag("현재 학기", "ok") : adminTag("지난 학기") },
+      { label: "자동 재생", render: (c) => c.auto_play ? "켜짐" : "꺼짐" },
+      { label: "주차별 출석", render: (c) => attendanceHtml(c.attendance, "출석 기록 없음") },
+    ], d.items, { caption: "과목과 출석" })));
+  },
+
+  todos(box, id, st) {
+    box.innerHTML = `<section aria-labelledby="admin-todos-title"><h3 id="admin-todos-title">할 일</h3><div class="admin-paged" data-part="todos"></div></section>
+      <section aria-labelledby="admin-assign-title"><h3 id="admin-assign-title">과제</h3><div class="admin-paged" data-part="assignments"></div></section>`;
+    adminPaged($('[data-part="todos"]', box), `${adminUserPath(id)}/todos`, st, "todos", (d) => adminEmptyRows(d.items, "할 일이 없습니다.", () => adminTable([
+      { label: "종류", render: (t) => esc(KIND[t.kind] || t.kind) },
+      { label: "과목 · 제목", render: (t) => adminCourseTitle(t.course_name, t.title) },
+      { label: "마감", render: (t) => adminWhen(t.deadline, "마감 없음"), cls: "admin-nowrap" },
+      // active가 false면 동기화에서 사라졌다는 뜻일 뿐이라 완료로 쓰지 않는다
+      { label: "상태", render: (t) => t.active ? adminTag("남아 있음") : adminTag("목록에서 사라짐(완료 또는 마감)") },
+    ], d.items, { caption: "할 일" })));
+    adminPaged($('[data-part="assignments"]', box), `${adminUserPath(id)}/assignments`, st, "assignments", (d) => adminEmptyRows(d.items, "과제가 없습니다.", () => adminTable([
+      { label: "종류", render: (a) => esc(KIND[a.kind] || a.kind) },
+      { label: "과목 · 제목", render: (a) => adminCourseTitle(a.course_name, a.title) },
+      { label: "제출 상태", render: (a) => adminTag(ADMIN_SUBMISSION[a.submission_state] || a.submission_state, a.submission_state === "submitted" ? "ok" : "") },
+      { label: "제출 시각", render: (a) => adminWhen(a.submitted_at), cls: "admin-nowrap" },
+      { label: "마감", render: (a) => adminWhen(a.deadline, "마감 없음"), cls: "admin-nowrap" },
+      { label: "미제출 여부", render: (a) => a.missing ? adminTag("마감 지나 미제출", "bad") : "-" },
+    ], d.items, { caption: "과제" })));
+  },
+
+  playback(box, id, st) {
+    st.status ??= ""; st.course ??= ""; st.days ??= "";
+    const opt = (v, label, cur) => `<option value="${esc(v)}"${String(cur) === String(v) ? " selected" : ""}>${esc(label)}</option>`;
+    box.innerHTML = `<form class="admin-filters" aria-label="재생 기록 조건">
+        <label>상태<select name="status">${opt("", "전체", st.status)}${ADMIN_PLAYBACK_FILTER.map((k) => opt(k, ADMIN_PLAYBACK_STATUS[k], st.status)).join("")}</select></label>
+        <label>과목<select name="course">${opt("", "전체", st.course)}</select></label>
+        <label>기간<select name="days">${opt("", "전체 기간", st.days)}${ADMIN_PERIODS.map((d) => opt(d, `최근 ${d}일`, st.days)).join("")}</select></label>
+      </form><div class="admin-paged"></div>`;
+    const form = $("form", box);
+    const courses = new Map();
+    let reload;
+    form.addEventListener("submit", (e) => e.preventDefault());
+    form.addEventListener("change", () => {
+      st.status = form.status.value; st.course = form.course.value; st.days = form.days.value;
+      st.offsets.playback = 0;
+      reload();
+    });
+    const draw = (d) => adminEmptyRows(d.items, "조건에 맞는 재생 기록이 없습니다.", () => d.items.map((b) => adminBatch(b, courses)).join(""));
+    reload = adminPaged($(".admin-paged", box), `${adminUserPath(id)}/playback`, st, "playback", draw, { params: () => {
+      const p = {};
+      if (st.status) p.status = st.status;
+      if (st.course) p.lms_course_id = st.course;
+      if (st.days) p.days = st.days;
+      return p;
+    } });
+    // 과목 필터와 묶음의 과목 이름용. 실패해도 재생 기록은 그대로 보인다.
+    adminRequest(`${adminUserPath(id)}/courses?limit=100`, (d) => {
+      d.items.forEach((c) => courses.set(c.lms_course_id, c.name));
+      form.course.innerHTML = opt("", "전체", st.course) + d.items.map((c) => opt(c.lms_course_id, c.name, st.course)).join("");
+      box.querySelectorAll(".admin-batch [data-course]").forEach((el) => { el.textContent = courses.get(Number(el.dataset.course)) || el.textContent; });
+    }, "playback-courses").catch(() => {});
+  },
+
+  downloads(box, id, st) {
+    adminPaged(box, `${adminUserPath(id)}/downloads`, st, "downloads", (d) => adminEmptyRows(d.items, "다운로드 기록이 없습니다.", () => adminTable([
+      { label: "제목", render: (r) => esc(r.title) },
+      { label: "종류", render: (r) => esc(ADMIN_DOWNLOAD_KIND[r.kind] || r.kind) },
+      { label: "횟수", render: (r) => `${adminNumber(r.count)}회` },
+      { label: "처음", render: (r) => adminTime(r.first_at), cls: "admin-nowrap" },
+      { label: "마지막", render: (r) => adminTime(r.last_at), cls: "admin-nowrap" },
+    ], d.items, { caption: "다운로드" })));
+  },
+
+  saved(box, id, st) {
+    adminPaged(box, `${adminUserPath(id)}/saved-videos`, st, "saved", (d) => adminEmptyRows(d.items, "저장한 영상이 없습니다.", () => adminTable([
+      { label: "영상", render: (v) => `${esc(v.title)}<div class="admin-sub">${esc(v.course_name)} · ${esc(v.module_title)}</div>` },
+      { label: "파일명", render: (v) => esc(v.file_name) },
+      { label: "길이 · 용량", render: (v) => [v.duration ? fmtDuration(v.duration) : "", fmtSize(v.size)].filter(Boolean).join(" · ") || "-" },
+      // 주소 자체는 API가 주지 않는다. 있는지만 보여 준다.
+      { label: "주소", render: (v) => `${v.has_media_url ? adminTag("주소 있음", "ok") : adminTag("주소 없음", "warn")}${v.resolve_error ? `<div class="admin-err">${esc(v.resolve_error)}</div>` : ""}` },
+      { label: "확보 시각", render: (v) => v.resolved_at ? adminTime(v.resolved_at) : v.resolve_failed_at ? `실패 ${adminTime(v.resolve_failed_at)}` : "-", cls: "admin-nowrap" },
+    ], d.items, { caption: "저장 영상" })));
+  },
+
+  transcripts(box, id, st) {
+    adminPaged(box, `${adminUserPath(id)}/transcripts`, st, "transcripts", (d) => adminEmptyRows(d.items, "전사 기록이 없습니다.", () => adminTable([
+      { label: "과목 · 제목", render: (t) => adminCourseTitle(t.course_name, t.title) },
+      { label: "모델", render: (t) => esc(t.model) },
+      { label: "길이", render: (t) => t.duration ? fmtDuration(t.duration) : "-" },
+      { label: "생성", render: (t) => adminTime(t.created_at), cls: "admin-nowrap" },
+      { label: "수정", render: (t) => adminTime(t.updated_at), cls: "admin-nowrap" },
+    ], d.items, { caption: "전사" })));
+  },
+
+  notifications(box, id, st) {
+    adminPaged(box, `${adminUserPath(id)}/notifications`, st, "notifications", (d) => `
+      <h3>알림 채널</h3>${adminEmptyRows(d.channels, "등록한 알림 채널이 없습니다.", () => adminTable([
+        { label: "종류", render: (c) => esc(ADMIN_CHANNEL[c.kind] || c.kind) },
+        { label: "사용", render: (c) => c.enabled ? adminTag("사용 중", "ok") : adminTag("꺼짐") },
+        { label: "등록일", render: (c) => adminDay(c.created_at) },
+      ], d.channels, { caption: "알림 채널" }))}
+      <h3>발송 기록 <span class="admin-count">${adminNumber(d.total)}건</span></h3>${adminEmptyRows(d.items, "발송 기록이 없습니다.", () => adminTable([
+        { label: "알림 키", render: (n) => `<code>${esc(n.key)}</code>` },
+        { label: "시각", render: (n) => adminTime(n.created_at), cls: "admin-nowrap" },
+      ], d.items, { caption: "알림 발송 기록" }))}`);
+  },
+};
+
+function adminBatch(b, courses) {
+  const status = ADMIN_BATCH_STATUS[b.status] || { label: b.status, tone: "" };
+  const course = b.lms_course_id != null ? ` · <span data-course="${esc(b.lms_course_id)}">${esc(courses.get(b.lms_course_id) || `과목 ${b.lms_course_id}`)}</span>` : "";
+  const jobs = b.jobs.length ? adminTable([
+    { label: "영상", render: (j) => `${esc(j.title)}${j.error ? `<div class="admin-err">${esc(j.error)}</div>` : ""}` },
+    { label: "길이", render: (j) => fmtDuration(j.duration), cls: "admin-nowrap" },
+    { label: "상태", render: (j) => adminJobTag(j) },
+    { label: "시도", render: (j) => `${adminNumber(j.attempts)}회` },
+    { label: "진행", render: (j) => `${fmtDuration(j.progress_seconds || 0)} / ${fmtDuration(j.duration)}`, cls: "admin-nowrap" },
+    { label: "시작", render: (j) => adminWhen(j.started_at), cls: "admin-nowrap" },
+    { label: "종료", render: (j) => adminWhen(j.finished_at), cls: "admin-nowrap" },
+  ], b.jobs, { caption: `${ADMIN_BATCH_SCOPE[b.scope] || b.scope} 재생 묶음의 영상` }) : '<p class="admin-empty">묶음에 영상이 없습니다.</p>';
+  return `<article class="admin-batch">
+    <div class="admin-batch-head"><h3>${esc(ADMIN_BATCH_SCOPE[b.scope] || b.scope)} 재생${course}</h3>${adminTag(status.label, status.tone)}</div>
+    <p class="admin-sub">완료 ${adminNumber(b.done_count)} · 실패 ${adminNumber(b.failed_count)} · 건너뜀 ${adminNumber(b.skipped_count)} / 전체 ${adminNumber(b.total)}
+      · 생성 ${adminTime(b.created_at)} · 시작 ${adminWhen(b.started_at, "기록 없음")} · 종료 ${adminWhen(b.finished_at, "기록 없음")}</p>
+    ${b.error ? `<p class="admin-err">${esc(b.error)}</p>` : ""}
+    ${jobs}</article>`;
 }
