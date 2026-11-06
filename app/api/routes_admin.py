@@ -1,13 +1,19 @@
-from datetime import datetime
+from collections import defaultdict
+from datetime import date, datetime, timedelta
 from typing import Literal
+from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
-from sqlalchemy import func, literal, select, union_all
+from sqlalchemy import func, select, union
 
 from app.api.deps import AdminUser, Db, is_admin
-from app.db.models import (CourseRow, DownloadRecord, LmsCredential, NotificationChannel,
-                           PlaybackBatch, PlaybackJob, Transcript, User)
+from app.config import get_settings
+from app.db.models import (CourseRow, LmsCredential, NotificationChannel, PlaybackBatch, PlaybackJob,
+                           Transcript, User, UserDailyActivity)
+from app.services.activity import local_day
+from app.services.admin_data import (activity_union, as_utc, clean_error, failed_at, failed_job_filter,
+                                     period_start, problem_union)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -130,27 +136,7 @@ async def user_activities(
     if user_id is None:
         raise HTTPException(404, "사용자를 찾을 수 없습니다.")
     # Only metadata is selected: no media URLs, raw errors, or transcript contents.
-    playback = select(
-        PlaybackJob.id.label("id"), literal("playback").label("kind"),
-        PlaybackJob.title.label("title"), CourseRow.name.label("course_name"),
-        PlaybackJob.status.label("status"), PlaybackBatch.created_at.label("recorded_at"),
-        PlaybackJob.started_at.label("started_at"), PlaybackJob.finished_at.label("finished_at"),
-        literal(1).label("count"),
-    ).join(PlaybackBatch, PlaybackBatch.id == PlaybackJob.batch_id).outerjoin(
-        CourseRow, (CourseRow.user_id == PlaybackJob.user_id)
-        & (CourseRow.lms_course_id == PlaybackJob.lms_course_id),
-    ).where(PlaybackJob.user_id == user_id)
-    downloads = select(
-        DownloadRecord.id, literal("download"), DownloadRecord.title, CourseRow.name,
-        literal("link_issued"), DownloadRecord.last_at, literal(None), literal(None), DownloadRecord.count,
-    ).outerjoin(CourseRow, (CourseRow.user_id == DownloadRecord.user_id)
-                & (CourseRow.lms_course_id == DownloadRecord.lms_course_id)
-    ).where(DownloadRecord.user_id == user_id)
-    transcripts = select(
-        Transcript.id, literal("transcript"), Transcript.title, Transcript.course_name,
-        literal("saved"), Transcript.updated_at, literal(None), literal(None), literal(1),
-    ).where(Transcript.user_id == user_id)
-    activities = union_all(playback, downloads, transcripts).subquery()
+    activities = activity_union(user_id)
     counts = {"playback": 0, "download": 0, "transcript": 0}
     counts.update(dict((await db.execute(
         select(activities.c.kind, func.count()).group_by(activities.c.kind)
@@ -164,4 +150,191 @@ async def user_activities(
     return AdminActivitiesOut(
         total=sum(counts.values()) if kind == "all" else counts[kind], counts=counts,
         activities=[AdminActivityOut(**row) for row in rows],
+    )
+
+
+def _period_days(days: int = 7) -> int:
+    if days not in (7, 30, 90):
+        raise HTTPException(422, "days는 7, 30, 90 중 하나여야 합니다.")
+    return days
+
+
+class AdminAllActivityOut(AdminActivityOut):
+    student_id: str
+
+
+class AdminAllActivitiesOut(BaseModel):
+    total: int
+    counts: dict[str, int]
+    activities: list[AdminAllActivityOut]
+
+
+class AdminProblemOut(BaseModel):
+    kind: str
+    occurred_at: datetime | None
+    student_id: str
+    course_name: str | None
+    title: str
+    error: str | None
+    not_run: int
+
+
+class AdminProblemsOut(BaseModel):
+    total: int
+    counts: dict[str, int]
+    problems: list[AdminProblemOut]
+
+
+class AdminSeriesOut(BaseModel):
+    day: date
+    playback_done: int
+    logins: int
+    downloads: int
+
+
+class AdminOverviewOut(BaseModel):
+    days: int
+    total_users: int
+    active_users: int
+    playback_done: int
+    playback_auto: int
+    playback_seconds: float
+    downloads: int
+    playback_failed: int
+    failure_rate: float | None
+    tracking_since: date | None
+    problem_count: int
+    series: list[AdminSeriesOut]
+    recent_activity: list[AdminAllActivityOut]
+    recent_problems: list[AdminProblemOut]
+
+
+async def _all_activities(db, activities, start, kind: str, student_id: str | None):
+    """기간·학번으로 거른 활동의 (종류별 건수, 필터된 쿼리). 건수에는 종류 필터를 적용하지 않는다."""
+    base = select(activities, User.student_id).join(User, User.id == activities.c.user_id).where(
+        activities.c.recorded_at >= start)
+    if student_id:
+        base = base.where(User.student_id == student_id)
+    sub = base.subquery()
+    counts = {"playback": 0, "download": 0, "transcript": 0}
+    counts.update(dict((await db.execute(select(sub.c.kind, func.count()).group_by(sub.c.kind))).all()))
+    return counts, select(sub).where(sub.c.kind == kind) if kind != "all" else select(sub), sub
+
+
+def _problem_rows(rows) -> list[AdminProblemOut]:
+    out = []
+    for row in rows:
+        title = f"재생 묶음 ({row['title']})" if row["kind"] == "batch" else row["title"]
+        out.append(AdminProblemOut(
+            kind=row["kind"], occurred_at=row["occurred_at"] and as_utc(row["occurred_at"]),
+            student_id=row["student_id"], course_name=row["course_name"], title=title,
+            error=clean_error(row["error"]), not_run=row["not_run"]))
+    return out
+
+
+def _problem_order(sub):
+    return (sub.c.occurred_at.desc().nulls_last(), sub.c.kind, sub.c.ref_id.desc())
+
+
+@router.get("/overview", response_model=AdminOverviewOut)
+async def overview(admin: AdminUser, db: Db, response: Response, days: int = Depends(_period_days)):
+    response.headers["Cache-Control"] = "no-store"
+    start = period_start(days)
+    first_day = local_day() - timedelta(days=days - 1)
+    total_users = await db.scalar(select(func.count()).select_from(User))
+    daily = (await db.execute(select(
+        UserDailyActivity.day, func.sum(UserDailyActivity.logins), func.sum(UserDailyActivity.downloads),
+    ).where(UserDailyActivity.day >= first_day).group_by(UserDailyActivity.day))).all()
+    by_day = {d: (int(logins or 0), int(downloads or 0)) for d, logins, downloads in daily}
+    active = union(
+        select(UserDailyActivity.user_id).where(
+            UserDailyActivity.day >= first_day, (UserDailyActivity.logins > 0) | (UserDailyActivity.downloads > 0)),
+        select(PlaybackJob.user_id).join(PlaybackBatch, PlaybackBatch.id == PlaybackJob.batch_id).where(
+            PlaybackJob.started_at >= start, PlaybackBatch.scope != "auto"),
+        select(Transcript.user_id).where(Transcript.updated_at >= start),
+    ).subquery()
+    active_users = await db.scalar(select(func.count()).select_from(active))
+    done = (await db.execute(
+        select(PlaybackJob.finished_at, PlaybackJob.duration, PlaybackBatch.scope)
+        .join(PlaybackBatch, PlaybackBatch.id == PlaybackJob.batch_id)
+        .where(PlaybackJob.status == "done", PlaybackJob.finished_at >= start)
+    )).all()
+    tz = ZoneInfo(get_settings().timezone)
+    done_by_day: dict[date, int] = defaultdict(int)
+    for finished_at, _, _ in done:
+        done_by_day[as_utc(finished_at).astimezone(tz).date()] += 1
+    failed = await db.scalar(
+        select(func.count()).select_from(PlaybackJob)
+        .join(PlaybackBatch, PlaybackBatch.id == PlaybackJob.batch_id)
+        .where(failed_job_filter(), failed_at() >= start))
+    tracking_since = await db.scalar(select(func.min(UserDailyActivity.day)))
+    problems = problem_union(start)
+    problem_count = await db.scalar(select(func.count()).select_from(problems))
+    recent_problems = (await db.execute(
+        select(problems).order_by(*_problem_order(problems)).limit(5))).mappings().all()
+    activities = activity_union(None)
+    _, query, sub = await _all_activities(db, activities, start, "all", None)
+    recent = (await db.execute(query.order_by(
+        sub.c.recorded_at.desc(), sub.c.kind, sub.c.id.desc()).limit(10))).mappings().all()
+    series = []
+    for offset in range(days):
+        day = first_day + timedelta(days=offset)
+        logins, downloads = by_day.get(day, (0, 0))
+        series.append(AdminSeriesOut(day=day, playback_done=done_by_day.get(day, 0), logins=logins, downloads=downloads))
+    return AdminOverviewOut(
+        days=days, total_users=total_users, active_users=active_users,
+        playback_done=len(done), playback_auto=sum(1 for _, _, scope in done if scope == "auto"),
+        playback_seconds=float(sum(duration for _, duration, _ in done)),
+        downloads=sum(downloads for _, downloads in by_day.values()),
+        playback_failed=failed, failure_rate=failed / (len(done) + failed) if len(done) + failed else None,
+        tracking_since=tracking_since, problem_count=problem_count, series=series,
+        recent_activity=[AdminAllActivityOut(**row) for row in recent],
+        recent_problems=_problem_rows(recent_problems),
+    )
+
+
+@router.get("/activities", response_model=AdminAllActivitiesOut)
+async def all_activities(
+    admin: AdminUser, db: Db, response: Response,
+    kind: Literal["all", "playback", "download", "transcript"] = "all",
+    student_id: str | None = Query(default=None, max_length=32),
+    days: int = Depends(_period_days),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    response.headers["Cache-Control"] = "no-store"
+    counts, query, sub = await _all_activities(db, activity_union(None), period_start(days), kind, student_id)
+    rows = (await db.execute(query.order_by(
+        sub.c.recorded_at.desc(), sub.c.kind, sub.c.id.desc()).offset(offset).limit(limit))).mappings().all()
+    return AdminAllActivitiesOut(
+        total=sum(counts.values()) if kind == "all" else counts[kind], counts=counts,
+        activities=[AdminAllActivityOut(**row) for row in rows],
+    )
+
+
+@router.get("/problems", response_model=AdminProblemsOut)
+async def problems(
+    admin: AdminUser, db: Db, response: Response,
+    kind: Literal["all", "playback", "batch", "lms", "resolve"] = "all",
+    student_id: str | None = Query(default=None, max_length=32),
+    lms_course_id: int | None = None,
+    days: int = Depends(_period_days),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    response.headers["Cache-Control"] = "no-store"
+    union_sub = problem_union(period_start(days))
+    filtered = select(union_sub)
+    if student_id:
+        filtered = filtered.where(union_sub.c.student_id == student_id)
+    if lms_course_id is not None:
+        filtered = filtered.where(union_sub.c.lms_course_id == lms_course_id)
+    sub = filtered.subquery()
+    counts = {"playback": 0, "batch": 0, "lms": 0, "resolve": 0}
+    counts.update(dict((await db.execute(select(sub.c.kind, func.count()).group_by(sub.c.kind))).all()))
+    query = select(sub) if kind == "all" else select(sub).where(sub.c.kind == kind)
+    rows = (await db.execute(query.order_by(*_problem_order(sub)).offset(offset).limit(limit))).mappings().all()
+    return AdminProblemsOut(
+        total=sum(counts.values()) if kind == "all" else counts[kind], counts=counts,
+        problems=_problem_rows(rows),
     )
