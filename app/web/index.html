@@ -38,6 +38,24 @@
     <button class="btn primary" id="retry-boot" hidden>다시 시도</button>
     <button class="btn ghost" id="startup-login" hidden>로그인 화면으로</button>
   </div>
+  <!-- 승인 전 사용자 -->
+  <main id="access" class="access" hidden>
+    <header class="access-top">
+      <span class="brand"><img class="brand-mark" src="/mark.png" alt="" width="26" height="26">아유 하기싫어</span>
+      <button class="btn small ghost" id="access-logout" type="button">로그아웃</button>
+      <button class="btn small danger" id="access-delete" type="button">계정 삭제</button>
+    </header>
+    <section class="access-box" aria-labelledby="access-title" tabindex="-1" id="access-box">
+      <h1 class="access-cap" id="access-title"></h1>
+      <p class="muted" id="access-message"></p>
+      <span class="tag warn" id="access-tag" hidden>대기 중</span>
+      <p class="error" id="access-error" role="alert"></p>
+      <div class="access-actions">
+        <button class="btn primary" id="access-request" type="button" hidden>권한 요청 보내기</button>
+        <button class="btn" id="access-recheck" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg>상태 다시 확인</button>
+      </div>
+    </section>
+  </main>
   <!-- 로그인 / 가입 -->
   <main id="auth" class="auth" hidden>
     <div class="auth-stage" aria-hidden="true"><div class="auth-frame"><img id="auth-mood" src="/patrick-blank.jpg" alt="" width="640" height="640"><p class="auth-caption" id="auth-caption">아유… 하기 싫어…</p></div></div>
@@ -129,6 +147,7 @@
   <script src="/downloads.js"></script>
   <script src="/transcribe.js"></script>
   <script src="/app.js"></script>
+  <script src="/access.js"></script>
   <script src="/admin.js"></script>
   <script src="/admin-feeds.js"></script>
   <script src="/week.js"></script>

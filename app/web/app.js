@@ -107,6 +107,7 @@ async function api(path, { method = "GET", json, form } = {}) {
       : detail?.message ? detail.message
       : Array.isArray(detail) ? detail.map((d) => d.msg).join(", ")
       : `요청 실패 (${res.status})`;
+    if (res.status === 403 && detail?.code === "ACCESS_REQUIRED") showAccessScreen();  // 열어 둔 탭에서 권한이 회수된 경우
     throw new ApiError(res.status, msg, detail?.code);
   }
   return data;
@@ -117,6 +118,7 @@ async function api(path, { method = "GET", json, form } = {}) {
 function showAuth() {
   $("#startup").hidden = true;
   $("#app").hidden = true;
+  $("#access").hidden = true;
   $("#auth").hidden = false;
 }
 
@@ -223,9 +225,9 @@ $("#logout-btn").addEventListener("click", logout);
 
 /* ---------------- 데이터 ---------------- */
 
-async function loadCore() {
+async function loadCore(knownMe) {
   const [me, cred, todos, courses, batches] = await Promise.all([
-    api("/me"),
+    knownMe ?? api("/me"),
     api("/lms/credentials").catch((e) => (e.status === 404 ? null : Promise.reject(e))),
     api("/todos"),
     api("/courses"),
@@ -242,15 +244,18 @@ async function loadCore() {
 async function boot() {
   if (!state.token) return showAuth();
   $("#auth").hidden = true;
+  $("#access").hidden = true;
   $("#startup").hidden = false;
   $("#startup-message").textContent = "잠시만 기다려 주세요.";
   $("#startup-photo").src = "/patrick-steam.jpg";
   $("#retry-boot").hidden = true;
   $("#startup-login").hidden = true;
   try {
-    await loadCore();
+    const me = await api("/me");
+    if (me.access_status !== "approved") return showAccessScreen(me);  // 승인 전에는 다른 API를 부르지 않는다
+    await loadCore(me);
   } catch (err) {
-    if (err.status !== 401) {
+    if (err.status !== 401 && err.code !== "ACCESS_REQUIRED") {
       $("#startup-message").textContent = `학습 현황을 불러오지 못했습니다. ${err.message}`;
       $("#startup-photo").src = "/patrick-burnt.jpg";
       $("#retry-boot").hidden = false;
