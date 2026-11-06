@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from starlette.background import BackgroundTask
 
-from app.api.deps import CurrentUser, Db
+from app.api.deps import CurrentUser, Db, access_denied
 from app.db.base import sessionmaker
 from app.db.models import CourseRow, SavedVideo
 from app.config import get_settings
@@ -38,6 +38,7 @@ from app.lms.media import (
 )
 from app.lms.models import Course
 from app.security import DOWNLOAD_LINK_MINUTES, create_download_token, decode_download_token
+from app.services.access import user_has_access
 from app.services.downloads import downloaded_map, record_download, video_key
 from app.services.lms_access import NoCredentials, lms_client_for
 from app.services.transcripts import transcript_map
@@ -384,12 +385,21 @@ class _Slot:
                 _audio_streams -= 1
 
 
+async def _require_owner_access(user_id: int) -> None:
+    """서명 링크는 로그인 토큰 없이 열리므로 링크 주인의 승인 상태를 매번 확인한다(회수 즉시 막힌다).
+    응답을 오래 흘려보내는 경로라 요청 내내 DB 연결을 잡지 않도록 의존성 대신 짧은 세션을 쓴다."""
+    async with sessionmaker()() as db:
+        if not await user_has_access(db, user_id):
+            raise access_denied()
+
+
 @router.get("/downloads/{token}", name="download_video")
 async def download_video(token: str, request: Request):
     decoded = decode_download_token(token)
     if decoded is None or decoded[1].get("kind", "video") not in RELAY_KINDS:
         raise HTTPException(401, "다운로드 링크가 만료되었거나 올바르지 않습니다. 목록에서 다시 받으세요.")
     user_id, data = decoded
+    await _require_owner_access(user_id)
     if data.get("kind", "video") == "video":
         _require_video_relay()
     slot = _Slot(user_id, "진행 중인 다운로드가 끝난 뒤 다시 시도하세요.")
@@ -441,6 +451,7 @@ async def stream_audio(token: str):
     if decoded is None or decoded[1].get("kind") != "audio":
         raise HTTPException(401, "전사 링크가 만료되었거나 올바르지 않습니다. 다시 시도하세요.")
     user_id, data = decoded
+    await _require_owner_access(user_id)
     if ffmpeg_path() is None:
         raise HTTPException(503, "서버에 ffmpeg가 설치되어 있지 않습니다.")
     slot = _Slot(user_id, "진행 중인 작업이 끝난 뒤 다시 시도하세요.", audio=True)

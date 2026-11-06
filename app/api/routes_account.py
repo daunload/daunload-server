@@ -8,12 +8,13 @@ from fastapi import APIRouter, Form, HTTPException, Request, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import CurrentUser, Db, JobQueue, is_admin
+from app.api.deps import AuthedUser, CurrentUser, Db, JobQueue, is_admin
 from app.api.schemas import CredentialsOut, TokenOut
 from app.db.base import utcnow
 from app.db.models import LmsCredential, User
 from app.lms.errors import InvalidCredentials, LmsError
 from app.security import create_access_token, hash_password, verify_password
+from app.services.access import access_retry_at, has_access
 from app.services.activity import bump_daily
 from app.services.lms_access import save_credentials
 
@@ -125,7 +126,8 @@ async def login(
         limiter.release(limits, mark)
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"LMS에 로그인하지 못했습니다: {e}") from e
     limiter.release(limits, mark)
-    await queue.enqueue("sync_user_job", user.id, job_id=f"sync:{user.id}")
+    if has_access(user):  # 승인 전에는 계정 확인과 저장만 하고 학교 정보는 가져오지 않는다
+        await queue.enqueue("sync_user_job", user.id, job_id=f"sync:{user.id}")
     return await _issue_token(db, user)
 
 
@@ -136,8 +138,14 @@ async def _issue_token(db: AsyncSession, user: User) -> TokenOut:
 
 
 @router.get("/me", tags=["auth"])
-async def me(user: CurrentUser):
-    return {"student_id": user.student_id, "consent_at": user.consent_at, "is_admin": is_admin(user)}
+async def me(user: AuthedUser):
+    """승인 전에도 열려 있다. 화면은 access_status를 보고 앱 또는 권한 화면을 띄운다."""
+    return {
+        "student_id": user.student_id, "consent_at": user.consent_at, "is_admin": is_admin(user),
+        "access_status": "approved" if has_access(user) else user.access_status,
+        "access_requested_at": user.access_requested_at,
+        "access_retry_at": access_retry_at(user),
+    }
 
 
 async def _record_login(db: AsyncSession, user_id: int) -> None:
@@ -149,7 +157,7 @@ async def _record_login(db: AsyncSession, user_id: int) -> None:
 
 
 @router.delete("/me", status_code=204, tags=["auth"])
-async def delete_me(user: CurrentUser, db: Db):
+async def delete_me(user: AuthedUser, db: Db):
     """계정과 저장된 학교 비밀번호, 동기화한 데이터를 모두 지운다."""
     await db.delete(user)
     await db.commit()

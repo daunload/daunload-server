@@ -26,7 +26,7 @@ async def page():
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     later = today + timedelta(days=40)
     data = {
-        "/me": {"student_id": "20260001"},
+        "/me": {"student_id": "20260001", "access_status": "approved"},
         "/lms/credentials": {"student_id": "20260001", "status": "ok", "last_error": None, "last_login_at": now.isoformat(),
                              "last_synced_at": now.isoformat(), "next_sync_at": None},
         "/courses": [{"lms_course_id": 1, "name": "피지컬미디어", "professors": "교수", "attendance": [], "auto_play": False}],

@@ -42,7 +42,7 @@ def _data(now):
              "deadline": v["deadline"], "status": "playing" if i == 0 else "queued", "attempts": 1, "progress_seconds": 540,
              "error": None, "started_at": None, "finished_at": None} for i, v in enumerate(videos)]
     return {
-        "/me": {"student_id": "20260001"},
+        "/me": {"student_id": "20260001", "access_status": "approved"},
         "/lms/credentials": {"student_id": "20260001", "status": "ok", "last_error": None, "last_login_at": now.isoformat(),
                              "last_synced_at": now.isoformat(), "next_sync_at": None},
         "/courses": [{"lms_course_id": 1, "name": "피지컬미디어", "professors": "교수", "attendance": [], "auto_play": False}],

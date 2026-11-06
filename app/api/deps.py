@@ -4,17 +4,18 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.db.base import get_db
 from app.db.models import User
 from app.security import decode_access_token
+from app.services.access import has_access, is_admin
 
 oauth2 = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 Db = Annotated[AsyncSession, Depends(get_db)]
 
 
-async def current_user(db: Db, token: Annotated[str, Depends(oauth2)]) -> User:
+async def authed_user(db: Db, token: Annotated[str, Depends(oauth2)]) -> User:
+    """로그인만 확인한다. 승인 없이 열어 두는 경로(GET·DELETE /me, 권한 요청)만 AuthedUser로 쓴다."""
     decoded = decode_access_token(token)
     user = await db.get(User, decoded[0]) if decoded else None
     if user is None or user.token_version != decoded[1]:
@@ -22,14 +23,26 @@ async def current_user(db: Db, token: Annotated[str, Depends(oauth2)]) -> User:
     return user
 
 
+AuthedUser = Annotated[User, Depends(authed_user)]
+
+ACCESS_REQUIRED = {"code": "ACCESS_REQUIRED", "message": "관리자 승인이 필요합니다."}
+
+
+def access_denied() -> HTTPException:
+    return HTTPException(status.HTTP_403_FORBIDDEN, ACCESS_REQUIRED)
+
+
+async def current_user(user: AuthedUser) -> User:
+    """로그인 + 관리자 승인. 사용자 API의 기본값이라, 새 경로도 따로 열지 않는 한 막힌다."""
+    if not has_access(user):
+        raise access_denied()
+    return user
+
+
 CurrentUser = Annotated[User, Depends(current_user)]
 
 
-def is_admin(user: User) -> bool:
-    return user.student_id in get_settings().admin_student_ids
-
-
-async def admin_user(user: CurrentUser) -> User:
+async def admin_user(user: AuthedUser) -> User:
     if not is_admin(user):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "관리자 권한이 필요합니다.")
     return user

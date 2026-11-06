@@ -19,7 +19,7 @@ NOTICE = "PC 크롬에서 받을 수 있어요"
 @pytest.fixture
 async def mobile_page():
     data = {
-        "/me": {"student_id": "20260001"},
+        "/me": {"student_id": "20260001", "access_status": "approved"},
         "/lms/credentials": {"status": "ok", "last_synced_at": "2026-11-05T00:00:00+00:00"},
         "/courses": [{"lms_course_id": 1, "name": "컴퓨터프로그래밍", "professors": "김교수", "attendance": [], "auto_play": False}],
         "/todos": [], "/playback/batches": [], "/announcements": [], "/notifications/channels": [],

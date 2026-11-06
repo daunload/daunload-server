@@ -22,6 +22,12 @@ class User(Base):
     login_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     # 학교 비밀번호가 바뀌면 올린다. 이전 버전으로 발급한 토큰은 쓸 수 없다.
     token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # 관리자 승인 상태: none / pending / approved / rejected / revoked. 판단은 app.services.access.has_access 한 곳에서 한다.
+    access_status: Mapped[str] = mapped_column(String(16), default="none", server_default="none")
+    access_requested_at: Mapped[datetime | None]  # 마지막 요청 시각
+    access_decided_at: Mapped[datetime | None]  # 마지막 승인·거절·회수 시각
+    access_decided_by: Mapped[str | None] = mapped_column(String(32))  # 결정한 관리자 학번
+    access_reject_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class LmsCredential(Base):
