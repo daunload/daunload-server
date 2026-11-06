@@ -17,7 +17,7 @@ function closeJob(job) {
   if (current === job) current = null;
 }
 
-function open(id, url) {
+function open(id, url, chunkBytes) {
   closeJob(current);
   const ctrl = new AbortController();
   const job = {
@@ -34,7 +34,7 @@ function open(id, url) {
     job.wake?.();
   });
   const source = openCdnSource(url, { signal: ctrl.signal, refresh });
-  job.iterator = extractPcm(source, { signal: ctrl.signal, rate: RATE });
+  job.iterator = extractPcm(source, { signal: ctrl.signal, rate: RATE, ...(chunkBytes ? { chunkBytes } : {}) });
   current = job;
   return { opened: true };
 }
@@ -108,7 +108,7 @@ async function read(job, url) {
 
 async function handle(message) {
   const job = current && current.id === message.job ? current : null;
-  if (message.action === "audio-open") return open(message.job, message.url);
+  if (message.action === "audio-open") return open(message.job, message.url, message.chunkBytes);
   if (message.action === "audio-close") {
     closeJob(job);
     return { closed: true };

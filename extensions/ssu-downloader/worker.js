@@ -164,6 +164,13 @@ async function handleAudio(message) {
   const forward = { target: "offscreen-audio", action: message.action, job };
   if (message.action === "audio-open") {
     forward.url = validateAudioUrl(message.url);
+    // Optional Range size (tests use small ranges to exercise flow control); defaults to the extractor's 2 MiB.
+    if (message.chunkBytes != null) {
+      if (!Number.isInteger(message.chunkBytes) || message.chunkBytes < 4096 || message.chunkBytes > 8 * 1024 * 1024) {
+        throw new Error("올바르지 않은 요청입니다.");
+      }
+      forward.chunkBytes = message.chunkBytes;
+    }
     await exclusive(configureRules);
     await ensureOffscreen();
   } else if (message.action === "audio-read") {

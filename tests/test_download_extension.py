@@ -14,7 +14,9 @@ import pytest
 from playwright.async_api import async_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
-TONE = (ROOT / 'tests' / 'fixtures' / 'media' / 'tone-opus.mp4').read_bytes()
+MEDIA = {f'/{name}': (ROOT / 'tests' / 'fixtures' / 'media' / name).read_bytes()
+         for name in ['tone-opus.mp4', 'tone-opus-12s.mp4']}
+SMALL_RANGE = 16384  # test-only Range size so the 12 s fixture needs many requests
 CDN = 'https://download-test.commonscdn.com'
 UNSUPPORTED_AUDIO = '이 영상은 텍스트 변환을 지원하지 않습니다.'
 pytestmark = pytest.mark.browser
@@ -36,7 +38,8 @@ def school_cdn(tmp_path):
                 self.send_header('Content-Length', '0')
                 self.end_headers()
                 return
-            if self.path == '/tone-opus.mp4':
+            if self.path in MEDIA:
+                data = MEDIA[self.path]
                 headers = {k.lower(): v for k, v in self.headers.items()}
                 match = re.fullmatch(r'bytes=(\d+)-(\d*)', headers.get('range', ''))
                 if not (match and headers.get('referer') == 'https://commons.ssu.ac.kr/'
@@ -46,11 +49,11 @@ def school_cdn(tmp_path):
                     self.end_headers()
                     return
                 start = int(match[1])
-                end = min(int(match[2]) if match[2] else len(TONE) - 1, len(TONE) - 1)
-                body = TONE[start:end + 1]
+                end = min(int(match[2]) if match[2] else len(data) - 1, len(data) - 1)
+                body = data[start:end + 1]
                 self.send_response(206)
                 self.send_header('Content-Type', 'video/mp4')
-                self.send_header('Content-Range', f'bytes {start}-{end}/{len(TONE)}')
+                self.send_header('Content-Range', f'bytes {start}-{end}/{len(data)}')
                 self.send_header('Content-Length', str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -325,8 +328,8 @@ async def dashboard(tmp_path, port):
 
 
 # open -> read until done -> close. Returns sample counts per pcm chunk, the done reply and refresh count.
-READ_ALL = """async ({ job, url, refreshUrl, opened = false }) => {
-  if (!opened) await extensionRequest('audio-open', { job, url });
+READ_ALL = """async ({ job, url, refreshUrl, chunkBytes, opened = false }) => {
+  if (!opened) await extensionRequest('audio-open', chunkBytes ? { job, url, chunkBytes } : { job, url });
   const chunks = [];
   let refreshes = 0, next = null;
   for (let i = 0; i < 100; i++) {
@@ -345,8 +348,8 @@ READ_ALL = """async ({ job, url, refreshUrl, opened = false }) => {
   throw new Error('too many reads');
 }"""
 
-FIRST_PCM = """async ({ job, url }) => {
-  await extensionRequest('audio-open', { job, url });
+FIRST_PCM = """async ({ job, url, chunkBytes }) => {
+  await extensionRequest('audio-open', chunkBytes ? { job, url, chunkBytes } : { job, url });
   const reply = await extensionRequest('audio-read', { job });
   if (typeof reply.pcm !== 'string') throw new Error(JSON.stringify(reply));
   return atob(reply.pcm).length / 2;
@@ -358,7 +361,7 @@ AUDIO_ERROR = """async ({ action, data }) => {
 
 
 def commons_headers(seen):
-    requests = [{k.lower(): v for k, v in headers.items()} for _, path, headers in seen if path == '/tone-opus.mp4']
+    requests = [{k.lower(): v for k, v in headers.items()} for _, path, headers in seen if path in MEDIA]
     assert requests
     return all(h.get('referer') == 'https://commons.ssu.ac.kr/' and h.get('origin') == 'https://commons.ssu.ac.kr'
                for h in requests)
@@ -384,6 +387,10 @@ async def test_audio_rejects_other_hosts(tmp_path, school_cdn):
             message = await page.evaluate(AUDIO_ERROR, {'action': 'audio-open',
                                                          'data': {'job': '22222222-2222-4222-8222-222222222222', 'url': url}})
             assert message == UNSUPPORTED_AUDIO, url
+        for chunk in [0, 100, 1.5, '4096', 64 * 1024 * 1024]:
+            bad = await page.evaluate(AUDIO_ERROR, {'action': 'audio-open', 'data': {
+                'job': '22222222-2222-4222-8222-222222222222', 'url': f'{CDN}/tone-opus.mp4', 'chunkBytes': chunk}})
+            assert bad == '올바르지 않은 요청입니다.', chunk
         bad_job = await page.evaluate(AUDIO_ERROR, {'action': 'audio-open', 'data': {'job': '../x', 'url': f'{CDN}/tone-opus.mp4'}})
         assert '작업 번호' in bad_job
         assert seen == []
@@ -401,17 +408,42 @@ async def test_audio_refresh_round_trip(tmp_path, school_cdn):
         assert commons_headers(seen)
 
 
+async def test_audio_long_file_reads_five_seconds_at_a_time(tmp_path, school_cdn):
+    port, seen, _ = school_cdn
+    async with dashboard(tmp_path, port) as (_, page):
+        result = await page.evaluate(READ_ALL, {'job': '77777777-7777-4777-8777-777777777777',
+                                                'url': f'{CDN}/tone-opus-12s.mp4', 'chunkBytes': SMALL_RANGE})
+        duration = result['done']['duration']
+        assert 11.9 <= duration <= 12.1
+        chunks = result['chunks']
+        # 12 s arrives as 5 s + 5 s + ~2 s: decoded pieces larger than the cap are split and carried over.
+        assert chunks.count(80000) >= 2 and max(chunks) == 80000, chunks
+        assert abs(sum(chunks) - duration * 16000) <= 1600, chunks
+        assert len([p for _, p, _ in seen if p == '/tone-opus-12s.mp4']) > 5
+        assert commons_headers(seen)
+
+
 async def test_audio_close_stops_fetching(tmp_path, school_cdn):
     port, seen, _ = school_cdn
+    url = f'{CDN}/tone-opus-12s.mp4'
+    count_requests = lambda: len([p for _, p, _ in seen if p == '/tone-opus-12s.mp4'])
     job = '44444444-4444-4444-8444-444444444444'
     async with dashboard(tmp_path, port) as (_, page):
-        assert await page.evaluate(FIRST_PCM, {'job': job, 'url': f'{CDN}/tone-opus.mp4'}) > 0
-        assert await page.evaluate('job => extensionRequest("audio-close", {job})', job) == {'closed': True}
-        count = len(seen)
+        await page.evaluate(READ_ALL, {'job': '88888888-8888-4888-8888-888888888888', 'url': url, 'chunkBytes': SMALL_RANGE})
+        full = count_requests()
+        seen.clear()
+        assert await page.evaluate(FIRST_PCM, {'job': job, 'url': url, 'chunkBytes': SMALL_RANGE}) == 80000
+        # Nothing is fetched ahead between audio-read calls.
+        after_first = count_requests()
         await asyncio.sleep(.5)
-        assert len(seen) == count
+        assert count_requests() == after_first
+        assert 0 < after_first < full, (after_first, full)
+        assert await page.evaluate('job => extensionRequest("audio-close", {job})', job) == {'closed': True}
+        await asyncio.sleep(.5)
+        assert count_requests() == after_first
         message = await page.evaluate(AUDIO_ERROR, {'action': 'audio-read', 'data': {'job': job}})
-        assert message and not message.startswith('{'), message
+        assert message == '텍스트 변환 작업이 끝났습니다. 다시 시도해 주세요.', message
+        assert count_requests() == after_first
         # Unknown jobs close the same way.
         assert await page.evaluate('extensionRequest("audio-close", {job: "55555555-5555-4555-8555-555555555555"})') == {'closed': True}
 
@@ -436,7 +468,8 @@ async def test_audio_survives_service_worker_restart(tmp_path, school_cdn):
     port, _, _ = school_cdn
     job = '66666666-6666-4666-8666-666666666666'
     async with dashboard(tmp_path, port) as (context, page):
-        first = await page.evaluate(FIRST_PCM, {'job': job, 'url': f'{CDN}/tone-opus.mp4'})
+        first = await page.evaluate(FIRST_PCM, {'job': job, 'url': f'{CDN}/tone-opus-12s.mp4', 'chunkBytes': SMALL_RANGE})
+        assert first == 80000
         await context.service_workers[0].evaluate('self.__beforeRestart = true')
         # Terminate the extension service worker (what Puppeteer's WebWorker.close() does).
         cdp = await context.new_cdp_session(page)
@@ -451,5 +484,8 @@ async def test_audio_survives_service_worker_restart(tmp_path, school_cdn):
         [target] = await worker_targets(cdp)
         # A fresh worker: the global set before termination is gone.
         assert await worker_eval(cdp, target, 'typeof self.__beforeRestart') == 'undefined'
-        assert abs(first + sum(result['chunks']) - 48000) <= 1600, result
-        assert 2.9 <= result['done']['duration'] <= 3.1
+        # The job resumes mid-stream: more PCM follows the restart, not just done.
+        assert len(result['chunks']) >= 2 and result['chunks'][0] == 80000, result
+        duration = result['done']['duration']
+        assert 11.9 <= duration <= 12.1
+        assert abs(first + sum(result['chunks']) - duration * 16000) <= 1600, result
