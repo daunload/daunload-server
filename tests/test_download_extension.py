@@ -1,10 +1,12 @@
 """Real MV3 extension smoke test with mocked school responses; no school credentials."""
 import asyncio
 import os
+import re
 import ssl
 import subprocess
 import threading
 import json
+from contextlib import asynccontextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -12,6 +14,9 @@ import pytest
 from playwright.async_api import async_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
+TONE = (ROOT / 'tests' / 'fixtures' / 'media' / 'tone-opus.mp4').read_bytes()
+CDN = 'https://download-test.commonscdn.com'
+UNSUPPORTED_AUDIO = '이 영상은 텍스트 변환을 지원하지 않습니다.'
 pytestmark = pytest.mark.browser
 
 
@@ -25,7 +30,31 @@ def school_cdn(tmp_path):
     release_downloads = threading.Event()
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            seen.append((self.path, dict(self.headers)))
+            seen.append(('GET', self.path, dict(self.headers)))
+            if self.path == '/expired.mp4':
+                self.send_response(403)
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+                return
+            if self.path == '/tone-opus.mp4':
+                headers = {k.lower(): v for k, v in self.headers.items()}
+                match = re.fullmatch(r'bytes=(\d+)-(\d*)', headers.get('range', ''))
+                if not (match and headers.get('referer') == 'https://commons.ssu.ac.kr/'
+                        and headers.get('origin') == 'https://commons.ssu.ac.kr'):
+                    self.send_response(403)
+                    self.send_header('Content-Length', '0')
+                    self.end_headers()
+                    return
+                start = int(match[1])
+                end = min(int(match[2]) if match[2] else len(TONE) - 1, len(TONE) - 1)
+                body = TONE[start:end + 1]
+                self.send_response(206)
+                self.send_header('Content-Type', 'video/mp4')
+                self.send_header('Content-Range', f'bytes {start}-{end}/{len(TONE)}')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if self.path == '/redirect.mp4':
                 self.send_response(302)
                 self.send_header('Location', '/test.mp4')
@@ -49,6 +78,12 @@ def school_cdn(tmp_path):
                 self.wfile.write(data)
             except (BrokenPipeError, ConnectionResetError, ssl.SSLError):
                 pass  # Closing the manager intentionally disconnects in-flight downloads.
+
+        def do_OPTIONS(self):
+            seen.append(('OPTIONS', self.path, dict(self.headers)))
+            self.send_response(405)
+            self.send_header('Content-Length', '0')
+            self.end_headers()
 
         def log_message(self, *_):
             pass
@@ -90,7 +125,7 @@ async def test_extension_bridge_download_and_validation(tmp_path, school_cdn):
                 body='<html><body>dashboard</body></html>', content_type='text/html'))
             await page.goto('https://daunload.cloud/')
             await page.add_script_tag(path=str(ROOT / 'app/web/downloads.js'))
-            assert await page.evaluate('extensionRequest("ping")') == {'version': 1, 'sessions': True, 'queue': True}
+            assert await page.evaluate('extensionRequest("ping")') == {'version': 1, 'sessions': True, 'queue': True, 'audio': True}
             # Production bridge must not be injected into localhost or a lookalike domain.
             for origin in ['http://localhost:8000', 'https://daunload.cloud.example.org']:
                 await context.route(f'{origin}/**', lambda route: route.fulfill(
@@ -102,6 +137,14 @@ async def test_extension_bridge_download_and_validation(tmp_path, school_cdn):
                   try { await extensionRequest('ping'); return true; } catch { return false; }
                 }""")
                 assert connected is False
+                # audio-open gets no answer at all (raw message, so the 15 s request timeout is not needed).
+                answered = await untrusted.evaluate("""url => new Promise(resolve => {
+                  addEventListener('message', e => { if (e.data?.channel === 'ssu-download-response') resolve(true); });
+                  postMessage({channel: 'ssu-download-request', id: 'audio-probe', action: 'audio-open',
+                               job: crypto.randomUUID(), url}, location.origin);
+                  setTimeout(() => resolve(false), 1500);
+                })""", f'{CDN}/tone-opus.mp4')
+                assert answered is False
                 await untrusted.close()
 
             await page.evaluate('''async () => {
@@ -157,8 +200,8 @@ async def test_extension_bridge_download_and_validation(tmp_path, school_cdn):
               const handle = await root.getFileHandle('테스트.mp4');
               return Array.from(new Uint8Array(await (await handle.getFile()).arrayBuffer()));
             }""") == list(b'fake-video-bytes')
-            assert [path for path, _ in seen] == ['/redirect.mp4', '/test.mp4']
-            assert all({k.lower(): v for k, v in headers.items()}.get('referer') == 'https://commons.ssu.ac.kr/' for _, headers in seen)
+            assert [path for _, path, _ in seen] == ['/redirect.mp4', '/test.mp4']
+            assert all({k.lower(): v for k, v in headers.items()}.get('referer') == 'https://commons.ssu.ac.kr/' for _, _, headers in seen)
             # Same request is idempotent, and another tab cannot inspect/cancel this job.
             assert await page.evaluate('''job => extensionRequest('start', {session: window.__session, job, data: {
               url: 'https://download-test.commonscdn.com/redirect.mp4', file_name: '테스트.mp4'
@@ -184,7 +227,7 @@ async def test_extension_bridge_download_and_validation(tmp_path, school_cdn):
                     break
                 await asyncio.sleep(.1)
             assert status['state'] == 'interrupted', status
-            assert not any(path == '/blocked.mp4' for path, _ in seen)
+            assert not any(path == '/blocked.mp4' for _, path, _ in seen)
 
             # Close/reopen clears the visible queue without losing old results needed by the dashboard.
             await worker.evaluate("""async () => {
@@ -222,10 +265,10 @@ async def test_extension_bridge_download_and_validation(tmp_path, school_cdn):
               return jobs.filter(j => j.state === 'in_progress').length === 2 && jobs.filter(j => j.state === 'queued').length === 2;
             }""")
             for _ in range(50):
-                if len([path for path, _ in seen if path.startswith('/hold.mp4')]) == 2:
+                if len([path for _, path, _ in seen if path.startswith('/hold.mp4')]) == 2:
                     break
                 await asyncio.sleep(.1)
-            assert len([path for path, _ in seen if path.startswith('/hold.mp4')]) == 2
+            assert len([path for _, path, _ in seen if path.startswith('/hold.mp4')]) == 2
 
             old_tab = await worker.evaluate("""async () => {
               const {managerTab} = await chrome.storage.session.get('managerTab');
@@ -257,3 +300,156 @@ async def test_extension_bridge_download_and_validation(tmp_path, school_cdn):
 
         finally:
             await context.close()
+
+
+@asynccontextmanager
+async def dashboard(tmp_path, port):
+    extension = ROOT / 'extensions' / 'ssu-downloader'
+    async with async_playwright() as p:
+        context = await p.chromium.launch_persistent_context(
+            str(tmp_path / 'profile'), channel='chromium', headless=True,
+            executable_path=os.environ.get('PLAYWRIGHT_CHROMIUM_EXECUTABLE'),
+            args=[f'--disable-extensions-except={extension}', f'--load-extension={extension}',
+                  '--ignore-certificate-errors', '--no-proxy-server',
+                  f'--host-resolver-rules=MAP download-test.commonscdn.com 127.0.0.1:{port}'],
+        )
+        try:
+            await context.route('https://daunload.cloud/**', lambda route: route.fulfill(
+                body='<html><body>dashboard</body></html>', content_type='text/html'))
+            page = await context.new_page()
+            await page.goto('https://daunload.cloud/')
+            await page.add_script_tag(path=str(ROOT / 'app/web/downloads.js'))
+            yield context, page
+        finally:
+            await context.close()
+
+
+# open -> read until done -> close. Returns sample counts per pcm chunk, the done reply and refresh count.
+READ_ALL = """async ({ job, url, refreshUrl, opened = false }) => {
+  if (!opened) await extensionRequest('audio-open', { job, url });
+  const chunks = [];
+  let refreshes = 0, next = null;
+  for (let i = 0; i < 100; i++) {
+    const reply = await extensionRequest('audio-read', next ? { job, url: next } : { job });
+    next = null;
+    if (reply.refresh) { refreshes++; next = refreshUrl; continue; }
+    if (reply.done) {
+      await extensionRequest('audio-close', { job });
+      return { chunks, done: reply, refreshes };
+    }
+    if (typeof reply.pcm !== 'string' || typeof reply.seconds !== 'number') throw new Error(JSON.stringify(reply));
+    const samples = atob(reply.pcm).length / 2;
+    if (Math.abs(reply.seconds - samples / 16000) > 1e-6) throw new Error('seconds mismatch');
+    chunks.push(samples);
+  }
+  throw new Error('too many reads');
+}"""
+
+FIRST_PCM = """async ({ job, url }) => {
+  await extensionRequest('audio-open', { job, url });
+  const reply = await extensionRequest('audio-read', { job });
+  if (typeof reply.pcm !== 'string') throw new Error(JSON.stringify(reply));
+  return atob(reply.pcm).length / 2;
+}"""
+
+AUDIO_ERROR = """async ({ action, data }) => {
+  try { return JSON.stringify(await extensionRequest(action, data)); } catch (e) { return e.message; }
+}"""
+
+
+def commons_headers(seen):
+    requests = [{k.lower(): v for k, v in headers.items()} for _, path, headers in seen if path == '/tone-opus.mp4']
+    assert requests
+    return all(h.get('referer') == 'https://commons.ssu.ac.kr/' and h.get('origin') == 'https://commons.ssu.ac.kr'
+               for h in requests)
+
+
+async def test_audio_pipeline_through_extension(tmp_path, school_cdn):
+    port, seen, _ = school_cdn
+    async with dashboard(tmp_path, port) as (_, page):
+        assert (await page.evaluate('extensionRequest("ping")'))['audio'] is True
+        result = await page.evaluate(READ_ALL, {'job': '11111111-1111-4111-8111-111111111111', 'url': f'{CDN}/tone-opus.mp4'})
+        assert abs(sum(result['chunks']) - 48000) <= 1600, result
+        assert all(0 < n <= 80000 for n in result['chunks'])
+        assert 2.9 <= result['done']['duration'] <= 3.1
+        assert commons_headers(seen)
+        assert not any(method == 'OPTIONS' for method, _, _ in seen)
+
+
+async def test_audio_rejects_other_hosts(tmp_path, school_cdn):
+    port, seen, _ = school_cdn
+    async with dashboard(tmp_path, port) as (_, page):
+        for url in ['https://evil.example/a.mp4', 'https://commons.ssu.ac.kr/a.mp4',
+                    'http://download-test.commonscdn.com/a.mp4', 'https://download-test.commonscdn.com:8443/a.mp4']:
+            message = await page.evaluate(AUDIO_ERROR, {'action': 'audio-open',
+                                                         'data': {'job': '22222222-2222-4222-8222-222222222222', 'url': url}})
+            assert message == UNSUPPORTED_AUDIO, url
+        bad_job = await page.evaluate(AUDIO_ERROR, {'action': 'audio-open', 'data': {'job': '../x', 'url': f'{CDN}/tone-opus.mp4'}})
+        assert '작업 번호' in bad_job
+        assert seen == []
+
+
+async def test_audio_refresh_round_trip(tmp_path, school_cdn):
+    port, seen, _ = school_cdn
+    async with dashboard(tmp_path, port) as (_, page):
+        result = await page.evaluate(READ_ALL, {'job': '33333333-3333-4333-8333-333333333333',
+                                                'url': f'{CDN}/expired.mp4', 'refreshUrl': f'{CDN}/tone-opus.mp4'})
+        assert result['refreshes'] == 1
+        assert abs(sum(result['chunks']) - 48000) <= 1600, result
+        assert 2.9 <= result['done']['duration'] <= 3.1
+        assert ('GET', '/expired.mp4') in [(m, path) for m, path, _ in seen]
+        assert commons_headers(seen)
+
+
+async def test_audio_close_stops_fetching(tmp_path, school_cdn):
+    port, seen, _ = school_cdn
+    job = '44444444-4444-4444-8444-444444444444'
+    async with dashboard(tmp_path, port) as (_, page):
+        assert await page.evaluate(FIRST_PCM, {'job': job, 'url': f'{CDN}/tone-opus.mp4'}) > 0
+        assert await page.evaluate('job => extensionRequest("audio-close", {job})', job) == {'closed': True}
+        count = len(seen)
+        await asyncio.sleep(.5)
+        assert len(seen) == count
+        message = await page.evaluate(AUDIO_ERROR, {'action': 'audio-read', 'data': {'job': job}})
+        assert message and not message.startswith('{'), message
+        # Unknown jobs close the same way.
+        assert await page.evaluate('extensionRequest("audio-close", {job: "55555555-5555-4555-8555-555555555555"})') == {'closed': True}
+
+
+async def worker_targets(cdp):
+    targets = (await cdp.send('Target.getTargets'))['targetInfos']
+    return [t['targetId'] for t in targets if t['type'] == 'service_worker' and t['url'].endswith('/worker.js')]
+
+
+async def worker_eval(cdp, target_id, expression):
+    """Evaluate in the extension worker over raw CDP (Playwright keeps a stale Worker after a restart)."""
+    reply = asyncio.get_running_loop().create_future()
+    cdp.on('Target.receivedMessageFromTarget', lambda e: reply.done() or (
+        json.loads(e['message']).get('id') == 1 and reply.set_result(json.loads(e['message']))))
+    session = (await cdp.send('Target.attachToTarget', {'targetId': target_id, 'flatten': False}))['sessionId']
+    await cdp.send('Target.sendMessageToTarget', {'sessionId': session, 'message': json.dumps({
+        'id': 1, 'method': 'Runtime.evaluate', 'params': {'expression': expression, 'returnByValue': True}})})
+    return (await asyncio.wait_for(reply, 5))['result']['result']['value']
+
+
+async def test_audio_survives_service_worker_restart(tmp_path, school_cdn):
+    port, _, _ = school_cdn
+    job = '66666666-6666-4666-8666-666666666666'
+    async with dashboard(tmp_path, port) as (context, page):
+        first = await page.evaluate(FIRST_PCM, {'job': job, 'url': f'{CDN}/tone-opus.mp4'})
+        await context.service_workers[0].evaluate('self.__beforeRestart = true')
+        # Terminate the extension service worker (what Puppeteer's WebWorker.close() does).
+        cdp = await context.new_cdp_session(page)
+        [target] = await worker_targets(cdp)
+        assert (await cdp.send('Target.closeTarget', {'targetId': target}))['success']
+        for _ in range(50):
+            if not await worker_targets(cdp):
+                break
+            await asyncio.sleep(.1)
+        assert await worker_targets(cdp) == []
+        result = await page.evaluate(READ_ALL, {'job': job, 'opened': True})
+        [target] = await worker_targets(cdp)
+        # A fresh worker: the global set before termination is gone.
+        assert await worker_eval(cdp, target, 'typeof self.__beforeRestart') == 'undefined'
+        assert abs(first + sum(result['chunks']) - 48000) <= 1600, result
+        assert 2.9 <= result['done']['duration'] <= 3.1

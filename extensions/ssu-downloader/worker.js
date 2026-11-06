@@ -1,6 +1,9 @@
 "use strict";
 
 const MEDIA_DOMAINS = ["ssu.ac.kr", "commonscdn.com"];
+const AUDIO_DOMAINS = ["commonscdn.com"];
+const AUDIO_UNSUPPORTED = "이 영상은 텍스트 변환을 지원하지 않습니다.";
+const JOB_PATTERN = /^[a-zA-Z0-9-]{16,80}$/;
 let serial = Promise.resolve();
 function exclusive(fn) {
   const result = serial.then(fn);
@@ -27,6 +30,21 @@ function validateDownload(data) {
     throw new Error("올바르지 않은 영상 파일명입니다.");
   }
   return { url: url.href, filename: name };
+}
+
+function validateAudioUrl(value) {
+  let url;
+  try { url = new URL(value); } catch { throw new Error(AUDIO_UNSUPPORTED); }
+  if (url.protocol !== "https:" || url.username || url.password || url.port ||
+      !AUDIO_DOMAINS.some((host) => url.hostname === host || url.hostname.endsWith(`.${host}`))) {
+    throw new Error(AUDIO_UNSUPPORTED);
+  }
+  return url.href;
+}
+
+function validateJob(key) {
+  if (typeof key !== "string" || !JOB_PATTERN.test(key)) throw new Error("올바르지 않은 작업 번호입니다.");
+  return key;
 }
 
 async function configureRules() {
@@ -121,10 +139,51 @@ async function ensureManager(focus = false) {
   return session;
 }
 
+const OFFSCREEN_URL = "offscreen.html";
+let creatingOffscreen = null;
+
+async function hasOffscreen() {
+  const contexts = await chrome.runtime.getContexts({
+    contextTypes: ["OFFSCREEN_DOCUMENT"], documentUrls: [chrome.runtime.getURL(OFFSCREEN_URL)]
+  });
+  return contexts.length > 0;
+}
+
+async function ensureOffscreen() {
+  if (await hasOffscreen()) return;
+  creatingOffscreen ??= chrome.offscreen.createDocument({
+    url: OFFSCREEN_URL, reasons: ["WORKERS"], justification: "Decode lecture audio for in-browser transcription"
+  }).finally(() => { creatingOffscreen = null; });
+  await creatingOffscreen;
+}
+
+// Audio jobs live in the offscreen document so they survive service-worker restarts.
+// They bypass `exclusive` so a slow decode never stalls download bookkeeping.
+async function handleAudio(message) {
+  const job = validateJob(message.job);
+  const forward = { target: "offscreen-audio", action: message.action, job };
+  if (message.action === "audio-open") {
+    forward.url = validateAudioUrl(message.url);
+    await exclusive(configureRules);
+    await ensureOffscreen();
+  } else if (message.action === "audio-read") {
+    if (message.url != null) forward.url = validateAudioUrl(message.url);
+    await ensureOffscreen();
+  } else if (message.action === "audio-close") {
+    if (!(await hasOffscreen())) return { closed: true };
+  } else {
+    throw new Error("지원하지 않는 요청입니다.");
+  }
+  const reply = await chrome.runtime.sendMessage(forward);
+  if (!reply) throw new Error("텍스트 변환 작업이 끝났습니다. 다시 시도해 주세요.");
+  if (reply.error) throw new Error(reply.error);
+  return reply.result;
+}
+
 async function handle(message, sender) {
   if (message?.action?.startsWith("manager-")) return managerUpdate(message, sender);
   if (!trustedSender(sender) || message?.channel !== "ssu-download") throw new Error("허용되지 않은 요청입니다.");
-  if (message.action === "ping") return { version: 1, sessions: true, queue: true };
+  if (message.action === "ping") return { version: 1, sessions: true, queue: true, audio: true };
   if (message.action === "prepare") return { session: await ensureManager(true) };
   const manager = await currentManager();
   const owner = `${new URL(sender.url).origin}:${sender.tab.id}`;
@@ -135,7 +194,7 @@ async function handle(message, sender) {
     }
     const options = validateDownload(message.data);
     const key = message.job;
-    if (typeof key !== "string" || !/^[a-zA-Z0-9-]{16,80}$/.test(key)) throw new Error("올바르지 않은 작업 번호입니다.");
+    validateJob(key);
     if (jobs[key]) {
       if (jobs[key].owner !== owner) throw new Error("다른 창의 다운로드입니다.");
       return { started: true };
@@ -164,7 +223,15 @@ async function handle(message, sender) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
-  exclusive(() => handle(message, sender)).then(
+  if (message?.target === "offscreen-audio") return false;
+  const audio = typeof message?.action === "string" && message.action.startsWith("audio-");
+  const work = audio
+    ? Promise.resolve().then(() => {
+        if (!trustedSender(sender) || message.channel !== "ssu-download") throw new Error("허용되지 않은 요청입니다.");
+        return handleAudio(message);
+      })
+    : exclusive(() => handle(message, sender));
+  work.then(
     (result) => respond({ result }),
     (error) => respond({ error: error.message })
   );
