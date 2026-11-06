@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     timezone: str = "Asia/Seoul"
 
     # 동기화·재생 정책
-    sync_interval_minutes: int = 45
+    auto_sync_interval_minutes: int = 120  # 자동 재생 과목만 이 주기로 동기화한다
     sync_jitter_minutes: int = 15
     playback_extra_seconds: int = 30
     playback_gap_seconds: tuple[int, int] = (10, 30)

@@ -17,6 +17,7 @@ from app.db.base import sessionmaker, utcnow
 from app.db.models import PlaybackBatch, PlaybackJob, TodoRow, User
 from app.lms.batch import BatchHooks, BatchPlan, BatchRunner, ItemOutcome, Scope, build_plan, select_videos
 from app.lms.todo import VideoTodo, parse_dt
+from app.services.access import user_has_access
 from app.services.lms_access import lms_client_for
 from app.services.notify import notify_user
 from app.services.sync import video_from_row
@@ -143,6 +144,13 @@ async def run_batch(
         jobs = (await db.scalars(
             select(PlaybackJob).where(PlaybackJob.batch_id == batch_id).order_by(PlaybackJob.position)
         )).all()
+        if not await user_has_access(db, batch.user_id):  # 회수된 사용자의 묶음은 재생하지 않는다
+            batch.status, batch.finished_at, batch.current_position = "cancelled", utcnow(), None
+            for j in jobs:
+                if j.status in ("queued", "playing"):
+                    j.status, j.finished_at = "cancelled", utcnow()
+            await db.commit()
+            return "cancelled"
         # 이어가기: 이미 끝난 항목은 건너뛴다(워커 재시작 대비).
         remaining = [j for j in jobs if j.status in ("queued", "playing")]
         start_position = remaining[0].position if remaining else len(jobs)

@@ -40,8 +40,13 @@ class SyncResult:
     new_video_course_ids: set[int] = field(default_factory=set)
 
 
-async def sync_user(db: AsyncSession, user_id: int, now: datetime | None = None) -> SyncResult:
+async def sync_user(
+    db: AsyncSession, user_id: int, now: datetime | None = None, course_ids: set[int] | None = None,
+) -> SyncResult:
+    """course_ids가 있으면 그 과목만 갱신한다(부분 동기화). 다른 과목의 줄은 건드리지 않고
+    last_synced_at도 바꾸지 않는다. 학기·과목 목록은 그대로 조회한다."""
     now = now or utcnow()
+    partial = course_ids is not None
     cred = await db.get(LmsCredential, user_id)
     result = SyncResult(first_sync=cred is None or cred.last_synced_at is None)
 
@@ -62,6 +67,8 @@ async def sync_user(db: AsyncSession, user_id: int, now: datetime | None = None)
         seen_todos: set[tuple[str, int]] = set()
 
         for course in courses:
+            if partial and course.id not in course_ids:
+                continue
             seen_courses.add(course.id)
             row = course_rows.get(course.id)
             if row is None:
@@ -114,20 +121,21 @@ async def sync_user(db: AsyncSession, user_id: int, now: datetime | None = None)
                 result.new_announcements.append(arow)
 
         for lms_course_id, row in course_rows.items():
-            if lms_course_id not in seen_courses:
+            if lms_course_id not in seen_courses and (not partial or lms_course_id in course_ids):
                 row.active = False
         for key, trow in todo_rows.items():
-            if key not in seen_todos:
+            if key not in seen_todos and (not partial or trow.lms_course_id in course_ids):
                 trow.active = False
 
-        result.course_count = len(courses)
+        result.course_count = len(seen_courses) if partial else len(courses)
         result.todo_count = len(seen_todos)
 
     cred = await db.get(LmsCredential, user_id)
     s = get_settings()
-    cred.last_synced_at = now
+    if not partial:
+        cred.last_synced_at = now
     cred.next_sync_at = now + timedelta(
-        minutes=s.sync_interval_minutes + random.uniform(-s.sync_jitter_minutes, s.sync_jitter_minutes)
+        minutes=s.auto_sync_interval_minutes + random.uniform(-s.sync_jitter_minutes, s.sync_jitter_minutes)
     )
     await db.commit()
     if result.first_sync:  # 첫 동기화 때 기존 공지를 한꺼번에 알리지 않는다

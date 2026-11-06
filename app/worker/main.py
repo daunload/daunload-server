@@ -2,7 +2,8 @@
 
 작업
 - sync_user_job: 동기화 → 새 공지·마감 알림 → 자동 수강 과목이면 일괄 재생 묶음 생성
-- schedule_syncs (cron): 동기화 시각이 된 사용자를 큐에 넣는다
+- auto_sync_user_job: 자동 재생 과목만 동기화(작업 ID autosync:{uid}). 전체 동기화(sync:{uid})와 ID를 나눠 서로 버려지지 않게 한다
+- schedule_syncs (cron): 시각이 된 승인 사용자 중 자동 재생 과목이 있는 사람만 auto_sync_user_job을 넣는다
 - deadline_reminders (cron): 마감 24시간·3시간 전 알림
 - 재생은 별도 DB 큐 워커(app.worker.playback)가 담당한다
 """
@@ -20,9 +21,10 @@ from sqlalchemy import func as sql_func, select
 from app.api.deps import Queue
 from app.config import get_settings
 from app.db.base import init_engine, sessionmaker, utcnow
-from app.db.models import CourseRow, LmsCredential, PlaybackBatch, PlaybackJob
+from app.db.models import CourseRow, LmsCredential, PlaybackBatch, PlaybackJob, User
 from app.lms.errors import InvalidCredentials, LmsError
 from app.services import playback
+from app.services.access import has_access, user_has_access
 from app.services.activity import prune_daily
 from app.services.notify import notify_announcements, notify_deadlines, notify_user
 from app.services.sync import sync_user
@@ -35,9 +37,26 @@ AUTO_GIVE_UP_WINDOW = timedelta(days=7)  # 실패 횟수는 이 기간 안의 �
 
 
 async def sync_user_job(ctx, user_id: int) -> str:
+    """전체 동기화. 로그인·`LMS 동기화` 버튼·승인 직후에만 큐에 들어간다(작업 ID sync:{uid})."""
+    return await _run_sync(user_id, None)
+
+
+async def auto_sync_user_job(ctx, user_id: int) -> str:
+    """자동 재생 과목만 동기화한다(작업 ID autosync:{uid}). 주기 작업이 넣는다."""
+    return await _run_sync(user_id, "auto")
+
+
+async def _run_sync(user_id: int, only: str | None) -> str:
     async with sessionmaker()() as db:
+        if not await user_has_access(db, user_id):
+            return "denied"
+        course_ids = None
+        if only == "auto":
+            course_ids = await _auto_play_course_ids(db, user_id)
+            if not course_ids:
+                return "skipped"
         try:
-            result = await sync_user(db, user_id)
+            result = await sync_user(db, user_id, course_ids=course_ids)
         except InvalidCredentials:
             await notify_user(db, user_id, "🔒 LMS 로그인 실패: 비밀번호가 바뀌었다면 계정을 다시 등록하세요.",
                               key=f"login-invalid:{utcnow():%Y%m%d}")
@@ -59,16 +78,20 @@ async def sync_user_job(ctx, user_id: int) -> str:
     return "ok"
 
 
+async def _auto_play_course_ids(db, user_id: int) -> set[int]:
+    return set((await db.scalars(
+        select(CourseRow.lms_course_id).where(CourseRow.user_id == user_id, CourseRow.auto_play, CourseRow.active)
+    )).all())
+
+
 async def create_auto_batch(db, user_id: int) -> PlaybackBatch | None:
     """자동 수강이 켜진 과목의 미수강 영상으로 묶음을 만든다. 이미 진행 중이면 만들지 않는다.
     최근 실패한 항목은 같은 실패를 반복하지 않도록 일정 시간 제외한다. 자동 묶음에서 AUTO_MAX_FAILURES번
     시도해 실패한 영상은 AUTO_GIVE_UP_WINDOW 동안 제외한다. 마감 없는 영상은 미수강 목록에서 빠지지 않아
     끝없이 재시도되기 때문이다. 기간이 지나면 다시 세므로 일시적인 장애로 실패한 영상도 다시 자동으로 시도한다."""
-    if await playback.active_batch(db, user_id):
+    if not await user_has_access(db, user_id) or await playback.active_batch(db, user_id):
         return None
-    course_ids = set((await db.scalars(
-        select(CourseRow.lms_course_id).where(CourseRow.user_id == user_id, CourseRow.auto_play, CourseRow.active)
-    )).all())
+    course_ids = await _auto_play_course_ids(db, user_id)
     if not course_ids:
         return None
     videos = await playback.pending_videos_from_db(db, user_id, "auto", course_ids=course_ids)
@@ -99,20 +122,27 @@ async def create_auto_batch(db, user_id: int) -> PlaybackBatch | None:
 
 
 async def schedule_syncs(ctx) -> int:
+    """동기화 시각이 된 사용자 중 승인되었고 현재 학기 자동 재생 과목이 있는 사람만 큐에 넣는다."""
     async with sessionmaker()() as db:
-        user_ids = (await db.scalars(
-            select(LmsCredential.user_id).where(
-                LmsCredential.status != "invalid", LmsCredential.next_sync_at <= utcnow()
-            )
-        )).all()
+        rows = (await db.execute(
+            select(User).join(LmsCredential, LmsCredential.user_id == User.id).where(
+                LmsCredential.status != "invalid", LmsCredential.next_sync_at <= utcnow(),
+                select(CourseRow.id).where(
+                    CourseRow.user_id == User.id, CourseRow.auto_play, CourseRow.active).exists(),
+            ).order_by(User.id)
+        )).scalars().all()
+        user_ids = [u.id for u in rows if has_access(u)]
     for uid in user_ids:
-        await ctx["queue"].enqueue("sync_user_job", uid, job_id=f"sync:{uid}")
+        await ctx["queue"].enqueue("auto_sync_user_job", uid, job_id=f"autosync:{uid}")
     return len(user_ids)
 
 
 async def deadline_reminders(ctx) -> int:
     async with sessionmaker()() as db:
-        user_ids = (await db.scalars(select(LmsCredential.user_id))).all()
+        users = (await db.scalars(
+            select(User).join(LmsCredential, LmsCredential.user_id == User.id).order_by(User.id)
+        )).all()
+        user_ids = [u.id for u in users if has_access(u)]
         return sum([await notify_deadlines(db, uid) for uid in user_ids])
 
 
@@ -130,6 +160,7 @@ async def startup(ctx) -> None:
 class WorkerSettings:
     functions = [
         func(sync_user_job, timeout=600),
+        func(auto_sync_user_job, timeout=600),
     ]
     cron_jobs = [
         cron(schedule_syncs, minute=set(range(0, 60, 5)), run_at_startup=True),
@@ -139,5 +170,5 @@ class WorkerSettings:
     on_startup = startup
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     max_jobs = 20
-    keep_result = 0  # 같은 job_id(sync:{user})를 바로 다시 넣을 수 있도록 결과를 남기지 않는다
+    keep_result = 0  # 같은 job_id(sync:{user}, autosync:{user})를 바로 다시 넣을 수 있도록 결과를 남기지 않는다
     job_timeout = 24 * 3600

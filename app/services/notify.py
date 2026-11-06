@@ -40,7 +40,11 @@ async def send_to_channel(channel: NotificationChannel, text: str, http: httpx.A
 
 
 async def notify_user(db: AsyncSession, user_id: int, text: str, key: str | None = None) -> bool:
-    """key가 있으면 한 번만 보낸다. 실제로 보냈으면 True."""
+    """key가 있으면 한 번만 보낸다. 실제로 보냈으면 True. 승인되지 않은 사용자에게는 보내지 않는다."""
+    from app.services.access import user_has_access  # access가 notify를 가져오므로 순환을 피한다
+
+    if not await user_has_access(db, user_id):
+        return False  # 키도 남기지 않는다. 승인된 뒤에는 같은 알림을 보낼 수 있다.
     if key is not None:
         db.add(NotificationLog(user_id=user_id, key=key))
         try:

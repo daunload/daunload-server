@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from app.db import base as db_base
 from app.db.base import utcnow
-from app.db.models import LmsCredential, PlaybackBatch, PlaybackJob
+from app.db.models import LmsCredential, PlaybackBatch, PlaybackJob, TodoRow, User
 from app.worker import main as worker
 from tests.test_api import COURSE_ID, WEBHOOK, LmsMock, _signup, env  # noqa: F401  (env는 fixture)
 
@@ -195,7 +195,7 @@ def _raising_ctx(exc):
     return ctx
 
 
-async def test_schedule_syncs(env):
+async def test_schedule_syncs_skips_users_without_auto_play(env):
     api, _ = env
     await _setup(api)
     ctx = {"queue": Q()}
@@ -204,8 +204,8 @@ async def test_schedule_syncs(env):
         cred.next_sync_at = utcnow() - timedelta(minutes=1)
         db.add(PlaybackBatch(user_id=1, scope="all", status="running", total=0))
         await db.commit()
-    assert await worker.schedule_syncs(ctx) == 1
-    assert ctx["queue"].jobs[-1] == ("sync_user_job", (1,), "sync:1")
+    assert await worker.schedule_syncs(ctx) == 0  # 자동 재생 과목이 없으면 동기화하지 않는다
+    assert ctx["queue"].jobs == []
 
 
 async def test_deadline_reminders_survive_duplicate_rollbacks(env):
@@ -234,3 +234,97 @@ async def test_deadline_reminders_survive_duplicate_rollbacks(env):
             await notify_announcements(db, 1, rows)
             await notify_announcements(db, 1, rows)
     assert await worker.deadline_reminders({}) == 0
+
+
+@respx.mock
+async def test_auto_sync_creates_auto_batch(env):
+    api, _ = env
+    h = await _setup(api)
+    respx.post(WEBHOOK).respond(204)
+    LmsMock().install()
+    await worker.sync_user_job({"queue": Q()}, 1)
+    await api.put(f"/courses/{COURSE_ID}/auto-play", headers=h, json={"enabled": True})
+    assert await worker.auto_sync_user_job({"queue": Q()}, 1) == "ok"
+    async with db_base.sessionmaker()() as db:
+        batch = await db.scalar(select(PlaybackBatch))
+        assert batch.scope == "auto" and batch.total == 3
+
+
+async def test_full_sync_job_not_dropped_by_auto_sync(env):
+    """arq는 같은 job_id가 큐에 있으면 새 작업을 버린다. 전체와 자동 동기화는 ID가 달라야 한다."""
+    from arq.connections import ArqRedis  # noqa: F401
+    from app.api.deps import Queue
+
+    seen: dict[str, object] = {}
+
+    class Redis:
+        async def enqueue_job(self, function, *args, _job_id=None, **kw):
+            if _job_id in seen:
+                return None  # arq처럼 중복 ID는 버린다
+            seen[_job_id] = function
+            return object()
+
+    q = Queue(Redis())
+    await q.enqueue("auto_sync_user_job", 1, job_id="autosync:1")
+    await q.enqueue("sync_user_job", 1, job_id="sync:1")
+    assert seen == {"autosync:1": "auto_sync_user_job", "sync:1": "sync_user_job"}
+
+
+async def test_unapproved_get_no_notifications(env):
+    from app.services.notify import notify_deadlines, notify_user
+
+    api, _ = env
+    await _setup(api)
+    async with db_base.sessionmaker()() as db:
+        db.add(TodoRow(user_id=1, lms_course_id=1, course_name="c", kind="assignment", lms_item_id=1,
+                       title="과제", deadline=utcnow() + timedelta(hours=2)))
+        user = await db.get(User, 1)
+        user.access_status = "revoked"
+        await db.commit()
+    with respx.mock:
+        discord = respx.post(WEBHOOK).respond(204)
+        async with db_base.sessionmaker()() as db:
+            assert await notify_user(db, 1, "hi", key="k") is False
+            assert await notify_deadlines(db, 1) == 0
+        assert await worker.deadline_reminders({}) == 0
+        assert len(discord.calls) == 0
+        async with db_base.sessionmaker()() as db:  # 승인되면 같은 키로 보낼 수 있다
+            (await db.get(User, 1)).access_status = "approved"
+            await db.commit()
+            assert await notify_user(db, 1, "hi", key="k") is True
+        assert len(discord.calls) == 1
+
+
+async def test_worker_cancels_batch_of_unapproved_owner(env):
+    from app.services.playback import run_batch
+
+    api, _ = env
+    await _setup(api)
+    async with db_base.sessionmaker()() as db:
+        b = PlaybackBatch(user_id=1, scope="all", status="queued", total=1)
+        db.add(b)
+        await db.flush()
+        db.add(PlaybackJob(batch_id=b.id, user_id=1, position=0, lms_course_id=COURSE_ID, module_item_id=11,
+                           title="x", duration=60, video={}, status="queued"))
+        (await db.get(User, 1)).access_status = "revoked"
+        await db.commit()
+        batch_id = b.id
+
+    class Boom:
+        def __getattr__(self, name):
+            raise AssertionError("재생하면 안 된다")
+
+    assert await run_batch(batch_id, Boom()) == "cancelled"
+    async with db_base.sessionmaker()() as db:
+        assert (await db.get(PlaybackBatch, batch_id)).status == "cancelled"
+        assert (await db.scalar(select(PlaybackJob))).status == "cancelled"
+
+
+async def test_jobs_denied_for_unapproved_user(env):
+    api, _ = env
+    await _setup(api)
+    async with db_base.sessionmaker()() as db:
+        (await db.get(User, 1)).access_status = "pending"
+        await db.commit()
+    assert await worker.sync_user_job({}, 1) == "denied"
+    assert await worker.auto_sync_user_job({}, 1) == "denied"
