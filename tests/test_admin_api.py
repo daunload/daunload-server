@@ -75,22 +75,24 @@ async def test_overview_empty_service(env, monkeypatch):
 
 async def test_overview_metrics(env, monkeypatch):
     api, admin, _ = await _admin(env, monkeypatch)
-    now = datetime.now(UTC)
+    # 오늘 한국 자정에 맞춘다. now - 1시간은 00시~01시에 실행하면 어제가 되어 오늘 칸 검사가 깨진다.
+    midnight = period_start(1)
+    today = local_day(midnight)
     async with db_base.sessionmaker()() as db:
         # user 1: 수동 재생, user 2: auto 재생만
         manual, auto = _batch(1), _batch(2, scope="auto")
         db.add_all([manual, auto])
         await db.flush()
         db.add_all([
-            _job(manual.id, 1, n=1, duration=100, started_at=now - timedelta(hours=2), finished_at=now - timedelta(hours=1)),
-            _job(manual.id, 1, "failed", n=2, started_at=now - timedelta(hours=2), finished_at=now - timedelta(hours=1)),
-            _job(auto.id, 2, n=3, duration=50, started_at=now - timedelta(hours=2), finished_at=now - timedelta(hours=1)),
-            _job(auto.id, 2, n=4, duration=50, started_at=now - timedelta(hours=2), finished_at=now - timedelta(hours=1)),
+            _job(manual.id, 1, n=1, duration=100, started_at=midnight, finished_at=midnight),
+            _job(manual.id, 1, "failed", n=2, started_at=midnight, finished_at=midnight),
+            _job(auto.id, 2, n=3, duration=50, started_at=midnight, finished_at=midnight),
+            _job(auto.id, 2, n=4, duration=50, started_at=midnight, finished_at=midnight),
         ])
         db.add_all([
-            UserDailyActivity(user_id=1, day=local_day(), logins=1, downloads=2),
-            UserDailyActivity(user_id=2, day=local_day() - timedelta(days=1), logins=0, downloads=3),
-            UserDailyActivity(user_id=2, day=local_day() - timedelta(days=40), logins=1, downloads=9),
+            UserDailyActivity(user_id=1, day=today, logins=1, downloads=2),
+            UserDailyActivity(user_id=2, day=today - timedelta(days=1), logins=0, downloads=3),
+            UserDailyActivity(user_id=2, day=today - timedelta(days=40), logins=1, downloads=9),
         ])
         await db.commit()
     body = (await api.get("/admin/overview", headers=admin)).json()
@@ -98,8 +100,9 @@ async def test_overview_metrics(env, monkeypatch):
     assert body["playback_done"] == 3 and body["playback_auto"] == 2 and body["playback_seconds"] == 200
     assert body["playback_failed"] == 1 and body["failure_rate"] == 0.25
     assert body["downloads"] == 5
-    assert body["tracking_since"] == str(local_day() - timedelta(days=40))
-    assert body["series"][-1] == {"day": str(local_day()), "playback_done": 3, "logins": 1, "downloads": 2}
+    assert body["tracking_since"] == str(today - timedelta(days=40))
+    by_day = {s["day"]: s for s in body["series"]}
+    assert by_day[str(today)] == {"day": str(today), "playback_done": 3, "logins": 1, "downloads": 2}
     assert len(body["series"]) == 7 and len(body["recent_activity"]) == 4
     assert body["problem_count"] == 1 and body["recent_problems"][0]["kind"] == "playback"
     # auto 재생만 한 사용자(로그인·다운로드 기록 없음)는 active가 아니다
