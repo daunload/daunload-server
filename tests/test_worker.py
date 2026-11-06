@@ -71,6 +71,74 @@ async def test_auto_batch_skips_recent_failures(env):
 
 
 @respx.mock
+async def test_auto_batch_gives_up_after_three_attempted_failures(env):
+    """마감 없는 영상은 미수강 목록에서 빠지지 않는다. 자동 묶음에서 시도해 3번 실패하면 자동으로는 더 넣지 않는다."""
+    api, _ = env
+    h = await _setup(api)
+    respx.post(WEBHOOK).respond(204)
+    LmsMock().install()
+    await worker.sync_user_job({"queue": Q()}, 1)
+    await api.put(f"/courses/{COURSE_ID}/auto-play", headers=h, json={"enabled": True})
+    long_ago = utcnow() - worker.AUTO_RETRY_COOLDOWN - timedelta(hours=1)  # 쿨다운은 이미 지났다
+
+    async def run_auto(fail: dict[int, str]):
+        async with db_base.sessionmaker()() as db:
+            batch = await worker.create_auto_batch(db, 1)
+            jobs = (await db.scalars(select(PlaybackJob).where(PlaybackJob.batch_id == batch.id))).all()
+            for j in jobs:
+                j.status = fail.get(j.module_item_id, "done")
+                j.started_at = j.finished_at = long_ago
+            batch.status = "partial"
+            await db.commit()
+            return sorted(j.module_item_id for j in jobs)
+
+    async with db_base.sessionmaker()() as db:  # 시도하지 못하고 끝난 실패(started_at 없음)는 세지 않는다
+        never = PlaybackBatch(user_id=1, scope="auto", status="failed", total=1)
+        db.add(never)
+        await db.flush()
+        db.add(PlaybackJob(batch_id=never.id, user_id=1, position=0, lms_course_id=COURSE_ID, module_item_id=21,
+                           title="x", duration=60, video={}, status="failed", finished_at=long_ago))
+        await db.commit()
+    assert await run_auto({21: "failed", 11: "failed"}) == [11, 12, 21]
+    assert await run_auto({21: "locked", 11: "failed"}) == [11, 12, 21]
+    assert await run_auto({21: "failed"}) == [11, 12, 21]
+    # 4번째 자동 묶음: 21번만 빠진다. 11번은 실패가 2번뿐이라 그대로 들어간다.
+    assert await run_auto({}) == [11, 12]
+
+    # 수동 재생은 여전히 21번을 넣는다
+    r = await api.post("/playback/batches", headers=h, json={"scope": "all"})
+    assert r.status_code == 201, r.text
+    async with db_base.sessionmaker()() as db:
+        manual = await db.get(PlaybackBatch, r.json()["id"])
+        assert manual.scope == "all"
+        ids = (await db.scalars(select(PlaybackJob.module_item_id).where(PlaybackJob.batch_id == manual.id))).all()
+        assert 21 in ids
+
+
+@respx.mock
+async def test_manual_failures_do_not_count_toward_auto_give_up(env):
+    api, _ = env
+    h = await _setup(api)
+    respx.post(WEBHOOK).respond(204)
+    LmsMock().install()
+    await worker.sync_user_job({"queue": Q()}, 1)
+    await api.put(f"/courses/{COURSE_ID}/auto-play", headers=h, json={"enabled": True})
+    long_ago = utcnow() - worker.AUTO_RETRY_COOLDOWN - timedelta(hours=1)
+    async with db_base.sessionmaker()() as db:
+        for _ in range(3):
+            manual = PlaybackBatch(user_id=1, scope="all", status="failed", total=1)
+            db.add(manual)
+            await db.flush()
+            db.add(PlaybackJob(batch_id=manual.id, user_id=1, position=0, lms_course_id=COURSE_ID, module_item_id=21,
+                               title="x", duration=60, video={}, status="failed", started_at=long_ago,
+                               finished_at=long_ago))
+        await db.commit()
+        batch = await worker.create_auto_batch(db, 1)
+        ids = (await db.scalars(select(PlaybackJob.module_item_id).where(PlaybackJob.batch_id == batch.id))).all()
+        assert sorted(ids) == [11, 12, 21]
+
+
+@respx.mock
 async def test_invalid_password_marks_and_notifies_once(env, monkeypatch):
     from app.lms.errors import InvalidCredentials
 

@@ -15,12 +15,12 @@ from datetime import timedelta
 from arq import cron
 from arq.connections import RedisSettings
 from arq.worker import func
-from sqlalchemy import select
+from sqlalchemy import func as sql_func, select
 
 from app.api.deps import Queue
 from app.config import get_settings
 from app.db.base import init_engine, sessionmaker, utcnow
-from app.db.models import CourseRow, LmsCredential, PlaybackJob
+from app.db.models import CourseRow, LmsCredential, PlaybackBatch, PlaybackJob
 from app.lms.errors import InvalidCredentials, LmsError
 from app.services import playback
 from app.services.activity import prune_daily
@@ -30,6 +30,7 @@ from app.services.sync import sync_user
 log = logging.getLogger(__name__)
 
 AUTO_RETRY_COOLDOWN = timedelta(hours=12)
+AUTO_MAX_FAILURES = 3  # 자동 묶음에서 이만큼 시도해 실패한 영상은 더 자동으로 넣지 않는다(수동 재생은 된다)
 
 
 async def sync_user_job(ctx, user_id: int) -> str:
@@ -59,7 +60,8 @@ async def sync_user_job(ctx, user_id: int) -> str:
 
 async def create_auto_batch(db, user_id: int) -> PlaybackBatch | None:
     """자동 수강이 켜진 과목의 미수강 영상으로 묶음을 만든다. 이미 진행 중이면 만들지 않는다.
-    최근 실패한 항목은 같은 실패를 반복하지 않도록 일정 시간 제외한다."""
+    최근 실패한 항목은 같은 실패를 반복하지 않도록 일정 시간 제외한다. 자동 묶음에서 AUTO_MAX_FAILURES번
+    시도해 실패한 영상은 아예 제외한다. 마감 없는 영상은 미수강 목록에서 빠지지 않아 끝없이 재시도되기 때문이다."""
     if await playback.active_batch(db, user_id):
         return None
     course_ids = set((await db.scalars(
@@ -75,7 +77,19 @@ async def create_auto_batch(db, user_id: int) -> PlaybackBatch | None:
             PlaybackJob.finished_at >= utcnow() - AUTO_RETRY_COOLDOWN,
         )
     )).all())
-    videos = [v for v in videos if v.module_item_id not in recent_failures]
+    given_up = set((await db.scalars(
+        select(PlaybackJob.module_item_id)
+        .join(PlaybackBatch, PlaybackBatch.id == PlaybackJob.batch_id)
+        .where(
+            PlaybackJob.user_id == user_id,
+            PlaybackBatch.scope == "auto",
+            PlaybackJob.status.in_(("failed", "locked")),
+            PlaybackJob.started_at.is_not(None),
+        )
+        .group_by(PlaybackJob.module_item_id)
+        .having(sql_func.count() >= AUTO_MAX_FAILURES)
+    )).all())
+    videos = [v for v in videos if v.module_item_id not in recent_failures | given_up]
     if not videos:
         return None
     return await playback.create_batch(db, user_id, "auto", videos)
