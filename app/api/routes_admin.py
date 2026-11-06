@@ -431,7 +431,7 @@ class AdminTodoOut(BaseModel):
     course_name: str
     deadline: datetime | None
     due_at: datetime | None
-    done: bool  # 마지막 동기화에서 사라진(완료·마감) 항목
+    active: bool  # False면 마지막 동기화에서 목록에서 사라진 항목(완료 또는 마감)
 
 
 class AdminAssignmentOut(BaseModel):
@@ -585,7 +585,7 @@ async def user_todos(student_id: str, admin: AdminUser, db: Db, response: Respon
     user = await _target_user(db, student_id)
     total, rows = await _paged(
         db, TodoRow, (TodoRow.kind, TodoRow.title, TodoRow.course_name, TodoRow.deadline, TodoRow.due_at,
-                      (~TodoRow.active).label("done")),
+                      TodoRow.active),
         user.id, (TodoRow.active.desc(), TodoRow.deadline.asc().nulls_last(), TodoRow.id), offset, limit)
     return {"total": total, "items": rows}
 
@@ -659,18 +659,24 @@ async def user_notifications(student_id: str, admin: AdminUser, db: Db, response
 @router.get("/users/{student_id}/playback", response_model=_page_out(AdminBatchOut))
 async def user_playback(
     student_id: str, admin: AdminUser, db: Db, response: Response,
-    status: str | None = Query(default=None, max_length=16),
+    status: Literal["failed", "locked", "done", "queued", "playing", "skipped", "cancelled"] | None = None,
     lms_course_id: int | None = None,
     days: int | None = Query(default=None, ge=1, le=365),
     offset: Offset = 0, limit: Limit = 20,
 ):
     response.headers["Cache-Control"] = "no-store"
     user = await _target_user(db, student_id)
+    # status와 lms_course_id는 묶음 안의 job 기준이다(묶음의 status·lms_course_id는 범위에 따라 비어 있거나
+    # 일부 실패도 partial이라 거를 수 없다). "failed"는 시도한 failed/locked job(failed_job_filter)이다.
+    # 맞는 묶음은 안의 job을 모두 돌려준다. days는 묶음 생성 시각 기준이다.
     where = []
+    job_cond = []
     if status:
-        where.append(PlaybackBatch.status == status)
+        job_cond.append(failed_job_filter() if status == "failed" else PlaybackJob.status == status)
     if lms_course_id is not None:
-        where.append(PlaybackBatch.lms_course_id == lms_course_id)
+        job_cond.append(PlaybackJob.lms_course_id == lms_course_id)
+    if job_cond:
+        where.append(exists().where(PlaybackJob.batch_id == PlaybackBatch.id, *job_cond))
     if days is not None:
         where.append(PlaybackBatch.created_at >= period_start(days))
     total, batches = await _paged(

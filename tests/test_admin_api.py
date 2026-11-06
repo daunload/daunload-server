@@ -46,7 +46,7 @@ def _batch(user_id, scope="all", status="done", created=None, **kw):
 
 def _job(batch_id, user_id, status="done", n=0, **kw):
     kw.setdefault("title", f"영상{n}")
-    return PlaybackJob(batch_id=batch_id, user_id=user_id, position=n, lms_course_id=1, module_item_id=n,
+    return PlaybackJob(batch_id=batch_id, user_id=user_id, position=n, lms_course_id=kw.pop("lms_course_id", 1), module_item_id=n,
                        duration=kw.pop("duration", 60), video={"url": "PRIVATE-URL"}, status=status, **kw)
 
 
@@ -302,16 +302,18 @@ async def test_users_filters_and_sort(env, monkeypatch):
     assert ids(await api.get("/admin/users?has_problem=true", headers=admin)) == []
     assert set(ids(await api.get("/admin/users?has_problem=false", headers=admin))) == {"20201234", "20209999"}
     assert (await api.get("/admin/users?has_problem=true&q=zzz", headers=admin)).json()["total"] == 0
+    # 세 정렬이 서로 다른 순서가 되게: 활동 user2>user3>user1, 가입 user3>user1>user2, 학번 user1<user2<user3
+    await _signup(api, "20205555")  # user 3
     async with db_base.sessionmaker()() as db:
-        u1, u2 = await db.get(User, 1), await db.get(User, 2)
-        u1.last_login_at, u2.last_login_at = now - timedelta(days=3), None
-        u1.created_at, u2.created_at = now - timedelta(days=1), now - timedelta(days=9)
+        u1, u2, u3 = [await db.get(User, i) for i in (1, 2, 3)]
+        u1.last_login_at, u2.last_login_at, u3.last_login_at = now - timedelta(days=3), now - timedelta(days=1), now - timedelta(days=2)
+        u1.created_at, u2.created_at, u3.created_at = now - timedelta(days=5), now - timedelta(days=9), now - timedelta(days=1)
         await db.commit()
-    assert ids(await api.get("/admin/users", headers=admin)) == ["20201234", "20209999"]
-    assert ids(await api.get("/admin/users?sort=created", headers=admin)) == ["20201234", "20209999"]
-    assert ids(await api.get("/admin/users?sort=student_id", headers=admin)) == ["20201234", "20209999"]
-    u = (await api.get("/admin/users?sort=created&limit=1&offset=1", headers=admin)).json()
-    assert u["total"] == 2 and [x["student_id"] for x in u["users"]] == ["20209999"]
+    assert ids(await api.get("/admin/users", headers=admin)) == ["20209999", "20205555", "20201234"]
+    assert ids(await api.get("/admin/users?sort=created", headers=admin)) == ["20205555", "20201234", "20209999"]
+    assert ids(await api.get("/admin/users?sort=student_id", headers=admin)) == ["20201234", "20205555", "20209999"]
+    page = (await api.get("/admin/users?sort=created&limit=1&offset=1", headers=admin)).json()
+    assert page["total"] == 3 and [x["student_id"] for x in page["users"]] == ["20201234"]
     for q in ("sort=x", "limit=101", "offset=-1"):
         assert (await api.get("/admin/users?" + q, headers=admin)).status_code == 422
 
@@ -389,7 +391,6 @@ async def test_playback_tab_groups_batches_and_cleans_errors(env, monkeypatch):
         other_user = _batch(1)
         db.add_all([b1, b2, old, other_user])
         await db.flush()
-        b1.lms_course_id = 7
         db.add_all([
             _job(b1.id, 2, "failed", n=1, started_at=t, finished_at=t, error="x https://cdn.test/p/q?token=SECRET y", attempts=2),
             _job(b1.id, 2, "done", n=2, started_at=t, finished_at=t),
@@ -405,11 +406,37 @@ async def test_playback_tab_groups_batches_and_cleans_errors(env, monkeypatch):
     assert first["jobs"][0]["error"] == "x https://cdn.test y" and first["jobs"][0]["attempts"] == 2
     assert first["jobs"][0]["deadline"] is None
     assert [len(i["jobs"]) for i in body["items"]] == [2, 1, 1]
-    assert (await api.get("/admin/users/20209999/playback?status=done", headers=admin)).json()["total"] == 2
-    assert (await api.get("/admin/users/20209999/playback?lms_course_id=7", headers=admin)).json()["total"] == 1
+    assert (await api.get("/admin/users/20209999/playback?status=done", headers=admin)).json()["total"] == 3
+    assert (await api.get("/admin/users/20209999/playback?lms_course_id=1", headers=admin)).json()["total"] == 3
+    assert (await api.get("/admin/users/20209999/playback?status=bogus", headers=admin)).status_code == 422
     assert (await api.get("/admin/users/20209999/playback?days=7", headers=admin)).json()["total"] == 2
+    # 일부 실패라 partial인 묶음도 status=failed로 나오고, 안의 job은 모두 돌려준다
+    failed = (await api.get("/admin/users/20209999/playback?status=failed", headers=admin)).json()
+    assert failed["total"] == 1 and failed["items"][0]["status"] == "partial" and len(failed["items"][0]["jobs"]) == 2
     page = (await api.get("/admin/users/20209999/playback?limit=1&offset=1", headers=admin)).json()
     assert page["total"] == 3 and len(page["items"]) == 1
+
+
+async def test_playback_course_filter_matches_jobs_in_all_and_auto_batches(env, monkeypatch):
+    api, admin, _ = await _admin(env, monkeypatch)
+    t = _recent()
+    async with db_base.sessionmaker()() as db:
+        everything = _batch(2, scope="all", status="partial", created=t)  # 묶음에는 lms_course_id가 없다
+        auto = _batch(2, scope="auto", created=t - timedelta(hours=1))
+        db.add_all([everything, auto])
+        await db.flush()
+        db.add_all([
+            _job(everything.id, 2, "failed", n=1, started_at=t, finished_at=t, lms_course_id=5),
+            _job(everything.id, 2, "done", n=2, lms_course_id=6),
+            _job(auto.id, 2, "done", n=3, lms_course_id=5),
+        ])
+        await db.commit()
+    body = (await api.get("/admin/users/20209999/playback?lms_course_id=5", headers=admin)).json()
+    assert body["total"] == 2 and len(body["items"][0]["jobs"]) == 2
+    assert (await api.get("/admin/users/20209999/playback?lms_course_id=6", headers=admin)).json()["total"] == 1
+    both = (await api.get("/admin/users/20209999/playback?lms_course_id=5&status=failed", headers=admin)).json()
+    assert both["total"] == 1 and both["items"][0]["scope"] == "all"
+    assert (await api.get("/admin/users/20209999/playback?lms_course_id=7", headers=admin)).json()["total"] == 0
 
 
 async def test_saved_videos_report_only_whether_address_exists(env, monkeypatch):
