@@ -11,8 +11,8 @@ const MESSAGES = {
 const EXPIRED = new Set([403, 404, 410]);
 
 export class AudioExtractError extends Error {
-  constructor(code) {
-    super(MESSAGES[code]);
+  constructor(code, options) {
+    super(MESSAGES[code], options);
     this.name = "AudioExtractError";
     this.code = code;
   }
@@ -162,7 +162,19 @@ export async function* extractPcm(source, { signal, rate = 16000, chunkBytes = 2
 
   const ready = [];
   let failure = null;
+  let wake = null;
   let resample = null;
+  // 디코더 오류는 비동기로 오고 코덱을 닫는다. 원래 오류를 cause로 담아 사용자 문구로 바꾼다.
+  const codecError = (error) => new AudioExtractError("unsupported_codec", { cause: failure ?? error });
+  const check = () => { if (failure) throw codecError(failure); };
+  const guard = async (step) => {
+    check();
+    try {
+      return await step();
+    } catch (error) {
+      throw codecError(error);
+    }
+  };
   const decoder = new AudioDecoder({
     output: (audio) => {
       try {
@@ -172,24 +184,27 @@ export async function* extractPcm(source, { signal, rate = 16000, chunkBytes = 2
         audio.close();
       }
     },
-    error: (error) => { failure = error; },
+    error: (error) => { failure = error; wake?.(); },
   });
   const drain = () => {
-    if (failure) throw failure;
+    check();
     const parts = ready.splice(0).filter((p) => p.length);
     return parts.length ? concat(parts) : null;
   };
   const settled = () => new Promise((resolve) => {
-    if (decoder.decodeQueueSize === 0) return resolve();
-    decoder.addEventListener("dequeue", function check() {
+    if (decoder.decodeQueueSize === 0 || failure) return resolve();
+    const done = () => {
       if (decoder.decodeQueueSize > 0 && !failure) return;
-      decoder.removeEventListener("dequeue", check);
+      decoder.removeEventListener("dequeue", done);
+      wake = null;
       resolve();
-    });
+    };
+    wake = done;
+    decoder.addEventListener("dequeue", done);
   });
 
   try {
-    decoder.configure(config);
+    await guard(() => decoder.configure(config));
     // 오디오 샘플을 파일 순서대로 묶어 chunkBytes 이하 Range 하나로 읽는다(사이에 낀 영상 바이트는 버린다).
     for (let i = 0; i < samples.length; ) {
       signal?.throwIfAborted();
@@ -200,15 +215,17 @@ export async function* extractPcm(source, { signal, rate = 16000, chunkBytes = 2
       const last = samples[j - 1];
       const bytes = await source.read(start, last.offset + last.size - 1);
       signal?.throwIfAborted();
-      for (; i < j; i++) {
-        const sample = samples[i];
-        decoder.decode(new EncodedAudioChunk({
-          type: "key",
-          timestamp: Math.round((sample.cts * 1e6) / sample.timescale),
-          duration: Math.round((sample.duration * 1e6) / sample.timescale),
-          data: bytes.subarray(sample.offset - start, sample.offset - start + sample.size),
-        }));
-      }
+      await guard(() => {
+        for (; i < j; i++) {
+          const sample = samples[i];
+          decoder.decode(new EncodedAudioChunk({
+            type: "key",
+            timestamp: Math.round((sample.cts * 1e6) / sample.timescale),
+            duration: Math.round((sample.duration * 1e6) / sample.timescale),
+            data: bytes.subarray(sample.offset - start, sample.offset - start + sample.size),
+          }));
+        }
+      });
       await settled();
       const pcm = drain();
       if (pcm) {
@@ -216,7 +233,7 @@ export async function* extractPcm(source, { signal, rate = 16000, chunkBytes = 2
         signal?.throwIfAborted();
       }
     }
-    await decoder.flush();
+    await guard(() => decoder.flush());
     const pcm = drain();
     if (pcm) yield pcm;
     return { duration: track.duration / track.timescale };

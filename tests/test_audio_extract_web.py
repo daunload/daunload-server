@@ -42,7 +42,7 @@ EXTRACT_ERROR = """async ({ name }) => {
     for await (const _ of m.extractPcm(source, { signal })) {}
     return null;
   } catch (e) {
-    return { typed: e instanceof m.AudioExtractError, code: e.code, message: e.message };
+    return { typed: e instanceof m.AudioExtractError, code: e.code, message: e.message, cause: e.cause?.name ?? null };
   }
 }"""
 
@@ -107,7 +107,7 @@ async def test_extract_faststart_yields_16k_mono(page):
 
 async def test_extract_moov_at_end(page):
     page, ranges = page
-    chunk = 64 * 1024
+    chunk = 1024  # moov(약 3.7KB)보다 작게 잡아 moov도 여러 Range로 나눠 읽게 한다
     assert_tone(await page.evaluate(EXTRACT_ALL, {"name": "tone-moov-end.mp4", "chunkBytes": chunk}))
     assert ranges
     assert not [r for r in ranges if r[2] - r[1] + 1 > chunk], ranges
@@ -139,15 +139,50 @@ async def test_backpressure_reads_lazily(page):
 
 async def test_video_only_raises_no_audio(page):
     page, _ = page
-    assert await page.evaluate(EXTRACT_ERROR, {"name": "video-only.mp4"}) == {"typed": True, "code": "no_audio", "message": NO_AUDIO}
+    assert await page.evaluate(EXTRACT_ERROR, {"name": "video-only.mp4"}) == {
+        "typed": True, "code": "no_audio", "message": NO_AUDIO, "cause": None,
+    }
 
 
 async def test_unsupported_codec(page):
     page, _ = page
     await page.evaluate("AudioDecoder.isConfigSupported = async () => ({ supported: false })")
     assert await page.evaluate(EXTRACT_ERROR, {"name": "tone-faststart.mp4"}) == {
-        "typed": True, "code": "unsupported_codec", "message": UNSUPPORTED,
+        "typed": True, "code": "unsupported_codec", "message": UNSUPPORTED, "cause": None,
     }
+
+
+async def test_decoder_error_becomes_unsupported_codec(page):
+    """디코딩 도중 error 콜백이 오고 코덱이 닫혀도 원래 오류를 담은 사용자 문구로 끝난다."""
+    page, _ = page
+    await page.evaluate("""() => {
+      const Real = AudioDecoder;
+      window.AudioDecoder = class extends Real {
+        constructor(init) {
+          super(init);
+          this.fail = init.error;
+        }
+        decode(chunk) {
+          super.decode(chunk);
+          if (this.failing) return;
+          this.failing = true;  // 다음 Range를 읽는 사이에 오류가 나서 코덱이 닫힌다
+          setTimeout(() => { this.close(); this.fail(new DOMException("bad frame", "EncodingError")); }, 0);
+        }
+      };
+      AudioDecoder.isConfigSupported = Real.isConfigSupported.bind(Real);
+    }""")
+    result = await page.evaluate("""async () => {
+      const m = await import("/audio-extract.mjs");
+      const signal = new AbortController().signal;
+      const source = m.openCdnSource("/media/tone-faststart.mp4", { signal, refresh: async () => "" });
+      try {
+        for await (const _ of m.extractPcm(source, { signal, chunkBytes: 1024 })) {}
+        return null;
+      } catch (e) {
+        return { typed: e instanceof m.AudioExtractError, code: e.code, message: e.message, cause: e.cause?.name ?? null };
+      }
+    }""")
+    assert result == {"typed": True, "code": "unsupported_codec", "message": UNSUPPORTED, "cause": "EncodingError"}
 
 
 async def test_source_refreshes_url_once_on_403(page):
