@@ -304,7 +304,7 @@ def admin_user(student_id, **over):
     now = datetime.now(UTC).isoformat()
     row = {"student_id": student_id, "created_at": "2026-03-04T01:00:00+00:00", "last_login_at": now, "login_count": 41,
            "lms_status": "ok", "course_count": 6, "playback_done": 58, "playback_failed": 3, "download_count": 21,
-           "transcript_count": 4, "channels": ["discord"]}
+           "transcript_count": 4, "channels": ["discord"], "access_status": "approved", "is_admin": False}
     row.update(over)
     return row
 
@@ -631,7 +631,7 @@ async def test_detail_tables_fit_mobile(dashboard, tmp_path):  # noqa: F811
         await expect(page.locator("#view .admin-users tbody tr")).to_have_count(3)
         assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), ("list", width)
     await page.set_viewport_size({"width": 375, "height": 900})
-    cell = page.locator("#view .admin-users tbody tr").first.locator("td").nth(1)
+    cell = page.locator("#view .admin-users tbody tr").first.locator("td").nth(2)
     assert await cell.get_attribute("data-label") == "최근 로그인"
     assert await page.locator("#view .admin-users thead").is_hidden()
     for _label, key, _tail, texts, _pages in TABS:
@@ -832,3 +832,212 @@ async def test_feed_tabs_fit_every_width(dashboard):  # noqa: F811
             heights = await page.locator("#view .admin-seg button, #view .admin-filters input, #view .admin-filters select").evaluate_all(
                 "els => els.map((e) => e.getBoundingClientRect().height)")
             assert min(heights) >= 44, (tab, width)
+
+
+# ---------- 권한 관리 ----------
+
+def request_row(sid, previous="none", rejects=0, at="2026-11-06T06:20:00+00:00"):
+    return {"student_id": sid, "requested_at": at, "previous_status": previous, "reject_count": rejects}
+
+
+def with_requests(data, *rows):
+    data["/admin/access-requests"] = {"total": len(rows), "items": list(rows)}
+    data["/admin/overview"]["pending_count"] = len(rows)
+
+
+async def decisions(page, data, *, status=200, gate=None):
+    """POST /admin/users/{id}/access를 가로채 기록한다. 성공하면 대기 목록에서 그 줄을 뺀다."""
+    calls = []
+
+    async def handle(route):
+        req = route.request
+        sid = urlparse(req.url).path.split("/")[3]
+        action = req.post_data_json["action"]
+        calls.append((sid, action))
+        if gate:
+            await gate.wait()
+        if status != 200:
+            await route.fulfill(status=status, json={"detail": "이미 처리된 요청입니다."})
+            return
+        pending = data.get("/admin/access-requests")
+        if pending:
+            pending["items"] = [r for r in pending["items"] if r["student_id"] != sid]
+            pending["total"] = len(pending["items"])
+        await route.fulfill(json={"student_id": sid, "access_status": {"approve": "approved", "reject": "rejected", "revoke": "revoked"}[action],
+                                  "access_decided_at": "2026-11-06T07:00:00+00:00", "access_decided_by": "20200001"})
+    await page.route("**/admin/users/*/access", handle)
+    return calls
+
+
+async def test_overview_shows_access_requests(dashboard):  # noqa: F811
+    page, data = dashboard
+    as_admin(data)
+    with_requests(data, request_row("20231877"), request_row("20220456", "revoked"), request_row("20241001", "rejected", 1))
+    await page.goto(BASE + "#admin/overview")
+    body = page.locator("#admin-body")
+    box = body.locator(".admin-access")
+    await expect(box.get_by_role("heading", name="권한 요청 3건")).to_be_visible()
+    rows = box.locator("tbody tr")
+    await expect(rows).to_have_count(3)
+    await expect(rows.nth(0)).to_contain_text("20231877")
+    await expect(rows.nth(0)).to_contain_text("처음 요청")
+    await expect(rows.nth(1)).to_contain_text("회수됨")
+    await expect(rows.nth(2)).to_contain_text("거절됨 1회")
+    await expect(rows.nth(0).get_by_role("button", name="승인")).to_be_visible()
+    await expect(rows.nth(0).get_by_role("button", name="거절")).to_be_visible()
+    # 지표 위에 있다
+    assert await box.evaluate("""(el) => el.parentElement === el.closest('#admin-body').firstElementChild
+        && el.parentElement.nextElementSibling.classList.contains('admin-kpis')""")
+    # 요청이 없으면 표도 요청도 없다
+    requested = []
+    page.on("request", lambda r: requested.append(r.url) if urlparse(r.url).path == "/admin/access-requests" else None)
+    with_requests(data)
+    await page.get_by_role("button", name="다시 불러오기").click()
+    await expect(body.locator(".admin-kpi")).to_have_count(4)
+    await expect(body.locator(".admin-access")).to_have_count(0)
+    assert requested == []
+
+
+async def test_approve_and_reject_from_overview(dashboard):  # noqa: F811
+    page, data = dashboard
+    as_admin(data)
+    with_requests(data, request_row("20231877"), request_row("20220456", "revoked"))
+    gate = asyncio.Event()
+    calls = await decisions(page, data, gate=gate)
+    await page.goto(BASE + "#admin/overview")
+    box = page.locator("#admin-body .admin-access")
+    first = box.locator("tbody tr").nth(0)
+    await first.get_by_role("button", name="승인").click()
+    # 처리 중에는 그 줄의 버튼이 모두 잠긴다
+    await expect(first.locator("button")).to_have_count(2)
+    for b in await first.locator("button").all():
+        await expect(b).to_be_disabled()
+    await expect(box.locator("tbody tr").nth(1).get_by_role("button", name="승인")).to_be_enabled()
+    gate.set()
+    await expect(box.locator("tbody tr")).to_have_count(1)
+    await expect(page.locator("#toast")).to_contain_text("20231877을 승인했습니다")
+    assert calls == [("20231877", "approve")]
+    await box.get_by_role("button", name="거절").click()
+    await expect(page.locator("#toast")).to_contain_text("20220456의 요청을 거절했습니다")
+    assert calls[-1] == ("20220456", "reject")
+    await expect(box).to_have_count(0)  # 다 처리하면 표가 사라진다
+
+
+async def test_users_tab_access_column_filter_and_buttons(dashboard):  # noqa: F811
+    page, data = dashboard
+    as_admin(data)
+    data["/admin/users"] = {"total": 6, "users": [
+        admin_user("20200001", access_status="approved", is_admin=True),
+        admin_user("20231234", access_status="approved"),
+        admin_user("20231877", access_status="pending"),
+        admin_user("20209999", access_status="none"),
+        admin_user("20208888", access_status="rejected"),
+        admin_user("20207777", access_status="revoked"),
+    ]}
+    await page.goto(BASE + "#admin/users")
+    view = page.locator("#view")
+    rows = view.locator(".admin-users tbody tr")
+    await expect(rows).to_have_count(6)
+    await expect(view.locator(".admin-users thead")).to_contain_text("권한")
+    for i, label in enumerate(["승인됨", "승인됨", "대기 중", "요청 안 함", "거절됨", "회수됨"]):
+        await expect(rows.nth(i).locator('td[data-label="권한"]')).to_have_text(label)
+
+    def names(i):
+        return rows.nth(i).locator(".admin-acts button")
+    await expect(names(0)).to_have_count(0)  # 관리자 줄
+    await expect(rows.nth(0)).to_contain_text("관리자 계정")
+    await expect(names(1)).to_have_text(["권한 회수"])
+    await expect(names(2)).to_have_text(["승인", "거절"])
+    await expect(names(3)).to_have_text(["바로 승인"])
+    await expect(names(4)).to_have_text(["바로 승인"])
+    await expect(names(5)).to_have_text(["바로 승인"])
+    # 버튼을 눌러도 상세로 가지 않는다
+    calls = await decisions(page, data)
+    await names(3).click()
+    await expect(page.locator("#toast")).to_contain_text("20209999을 승인했습니다")
+    assert calls == [("20209999", "approve")] and page.url.endswith("#admin/users")
+
+    group = view.get_by_role("group", name="권한")
+    await expect(group.get_by_role("button")).to_have_text(["전체", "승인됨", "대기 중", "거절됨", "회수됨", "요청 안 함"])
+    await expect(group.get_by_role("button", name="전체")).to_have_attribute("aria-pressed", "true")
+
+    def access(r):
+        q = parse_qs(urlparse(r.url).query) if urlparse(r.url).path == "/admin/users" else {}
+        return q.get("access")
+    async with page.expect_request(lambda r: access(r) == ["pending"]):
+        await group.get_by_role("button", name="대기 중").click()
+    await expect(group.get_by_role("button", name="대기 중")).to_have_attribute("aria-pressed", "true")
+    async with page.expect_request(lambda r: access(r) == ["none"]):
+        await group.get_by_role("button", name="요청 안 함").click()
+    async with page.expect_request(lambda r: urlparse(r.url).path == "/admin/users" and access(r) is None):
+        await group.get_by_role("button", name="전체").click()
+
+
+async def test_revoke_needs_confirmation(dashboard):  # noqa: F811
+    page, data = dashboard
+    as_admin(data)
+    data["/admin/users"] = {"total": 1, "users": [admin_user("20231234", access_status="approved")]}
+    calls = await decisions(page, data)
+    await page.goto(BASE + "#admin/users")
+    row = page.locator(".admin-users tbody tr")
+    await row.get_by_role("button", name="권한 회수").click()
+    dialog = page.locator("#confirm-dialog")
+    await expect(dialog).to_contain_text("20231234")
+    await expect(dialog).to_contain_text("재생")
+    await dialog.get_by_role("button", name="취소").click()
+    await expect(dialog).to_be_hidden()
+    assert calls == []
+    await row.get_by_role("button", name="권한 회수").click()
+    await dialog.get_by_role("button", name="권한 회수").click()
+    await expect(page.locator("#toast")).to_contain_text("20231234의 권한을 회수했습니다")
+    assert calls == [("20231234", "revoke")]
+
+
+async def test_decision_conflict_shows_error_and_reloads(dashboard):  # noqa: F811
+    page, data = dashboard
+    as_admin(data)
+    with_requests(data, request_row("20231877"))
+    await decisions(page, data, status=409)
+    loads = []
+    page.on("request", lambda r: loads.append(urlparse(r.url).path) if r.method == "GET" else None)
+    await page.goto(BASE + "#admin/overview")
+    box = page.locator("#admin-body .admin-access")
+    await expect(box.locator("tbody tr")).to_have_count(1)
+    before = loads.count("/admin/access-requests")
+    data["/admin/access-requests"] = {"total": 0, "items": []}  # 다른 관리자가 먼저 처리했다
+    await box.get_by_role("button", name="승인").click()
+    await expect(page.locator("#toast .bad")).to_contain_text("이미 처리된 요청입니다.")
+    await expect(box).to_have_count(0)
+    assert loads.count("/admin/access-requests") == before + 1
+    # 사용자 탭도 다시 불러온다
+    data["/admin/users"] = {"total": 1, "users": [admin_user("20231234", access_status="approved")]}
+    await page.goto(BASE + "#admin/users")
+    await expect(page.locator(".admin-users tbody tr")).to_have_count(1)
+    before = loads.count("/admin/users")
+    data["/admin/users"] = {"total": 1, "users": [admin_user("20231234", access_status="revoked")]}
+    await page.locator(".admin-users").get_by_role("button", name="권한 회수").click()
+    await page.locator("#confirm-dialog").get_by_role("button", name="권한 회수").click()
+    await expect(page.locator(".admin-users tbody tr")).to_contain_text("회수됨")
+    assert loads.count("/admin/users") == before + 1
+
+
+async def test_detail_header_shows_access_and_actions(dashboard):  # noqa: F811
+    page, data = dashboard
+    as_users_admin(data)
+    data[f"/admin/users/{SID}/summary"]["access_status"] = "pending"
+    calls = await decisions(page, data)
+    await page.goto(BASE + f"#admin/users/{SID}")
+    head = page.locator("#view .admin-user-head")
+    await expect(head).to_contain_text("대기 중")
+    await expect(head.locator(".admin-acts button")).to_have_text(["승인", "거절"])
+    data[f"/admin/users/{SID}/summary"]["access_status"] = "approved"
+    await head.get_by_role("button", name="승인", exact=True).click()
+    assert calls == [(SID, "approve")]
+    await expect(head.locator(".admin-who .admin-tag").nth(1)).to_have_text("승인됨")
+    await expect(head.locator(".admin-acts button")).to_have_text(["권한 회수"])
+    # 관리자 상세는 버튼이 없다
+    data["/admin/users/20231877/summary"] = {**data[f"/admin/users/{SID}/summary"], "student_id": "20231877",
+                                             "is_admin": True, "access_status": "approved"}
+    await page.goto(BASE + "#admin/users/20231877")
+    await expect(head).to_contain_text("관리자")
+    await expect(head.locator(".admin-acts")).to_have_count(0)

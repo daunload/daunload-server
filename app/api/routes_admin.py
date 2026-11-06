@@ -34,6 +34,7 @@ class AdminUserOut(BaseModel):
     transcript_count: int
     channels: list[str]
     access_status: str
+    is_admin: bool
 
 
 class AdminUsersOut(BaseModel):
@@ -101,7 +102,8 @@ async def list_users(
                      course_count=courses.get(u.id, 0), playback_done=done.get(u.id, 0),
                      playback_failed=failed.get(u.id, 0), download_count=downloads.get(u.id, 0),
                      transcript_count=transcripts.get(u.id, 0), channels=channels.get(u.id, []),
-                     access_status="approved" if is_admin(u) else u.access_status)
+                     access_status="approved" if is_admin(u) else u.access_status,
+                     is_admin=is_admin(u))
         for u, status in rows
     ])
 

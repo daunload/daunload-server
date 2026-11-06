@@ -309,6 +309,16 @@ async def test_users_list_counts_without_mixing_users(env, monkeypatch):
     assert a["lms_status"] == "ok" and "login_count" in a and "created_at" in a
 
 
+async def test_users_list_marks_admin_rows(env, monkeypatch):
+    api, admin, _ = await _admin(env, monkeypatch)
+    async with db_base.sessionmaker()() as db:
+        (await db.get(User, 2)).access_status = "approved"
+        await db.commit()
+    rows = {u["student_id"]: u for u in (await api.get("/admin/users", headers=admin)).json()["users"]}
+    assert rows["20201234"]["is_admin"] is True and rows["20201234"]["access_status"] == "approved"
+    assert rows["20209999"]["is_admin"] is False and rows["20209999"]["access_status"] == "approved"
+
+
 async def test_users_filters_and_sort(env, monkeypatch):
     api, admin, _ = await _admin(env, monkeypatch)
     now = datetime.now(UTC)

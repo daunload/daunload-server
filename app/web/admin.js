@@ -27,6 +27,11 @@ const ADMIN_BATCH_STATUS = {
   partial: { label: "일부 실패", tone: "bad" }, failed: { label: "실패", tone: "bad" }, cancelled: { label: "취소", tone: "" },
 };
 const ADMIN_LMS_STATUS = { ok: { label: "정상", tone: "ok" }, invalid: { label: "비밀번호가 바뀜", tone: "bad" }, error: { label: "최근 오류", tone: "warn" } };
+/** 사용 권한(User.access_status)의 화면 이름. 사용자 탭의 필터 순서이기도 하다. */
+const ADMIN_ACCESS = {
+  approved: { label: "승인됨", tone: "ok" }, pending: { label: "대기 중", tone: "warn" }, rejected: { label: "거절됨", tone: "bad" },
+  revoked: { label: "회수됨", tone: "bad" }, none: { label: "요청 안 함", tone: "" },
+};
 const ADMIN_CHANNEL = { discord: "Discord", telegram: "Telegram" };
 const ADMIN_USER_SORTS = { activity: "최근 로그인순", created: "가입일순", student_id: "학번순" };
 const ADMIN_USERS_LIMIT = 25;
@@ -43,7 +48,7 @@ const ADMIN_DETAIL_TABS = [
  */
 const adminUi = {
   nav: 0, seq: {}, days: 7, metric: "playback_done", problemCount: null, problemCountFor: null,
-  users: { q: "", lms_status: "", has_problem: false, sort: "activity", offset: 0 },
+  users: { q: "", lms_status: "", has_problem: false, access: "", sort: "activity", offset: 0 },
   detail: null,
 };
 
@@ -169,6 +174,75 @@ function viewAdmin(path = state.adminPath) {
   else adminProblems(body);  // admin-feeds.js
 }
 
+/* ---------- 권한 ---------- */
+
+const adminAccessTag = (status) => {
+  const a = ADMIN_ACCESS[status] || { label: status, tone: "warn" };
+  return adminTag(a.label, a.tone);
+};
+
+/** 상태별 버튼. 대기 중은 승인·거절, 승인됨은 회수, 나머지는 바로 승인. 관리자 줄에는 두지 않는다. */
+function adminAccessButtons(id, status, isAdmin) {
+  if (isAdmin) return "";
+  const btn = (action, label, cls) => `<button class="btn small${cls}" type="button" data-access="${action}" data-id="${esc(id)}">${label}</button>`;
+  let inner;
+  if (status === "pending") inner = btn("approve", "승인", " primary") + btn("reject", "거절", " danger");
+  else if (status === "approved") inner = btn("revoke", "권한 회수", " danger");
+  else inner = btn("approve", "바로 승인", "");
+  return `<div class="admin-acts">${inner}</div>`;
+}
+
+const ADMIN_ACCESS_DONE = { approve: (id) => `${id}을 승인했습니다`, reject: (id) => `${id}의 요청을 거절했습니다`, revoke: (id) => `${id}의 권한을 회수했습니다` };
+
+/**
+ * root 안의 [data-access] 버튼을 처리한다. 결정이 끝나거나 다른 관리자가 먼저 처리해 409가 나면 reload()로 목록을 다시 불러온다.
+ * 처리 중에는 같은 줄의 버튼을 모두 잠그고, 회수만 확인 창을 거친다.
+ */
+function adminBindAccess(root, reload) {
+  root.addEventListener("click", async (e) => {
+    const btn = e.target.closest("button[data-access]");
+    if (!btn || !root.contains(btn) || btn.disabled) return;
+    const { access: action, id } = btn.dataset;
+    if (action === "revoke") {
+      const ok = await confirmDialog({
+        title: `${id}의 사용 권한을 회수할까요?`,
+        body: ["회수하면 이 사용자는 서비스를 쓸 수 없어요.", "대기 중이거나 진행 중인 재생도 멈춰요."],
+        confirmLabel: "권한 회수", danger: true,
+      });
+      if (!ok) return;
+    }
+    const mates = [...btn.closest(".admin-acts").querySelectorAll("button")].filter((b) => b !== btn);
+    mates.forEach((b) => { b.disabled = true; });
+    try {
+      await withPending(btn, "처리 중", () => api(`${adminUserPath(id)}/access`, { method: "POST", json: { action } }));
+      toast(ADMIN_ACCESS_DONE[action](id));
+    } catch (err) {
+      toast(err.message, true);
+      if (err.status !== 409) { mates.forEach((b) => { b.disabled = false; }); return; }  // 409는 상태가 바뀐 것이므로 목록을 새로 본다
+    }
+    reload();
+  });
+}
+
+const ADMIN_PREVIOUS = { none: "처음 요청", rejected: "거절됨", revoked: "회수됨" };
+
+/** 현황 맨 위의 권한 요청 표. 요청이 없으면 비운다. */
+function adminAccessRequests(slot) {
+  const load = () => adminRequest("/admin/access-requests", (d) => {
+    if (!d.items.length) { slot.replaceChildren(); return; }
+    slot.innerHTML = `<section class="panel admin-box admin-access" aria-labelledby="admin-access-title">
+      <h2 id="admin-access-title">권한 요청 ${adminNumber(d.total)}건</h2>
+      ${adminTable([
+        { label: "학번", render: (r) => adminUserLink(r.student_id), cls: "admin-nowrap" },
+        { label: "요청 시각", render: (r) => adminTime(r.requested_at), cls: "admin-nowrap" },
+        { label: "이전 상태", render: (r) => adminTag(r.previous_status === "rejected" && r.reject_count ? `거절됨 ${adminNumber(r.reject_count)}회` : ADMIN_PREVIOUS[r.previous_status] || r.previous_status, r.previous_status === "none" ? "" : "bad") },
+        { label: "처리", render: (r) => adminAccessButtons(r.student_id, "pending", false) },
+      ], d.items, { caption: "권한 요청", cls: "admin-linked" })}</section>`;
+  }, "access").catch((err) => adminState(slot, "error", { message: err.message, retry: load }));
+  adminBindAccess(slot, load);
+  load();
+}
+
 /* ---------- 현황 ---------- */
 
 function adminOverview(body) {
@@ -216,6 +290,7 @@ function drawOverview(body, d) {
     { label: "오류", render: (p) => `${adminProblemTag(p)} ${adminProblemError(p)}` },
   ], d.recent_problems, { caption: "확인이 필요한 문제", cls: "admin-linked" }) : '<p class="admin-empty">확인할 문제가 없습니다.</p>';
   body.innerHTML = `
+    <div class="admin-access-slot"></div>
     <section class="admin-kpis" aria-label="주요 지표 (최근 ${adminNumber(d.days)}일)">
       ${kpi("활동 사용자", adminNumber(d.active_users), `전체 ${adminNumber(d.total_users)}명`)}
       ${kpi("재생한 강의", adminNumber(d.playback_done), `${fmtDuration(d.playback_seconds)}${d.playback_auto ? ` · 자동 ${adminNumber(d.playback_auto)}개` : ""}`)}
@@ -247,6 +322,7 @@ function drawOverview(body, d) {
         <a class="admin-more" href="#admin/problems">문제 ${adminNumber(d.problem_count)}건 모두 보기</a></div>
       ${problems}
     </section>`;
+  if (d.pending_count) adminAccessRequests($(".admin-access-slot", body));
   const chart = $(".admin-chart", body);
   chart.querySelectorAll("[data-metric]").forEach((b) => b.addEventListener("click", () => {
     adminUi.metric = b.dataset.metric;
@@ -322,6 +398,8 @@ function adminUsers(body) {
         `<option value="${k}"${f.sort === k ? " selected" : ""}>${label}</option>`).join("")}</select></label>
       <label class="check"><input type="checkbox" name="has_problem"${f.has_problem ? " checked" : ""}><span>문제 있음만</span></label>
     </form>
+    <div class="admin-seg admin-access-filter" role="group" aria-label="권한">${[["", "전체"], ...Object.entries(ADMIN_ACCESS).map(([k, a]) => [k, a.label])].map(([k, label]) =>
+      `<button class="btn small" type="button" data-access-filter="${k}" aria-pressed="${f.access === k}">${label}</button>`).join("")}</div>
     <section class="panel admin-box" aria-labelledby="admin-users-title">
       <div class="admin-box-head"><h2 id="admin-users-title" tabindex="-1">사용자 <span class="admin-count" id="admin-user-count" role="status"></span></h2></div>
       <div id="admin-user-list"></div>
@@ -333,6 +411,7 @@ function adminUsers(body) {
     if (f.q.trim()) params.set("q", f.q.trim());
     if (f.lms_status) params.set("lms_status", f.lms_status);
     if (f.has_problem) params.set("has_problem", "true");
+    if (f.access) params.set("access", f.access);
     adminState(list, "loading", { rows: 4 });
     adminRequest(`/admin/users?${params}`, (d) => drawUsers(list, d, load), "users")
       .catch((err) => adminState(list, "error", { message: err.message, retry: load }));
@@ -352,6 +431,15 @@ function adminUsers(body) {
     clearTimeout(adminUi.searchTimer);
     adminUi.searchTimer = setTimeout(() => { if (nav === adminUi.nav) apply(); }, 300);
   });
+  $(".admin-access-filter", body).addEventListener("click", (e) => {
+    const b = e.target.closest("[data-access-filter]");
+    if (!b) return;
+    f.access = b.dataset.accessFilter;
+    f.offset = 0;
+    body.querySelectorAll("[data-access-filter]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    load();
+  });
+  adminBindAccess(list, load);
   $("#admin-reload").addEventListener("click", load);
   // 학번 링크가 실제 컨트롤이고, 줄의 다른 곳을 눌러도 그 링크를 누른 것으로 친다
   list.addEventListener("click", (e) => {
@@ -370,6 +458,7 @@ function drawUsers(list, d, load) {
   } else {
     list.innerHTML = adminTable([
       { label: "학번", render: (u) => adminUserLink(u.student_id), cls: "admin-nowrap" },
+      { label: "권한", render: (u) => adminAccessTag(u.access_status) },
       { label: "최근 로그인", render: (u) => adminWhen(u.last_login_at, "로그인 기록 없음"), cls: "admin-nowrap" },
       { label: "LMS", render: (u) => adminLmsTag(u.lms_status) },
       { label: "과목", render: (u) => adminNumber(u.course_count) },
@@ -378,6 +467,7 @@ function drawUsers(list, d, load) {
       { label: "다운로드", render: (u) => adminNumber(u.download_count) },
       { label: "전사", render: (u) => adminNumber(u.transcript_count) },
       { label: "알림", render: (u) => u.channels.length ? esc(u.channels.map((c) => ADMIN_CHANNEL[c] || c).join(", ")) : "없음" },
+      { label: "권한 관리", render: (u) => adminAccessButtons(u.student_id, u.access_status, u.is_admin) || "관리자 계정" },
     ], d.users, { caption: "사용자 목록", cls: "admin-users" });
   }
   if (d.total > ADMIN_USERS_LIMIT || f.offset) {
@@ -426,6 +516,7 @@ function adminUserDetail(body, id, tabKey) {
       if (tab === "lms") adminState(box, "error", { message: err.message, retry: loadSummary });
     });
   };
+  adminBindAccess(head, () => { detail.summary = null; loadSummary(); });
   if (detail.summary) {
     drawUserHead(head, detail.summary);
     if (tab === "lms") drawUserLms(box, detail.summary);
@@ -447,7 +538,7 @@ function drawUserHead(head, s) {
   const kpi = (label, value, cls = "") =>
     `<div class="panel admin-kpi${cls}"><span class="admin-kpi-label">${label}</span><strong>${adminNumber(value)}</strong></div>`;
   head.innerHTML = `
-    <div class="admin-who"><h2>${esc(s.student_id)}</h2>${s.is_admin ? adminTag("관리자", "warn") : adminTag("일반 사용자")}</div>
+    <div class="admin-who"><h2>${esc(s.student_id)}</h2>${s.is_admin ? adminTag("관리자", "warn") : adminTag("일반 사용자")}${adminAccessTag(s.access_status)}${adminAccessButtons(s.student_id, s.access_status, s.is_admin)}</div>
     <p class="admin-sub">가입 ${adminDay(s.created_at)} · 로그인 ${adminNumber(s.login_count)}회 · 최근 로그인 ${adminWhen(s.last_login_at, "기록 없음")} · 이용 동의 ${adminDay(s.consent_at)}</p>
     <p class="admin-sub">${adminLmsTag(lms?.status, "LMS ")}${lms ? ` 동기화 ${adminWhen(lms.last_synced_at, "기록 없음")}` : ""}
       ${lms?.last_error ? `<span class="admin-err">마지막 오류: ${esc(lms.last_error)}</span>` : ""}</p>
