@@ -319,7 +319,13 @@ async def problems(
     if student_id:
         filtered = filtered.where(union_sub.c.student_id == student_id)
     if lms_course_id is not None:
-        filtered = filtered.where(union_sub.c.lms_course_id == lms_course_id)
+        # 전체·자동 묶음은 lms_course_id가 비어 있다. 재생 탭처럼 묶음 안 job 중 하나라도 그 과목이면 맞는다.
+        batch_has_course = exists().where(
+            PlaybackJob.batch_id == union_sub.c.ref_id, PlaybackJob.lms_course_id == lms_course_id)
+        filtered = filtered.where(or_(
+            union_sub.c.lms_course_id == lms_course_id,
+            and_(union_sub.c.kind == "batch", batch_has_course),
+        ))
     sub = filtered.subquery()
     counts = {"playback": 0, "batch": 0, "lms": 0, "resolve": 0}
     counts.update(dict((await db.execute(select(sub.c.kind, func.count()).group_by(sub.c.kind))).all()))

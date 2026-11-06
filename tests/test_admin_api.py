@@ -155,6 +155,33 @@ async def test_failure_counts_only_attempted_jobs(env, monkeypatch):
     assert line["title"] == "all"  # 묶음 줄의 제목은 범위 값이고, 화면이 이름(전체 재생 묶음)을 붙인다
 
 
+async def test_problems_course_filter_matches_jobs_in_all_and_auto_batches(env, monkeypatch):
+    api, admin, _ = await _admin(env, monkeypatch)
+    t = _recent()
+    async with db_base.sessionmaker()() as db:
+        everything = _batch(2, scope="all", status="failed", created=t, finished_at=t, error="중단됨")
+        auto = _batch(2, scope="auto", status="failed", created=t, finished_at=t, error="자동 중단")
+        course = _batch(2, scope="course", lms_course_id=7, status="failed", created=t, finished_at=t, error="과목 중단")
+        db.add_all([everything, auto, course])
+        await db.flush()
+        db.add_all([
+            _job(everything.id, 2, "failed", n=1, lms_course_id=5),  # 시도 전 중단: 재생 문제는 아니다
+            _job(everything.id, 2, "done", n=2, lms_course_id=6, started_at=t, finished_at=t),
+            _job(auto.id, 2, "failed", n=3, lms_course_id=6),
+            _job(course.id, 2, "failed", n=4, lms_course_id=7),
+        ])
+        await db.commit()
+
+    def scopes(body):
+        return sorted(p["title"] for p in body["problems"] if p["kind"] == "batch")
+    five = (await api.get("/admin/problems?lms_course_id=5", headers=admin)).json()
+    assert scopes(five) == ["all"] and five["counts"]["batch"] == 1
+    assert scopes((await api.get("/admin/problems?lms_course_id=6", headers=admin)).json()) == ["all", "auto"]
+    assert scopes((await api.get("/admin/problems?lms_course_id=7", headers=admin)).json()) == ["course"]
+    assert (await api.get("/admin/problems?lms_course_id=8", headers=admin)).json()["total"] == 0
+    assert scopes((await api.get("/admin/problems", headers=admin)).json()) == ["all", "auto", "course"]
+
+
 async def test_problems_lms_ignores_period_and_resolve_respects_it(env, monkeypatch):
     api, admin, _ = await _admin(env, monkeypatch)
     now = datetime.now(UTC)
