@@ -192,13 +192,51 @@ async def test_stale_response_does_not_overwrite(dashboard):  # noqa: F811
     await page.goto(BASE + "#admin/overview")
     await asyncio.wait_for(requested.wait(), timeout=5)
     await expect(page.locator("#view [aria-busy='true']")).to_have_count(1)
-    await page.locator("#view nav.admin-tabs").get_by_role("link", name="활동").click()
-    async with page.expect_response("**/admin/overview?*"):
+    tabs = page.locator("#view nav.admin-tabs")
+    await tabs.get_by_role("link", name="활동").click()
+    await expect(tabs.get_by_role("link", name="활동")).to_have_attribute("aria-current", "page")
+    async with page.expect_event("requestfinished", lambda r: "/admin/overview?" in r.url):
         release.set()
-    await page.wait_for_timeout(100)
+    await page.evaluate("() => new Promise((r) => requestAnimationFrame(() => setTimeout(() => setTimeout(r))))")
     await expect(page).to_have_url(BASE + "#admin/activity")
     await expect(page.locator("#view")).to_contain_text("준비 중")
     await expect(page.locator("#view .admin-kpi")).to_have_count(0)
+    # 늦은 응답이 살아 있는 탭 이름(문제 N건)을 바꾸지 않는다
+    await expect(tabs.locator('[data-admin-tab="problems"]')).to_have_text("문제")
+
+
+async def test_stale_period_response_does_not_overwrite_newer(dashboard):  # noqa: F811
+    page, data = dashboard
+    as_admin(data)
+    week = overview(days=7, active_users=48, problem_count=15)
+    month = overview(days=30, active_users=99, problem_count=21)
+    held, release = asyncio.Event(), asyncio.Event()
+
+    async def by_period(route):
+        if "days=7" in route.request.url:
+            held.set()
+            await release.wait()
+            await route.fulfill(json=week)
+        else:
+            await route.fulfill(json=month)
+
+    await page.route("**/admin/overview?*", by_period)
+    await page.goto(BASE + "#admin/overview")
+    await asyncio.wait_for(held.wait(), timeout=5)
+    view = page.locator("#view")
+    async with page.expect_event("requestfinished", lambda r: "days=30" in r.url):
+        await view.get_by_label("기간").select_option("30")
+    kpis = view.locator(".admin-kpi")
+    await expect(kpis.nth(0)).to_contain_text("99")
+    await expect(view.locator(".admin-bar")).to_have_count(30)
+    async with page.expect_event("requestfinished", lambda r: "days=7" in r.url):
+        release.set()
+    await page.evaluate("() => new Promise((r) => requestAnimationFrame(() => setTimeout(() => setTimeout(r))))")
+    await expect(kpis.nth(0)).to_contain_text("99")
+    await expect(kpis.nth(0)).not_to_contain_text("48")
+    await expect(view.locator(".admin-bar")).to_have_count(30)
+    await expect(view.locator("nav.admin-tabs [data-admin-tab='problems']")).to_have_text("문제 21건")
+    await expect(view.get_by_label("기간")).to_have_value("30")
 
 
 async def test_admin_shared_pieces(dashboard):  # noqa: F811

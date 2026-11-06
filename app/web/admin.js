@@ -171,7 +171,7 @@ function drawOverview(body, d) {
     } },
   ], d.recent_problems, { caption: "확인이 필요한 문제" }) : '<p class="admin-empty">확인할 문제가 없습니다.</p>';
   body.innerHTML = `
-    <section class="admin-kpis" aria-label="주요 지표 (최근 ${d.days}일)">
+    <section class="admin-kpis" aria-label="주요 지표 (최근 ${adminNumber(d.days)}일)">
       ${kpi("활동 사용자", adminNumber(d.active_users), `전체 ${adminNumber(d.total_users)}명`)}
       ${kpi("재생한 강의", adminNumber(d.playback_done), `${fmtDuration(d.playback_seconds)}${d.playback_auto ? ` · 자동 ${adminNumber(d.playback_auto)}개` : ""}`)}
       ${kpi("다운로드 기록", adminNumber(d.downloads), "완료 보고 또는 링크 발급 횟수")}
