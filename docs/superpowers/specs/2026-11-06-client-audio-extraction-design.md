@@ -83,7 +83,7 @@
 새 모듈 Worker(예: `app/web/audio.worker.mjs`)가 한 작업을 맡는다.
 
 1. CDN mp4를 Range 요청으로 조각(예: 2~4MB)씩 받는다.
-2. mp4box.js(cdn.jsdelivr.net, 버전 고정 — `whisper.worker.js`의 transformers.js 로딩과 같은 방식)로 오디오 트랙만 꺼낸다. 영상 트랙 샘플은 버린다.
+2. mp4box.js(2.4.1 고정, 테스트가 외부 네트워크 없이 돌도록 `app/web/vendor/`에 넣는다)로 오디오 트랙만 꺼낸다. 영상 트랙 샘플은 버린다.
 3. WebCodecs `AudioDecoder`로 AAC를 디코딩한다(트랙의 `esds`로 `description` 구성).
 4. 채널을 평균해 모노로, 16kHz로 리샘플링해 Float32 조각을 만든다.
 5. 조각을 whisper 워커로 넘긴다. 지금 `pumpAudio`의 `READ_AHEAD_SECONDS` 역압(Whisper보다 60초 이상 앞서면 받기를 멈춤)을 그대로 지킨다.
