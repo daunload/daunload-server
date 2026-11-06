@@ -13,7 +13,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.db import base as db_base
 from app.db.base import Base
-from app.db.models import AnnouncementRow, NotificationLog
+from app.db.models import AnnouncementRow, LmsCredential, NotificationLog
 from app.lms.auth import LmsSession
 from app.main import create_app
 
@@ -141,27 +141,27 @@ async def test_first_login_requires_consent_and_verifies_with_lms(env):
     assert (await api.get("/me", headers=h)).json()["student_id"] == "20201234"
     cred = (await api.get("/lms/credentials", headers=h)).json()
     assert cred["status"] == "ok" and cred["student_id"] == "20201234"
-    async with db_base.sessionmaker()() as db:
-        from app.db.models import LmsCredential
-        assert "right" not in (await db.scalars(select(LmsCredential))).one().password_enc
     assert (await api.get("/courses")).status_code == 401
 
 
-async def test_next_login_uses_hash_and_password_change_rechecks_lms(env):
+async def test_every_login_is_checked_by_school_and_password_is_never_stored(env):
+    from app.db.models import LmsCredential, User
+    from app.security import decrypt
+
     api, _ = env
     await _signup(api)
     calls = len(api.lms_logins)
     r = await api.post("/auth/login", data={"username": "20201234", "password": "right"})
-    assert r.status_code == 200 and len(api.lms_logins) == calls  # LMS 접속 없음
+    assert r.status_code == 200 and len(api.lms_logins) == calls + 1  # 저장된 해시 없이 매번 학교에서 확인
 
-    # 학교 비밀번호를 바꾼 경우: 해시가 다르니 LMS로 확인하고 갱신한다
     api.school_password["current"] = "new-right"
-    r = await api.post("/auth/login", data={"username": "20201234", "password": "new-right"})
-    assert r.status_code == 200 and api.lms_logins[-1] == "new-right"
-    calls = len(api.lms_logins)
-    assert (await api.post("/auth/login", data={"username": "20201234", "password": "new-right"})).status_code == 200
-    assert len(api.lms_logins) == calls
     assert (await api.post("/auth/login", data={"username": "20201234", "password": "right"})).status_code == 401
+    assert (await api.post("/auth/login", data={"username": "20201234", "password": "new-right"})).status_code == 200
+
+    assert not hasattr(User, "password_hash") and not hasattr(LmsCredential, "password_enc")
+    async with db_base.sessionmaker()() as db:
+        cred = (await db.scalars(select(LmsCredential))).one()
+        assert "right" not in decrypt(cred.session_enc)
 
 
 async def test_failed_logins_are_throttled(env):
@@ -349,14 +349,13 @@ async def test_site_login_activity_counts_success_only(env, monkeypatch):
     api.school_password["current"] = "changed"
     r = await api.post("/auth/login", data={"username": "20201234", "password": "changed"})
     assert r.status_code == 200
-    assert (await api.get("/admin/users", headers=admin)).status_code == 401  # 비밀번호가 바뀌면 이전 토큰은 폐기
     admin = {"Authorization": f"Bearer {r.json()['access_token']}"}
     row = (await api.get("/admin/users", headers=admin)).json()["users"][0]
     assert row["login_count"] == 3
     assert row["last_login_at"] >= first["last_login_at"]
     # Legacy users have no invented login date; missing credentials are allowed.
     async with db_base.sessionmaker()() as db:
-        db.add(User(student_id="legacy", password_hash="unused", consent_at=datetime.now(UTC)))
+        db.add(User(student_id="legacy", consent_at=datetime.now(UTC)))
         await db.commit()
     legacy = (await api.get("/admin/users?q=legacy", headers=admin)).json()["users"][0]
     assert legacy["last_login_at"] is None and legacy["login_count"] == 0
@@ -437,15 +436,20 @@ async def test_invalidated_lms_credentials_force_lms_check(env):
     assert r.status_code == 401 and len(api.lms_logins) == calls + 1
 
 
-async def test_password_change_revokes_existing_tokens(env):
-    api, _ = env
-    old = await _signup(api)
-    assert (await api.get("/me", headers=old)).status_code == 200
-    api.school_password["current"] = "new-right"
-    r = await api.post("/auth/login", data={"username": "20201234", "password": "new-right"})
-    new = {"Authorization": f"Bearer {r.json()['access_token']}"}
-    assert (await api.get("/me", headers=old)).status_code == 401
-    assert (await api.get("/me", headers=new)).status_code == 200
+async def test_relogin_after_sso_expiry_restores_access_and_syncs(env):
+    from app.services import lms_access
+
+    api, queue = env
+    h = await _signup(api)
+    async with db_base.sessionmaker()() as db:
+        cred = await db.get(LmsCredential, 1)
+        await lms_access._mark(db, cred, "invalid", lms_access.RELOGIN_MESSAGE)
+    assert (await api.get("/lms/credentials", headers=h)).json()["status"] == "invalid"
+    before = len(queue.jobs)
+    r = await api.post("/auth/login", data={"username": "20201234", "password": "right"})
+    assert r.status_code == 200
+    assert (await api.get("/lms/credentials", headers=h)).json()["status"] == "ok"
+    assert queue.jobs[before:] == [("sync_user_job", (1,), "sync:1")]
 
 
 async def test_security_headers_on_dashboard_and_api(env):

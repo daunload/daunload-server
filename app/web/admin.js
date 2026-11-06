@@ -26,7 +26,7 @@ const ADMIN_BATCH_STATUS = {
   queued: { label: "대기", tone: "" }, running: { label: "진행 중", tone: "" }, done: { label: "완료", tone: "ok" },
   partial: { label: "일부 실패", tone: "bad" }, failed: { label: "실패", tone: "bad" }, cancelled: { label: "취소", tone: "" },
 };
-const ADMIN_LMS_STATUS = { ok: { label: "정상", tone: "ok" }, invalid: { label: "비밀번호가 바뀜", tone: "bad" }, error: { label: "최근 오류", tone: "warn" } };
+const ADMIN_LMS_STATUS = { ok: { label: "정상", tone: "ok" }, invalid: { label: "다시 로그인 필요", tone: "bad" }, error: { label: "최근 오류", tone: "warn" } };
 /** 사용 권한(User.access_status)의 화면 이름. 사용자 탭의 필터 순서이기도 하다. */
 const ADMIN_ACCESS = {
   approved: { label: "승인됨", tone: "ok" }, pending: { label: "대기 중", tone: "warn" }, rejected: { label: "거절됨", tone: "bad" },

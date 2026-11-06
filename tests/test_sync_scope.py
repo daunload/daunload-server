@@ -72,9 +72,9 @@ async def test_full_sync_still_deactivates_everything_missing(env):
 
 
 async def _add_user(db, uid, sid, access, auto=True, active=True, due=True):
-    db.add(User(id=uid, student_id=sid, password_hash="x", consent_at=utcnow(), access_status=access))
+    db.add(User(id=uid, student_id=sid, consent_at=utcnow(), access_status=access))
     await db.flush()
-    db.add(LmsCredential(user_id=uid, student_id=sid, password_enc="x", status="ok",
+    db.add(LmsCredential(user_id=uid, student_id=sid, status="ok",
                          next_sync_at=utcnow() + timedelta(minutes=-1 if due else 60)))
     if auto is not None:
         db.add(CourseRow(user_id=uid, lms_course_id=100 + uid, term_id=1, name="c", auto_play=auto, active=active))

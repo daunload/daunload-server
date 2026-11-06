@@ -86,7 +86,7 @@ async def _run_sync(user_id: int, only: str | None) -> str:
         try:
             result = await sync_user(db, user_id, course_ids=course_ids)
         except InvalidCredentials:
-            await notify_user(db, user_id, "🔒 LMS 로그인 실패: 비밀번호가 바뀌었다면 계정을 다시 등록하세요.",
+            await notify_user(db, user_id, "🔒 학교 로그인이 만료되었습니다. 사이트에서 다시 로그인하면 동기화와 자동 수강이 이어집니다.",
                               key=f"login-invalid:{utcnow():%Y%m%d}")
             return "invalid"
         except LmsError as e:

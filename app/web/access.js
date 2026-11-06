@@ -109,7 +109,7 @@ $("#access-delete").addEventListener("click", async (e) => {
   }
   const ok = await confirmDialog({
     title: "계정을 삭제할까요?",
-    body: ["저장된 학교 비밀번호와 동기화한 과목·할 일·공지, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다."],
+    body: ["저장된 학교 로그인 세션과 동기화한 과목·할 일·공지, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다."],
     requireText: accessMe.student_id, requireLabel: "확인을 위해 학번을 입력하세요",
     confirmLabel: "계정 삭제", danger: true,
   });

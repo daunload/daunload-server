@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://lms:lms@localhost:5432/lms"
     redis_url: str = "redis://localhost:6379/0"
 
-    # LMS 비밀번호 암호화용 Fernet 키 (Fernet.generate_key()로 생성)
+    # 학교 로그인 세션 암호화용 Fernet 키 (Fernet.generate_key()로 생성)
     fernet_key: str = ""
     jwt_secret: str = "change-me"
     jwt_expire_minutes: int = 60 * 24

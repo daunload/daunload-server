@@ -11,7 +11,7 @@ from starlette.routing import Mount
 
 from app.config import get_settings
 from app.db import base as db_base
-from app.db.models import NotificationChannel, PlaybackBatch, SavedVideo, User
+from app.db.models import LmsCredential, NotificationChannel, PlaybackBatch, SavedVideo, User
 from app.security import create_download_token, encrypt
 from app.services.access import access_retry_at, has_access
 from tests.test_api import _signup, env  # noqa: F401
@@ -153,11 +153,13 @@ async def test_login_does_not_queue_sync_for_unapproved(env):
     await _signup(api, "20209999")
     assert [j for j in queue.jobs if j[0] == "sync_user_job"] == []
 
-    # 학교 비밀번호가 바뀌어 다시 LMS로 확인하는 로그인: 승인된 사용자만 동기화한다.
+    # 학교 로그인이 만료된 뒤 다시 연동하는 로그인: 승인된 사용자만 동기화한다.
     await _set_status("20201234", "approved")
-    api.school_password["current"] = "new"
+    async with db_base.sessionmaker()() as db:
+        await db.execute(update(LmsCredential).values(status="invalid", session_enc=None))
+        await db.commit()
     for sid in ("20201234", "20209999"):
-        r = await api.post("/auth/login", data={"username": sid, "password": "new"})
+        r = await api.post("/auth/login", data={"username": sid, "password": "right"})
         assert r.status_code == 200, r.text
     assert [j for j in queue.jobs if j[0] == "sync_user_job"] == [("sync_user_job", (1,), "sync:1")]
 

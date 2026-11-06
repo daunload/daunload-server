@@ -306,7 +306,7 @@ function renderSync() {
   const c = state.cred;
   el.classList.remove("bad");
   if (!c) { el.textContent = "LMS 연결 정보가 없습니다"; return; }
-  if (c.status === "invalid") { el.textContent = "학교 비밀번호가 바뀌었습니다. 다시 로그인하세요."; el.classList.add("bad"); return; }
+  if (c.status === "invalid") { el.textContent = "학교 로그인이 만료되었습니다. 다시 로그인하세요."; el.classList.add("bad"); return; }
   const who = state.me?.student_id ? `${state.me.student_id} ` : "";
   el.textContent = c.last_synced_at ? `${who}마지막 동기화 ${fmtDate(new Date(c.last_synced_at))}` : `${who}첫 동기화를 기다리는 중`;
   if (c.status === "error") { el.textContent += " (최근 동기화 실패)"; el.classList.add("bad"); }
@@ -511,7 +511,7 @@ function viewError(message, retry) {
 
 function needCred() {
   if (state.cred) return false;
-  $("#view").innerHTML = `<div class="panel empty"><p>LMS 연결 정보가 없습니다. 로그아웃한 뒤 학교 비밀번호로 다시 로그인하세요.</p></div>`;
+  $("#view").innerHTML = `<div class="panel empty"><p>LMS 연결 정보가 없습니다. 로그아웃한 뒤 다시 로그인하세요.</p></div>`;
   return true;
 }
 
@@ -1523,7 +1523,7 @@ async function viewNotifications() {
 
 function viewAccount() {
   const c = state.cred;
-  const statusName = { ok: "정상", invalid: "비밀번호가 바뀜", error: "최근 오류" };
+  const statusName = { ok: "정상", invalid: "다시 로그인 필요", error: "최근 오류" };
   $("#view").innerHTML = `
     <div class="view-head"><h1>계정</h1></div>
     <div class="panel"><div class="panel-body">
@@ -1532,17 +1532,17 @@ function viewAccount() {
       ${c ? `<p class="muted small-text">마지막 LMS 로그인 ${c.last_login_at ? fmtDate(new Date(c.last_login_at)) : "없음"},
         다음 자동 동기화 ${c.next_sync_at ? fmtDate(new Date(c.next_sync_at)) : "예정 없음"}</p>` : ""}
       ${c?.last_error ? `<p class="error">${esc(c.last_error)}</p>` : ""}
-      <p class="small-text">학교 비밀번호를 바꿨다면 로그아웃한 뒤 새 비밀번호로 다시 로그인하세요. 저장된 정보가 함께 바뀝니다.</p>
+      <p class="small-text">학교 로그인이 만료되면 자동 수강과 동기화가 멈춥니다. 로그아웃한 뒤 다시 로그인하면 이어집니다. 학교 비밀번호는 저장하지 않습니다.</p>
     </div></div>
     <div class="panel"><div class="panel-body">
       <h3>계정 삭제</h3>
-      <p class="muted small-text">저장된 학교 비밀번호와 동기화한 과목·할 일·공지, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다.</p>
+      <p class="muted small-text">저장된 학교 로그인 세션과 동기화한 과목·할 일·공지, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다.</p>
       <div><button class="btn danger" id="delete-me">계정 삭제</button></div>
     </div></div>`;
   $("#delete-me").addEventListener("click", async () => {
     const ok = await confirmDialog({
       title: "계정을 삭제할까요?",
-      body: ["저장된 학교 비밀번호와 동기화한 과목·할 일·공지, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다."],
+      body: ["저장된 학교 로그인 세션과 동기화한 과목·할 일·공지, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다."],
       requireText: state.me.student_id, requireLabel: "확인을 위해 학번을 입력하세요",
       confirmLabel: "계정 삭제", danger: true,
     });

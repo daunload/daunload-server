@@ -16,7 +16,6 @@ dependencies = [
     "arq>=0.26",
     "playwright>=1.47",
     "pyjwt>=2.9",
-    "pwdlib[argon2]>=0.2",
     "python-multipart>=0.0.32",
 ]
 

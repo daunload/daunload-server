@@ -401,7 +401,7 @@ async def test_users_table_search_filters_sort(dashboard):  # noqa: F811
     await expect(rows.nth(0)).to_contain_text("58 / 3")
     await expect(rows.nth(0)).to_contain_text("Discord")
     await expect(rows.nth(0)).to_contain_text("정상")
-    await expect(rows.nth(1)).to_contain_text("비밀번호가 바뀜")
+    await expect(rows.nth(1)).to_contain_text("다시 로그인 필요")
     await expect(rows.nth(1)).to_contain_text("없음")
     await expect(rows.nth(2)).to_contain_text("연결 안 함")
     await expect(rows.nth(2)).to_contain_text("Telegram, Discord")
@@ -468,7 +468,7 @@ async def test_detail_header_and_counts(dashboard):  # noqa: F811
     await expect(head).to_contain_text("로그인 41회")
     await expect(head).to_contain_text("이용 동의 2026/03/04")
     await expect(head).to_contain_text("일반 사용자")
-    await expect(head).to_contain_text("LMS 비밀번호가 바뀜")
+    await expect(head).to_contain_text("LMS 다시 로그인 필요")
     await expect(head).to_contain_text("학교 비밀번호가 바뀌었습니다")
     sums = head.locator(".admin-kpi")
     await expect(sums).to_have_count(5)
@@ -495,7 +495,7 @@ TABS = [
     ("저장 영상", "saved", "saved-videos", ["os-06.mp4", "주소 있음", "주소 없음", "권한 없음", "350MB"], True),
     ("전사", "transcripts", "transcripts", ["whisper-small", "45분"], False),
     ("알림", "notifications", "notifications", ["Discord", "사용 중", "deadline:42:24h"], True),
-    ("LMS", "lms", None, ["비밀번호가 바뀜", "학교 비밀번호가 바뀌었습니다", "예정 없음"], False),
+    ("LMS", "lms", None, ["다시 로그인 필요", "학교 비밀번호가 바뀌었습니다", "예정 없음"], False),
 ]
 
 

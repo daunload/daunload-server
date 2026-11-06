@@ -315,9 +315,9 @@ Chrome 재생과 ffmpeg 변환이 겹칠 때의 CPU·메모리도 확인한다. 
 백업 스크립트는 실행할 때마다 파일 두 개를 만든다.
 
 - `ssu-lms-날짜.tar.gz`: DB dump, Compose·Caddy 설정
-- `ssu-lms-secrets-날짜.env`: 운영 `.env`. 저장된 학교 비밀번호를 복호화하는 `FERNET_KEY`가 들어 있다.
+- `ssu-lms-secrets-날짜.env`: 운영 `.env`. 저장된 학교 로그인 세션을 복호화하는 `FERNET_KEY`가 들어 있다.
 
-두 파일이 함께 유출되면 모든 사용자의 학교 비밀번호가 드러난다. 외부 사본은 서로 다른 곳에 보관한다
+두 파일이 함께 유출되면 모든 사용자의 학교 로그인 세션이 드러난다. 학교 비밀번호 저장을 중단하기 전(`f5a6b7c8d9e0` 마이그레이션 이전)에 만든 백업에는 암호화된 학교 비밀번호도 들어 있으므로 보존 기간이 지나면 폐기한다. 외부 사본은 서로 다른 곳에 보관한다
 (예: DB 백업은 외부 저장소, secrets 파일은 비밀번호 관리자).
 
 `/etc/ssu-lms/backup-age-recipients`에 [age](https://github.com/FiloSottile/age) 수신자(공개키)를 넣어 두면

@@ -25,7 +25,7 @@ def video(index=1, duration=60, deadline=None):
 
 async def add_user(student_id):
     async with sessionmaker()() as db:
-        user = User(student_id=student_id, password_hash="test", consent_at=utcnow())
+        user = User(student_id=student_id, consent_at=utcnow())
         db.add(user)
         await db.commit()
         return user.id

@@ -13,14 +13,15 @@ from app.api.schemas import CredentialsOut, TokenOut
 from app.db.base import utcnow
 from app.db.models import LmsCredential, User
 from app.lms.errors import InvalidCredentials, LmsError
-from app.security import create_access_token, hash_password, verify_password
+from app.lms import auth
+from app.security import create_access_token
 from app.services.access import access_retry_at, has_access
 from app.services.activity import bump_daily
-from app.services.lms_access import save_credentials
+from app.services.lms_access import link_session
 
 router = APIRouter()
 
-# 틀린 비밀번호는 매번 학교 SSO로 확인 요청이 가므로, 학번별·IP별 실패 횟수를 제한한다.
+# 로그인은 매번 학교 SSO로 확인 요청이 가므로, 학번별·IP별 실패 횟수를 제한한다.
 STUDENT_ID = re.compile(r"\d{8,10}")
 MAX_FAILURES = 5  # 학번별
 MAX_IP_FAILURES = 20  # IP별(여러 학번에 비밀번호를 대입하는 것을 막는다)
@@ -74,7 +75,7 @@ limiter = AttemptLimiter()
 
 CONSENT_REQUIRED = {
     "code": "consent_required",
-    "message": "처음 로그인합니다. 학교 비밀번호 보관과 자동 재생 관련 안내에 동의해 주세요.",
+    "message": "처음 로그인합니다. 학교 로그인 세션 보관과 자동 재생 관련 안내에 동의해 주세요.",
 }
 
 
@@ -84,13 +85,13 @@ async def login(
     db: Db,
     queue: JobQueue,
     username: Annotated[str, Form(description="학번")],
-    password: Annotated[str, Form(description="통합 로그인 비밀번호")],
+    password: Annotated[str, Form(description="통합 로그인 비밀번호(학교 로그인에만 쓰고 저장하지 않는다)")],
     agree_terms: Annotated[bool, Form(description="첫 로그인 때 필요한 동의")] = False,
 ):
     """학번과 학교 비밀번호로 로그인한다.
 
-    저장된 해시와 맞고 저장된 LMS 계정이 유효하면 LMS에 접속하지 않는다. 처음이거나 비밀번호가 바뀐 경우,
-    또는 학교 비밀번호가 바뀌어 저장된 계정이 무효가 된 경우에는 실제 LMS 로그인으로 확인하고 계정 정보(암호화)를 저장·갱신한다.
+    매번 학교 SSO로 실제 로그인해 본인임을 확인한다. 비밀번호는 이 요청 안에서만 쓰고 DB·로그에 남기지 않으며,
+    발급받은 학습 세션(SSO 토큰 포함)만 암호화해 저장한다. 세션이 만료되면 서버가 SSO 토큰으로 다시 발급받는다.
     """
     student_id = username.strip()
     if not STUDENT_ID.fullmatch(student_id):
@@ -99,34 +100,32 @@ async def login(
     if limiter.blocked(limits):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "로그인 실패가 많습니다. 10분 뒤에 다시 시도하세요.")
     user = await db.scalar(select(User).where(User.student_id == student_id))
-    if user is not None and verify_password(password, user.password_hash):
-        cred = await db.get(LmsCredential, user.id)
-        if cred is not None and cred.status != "invalid":
-            return await _issue_token(db, user)
-
     if user is None and not agree_terms:
         raise HTTPException(status.HTTP_403_FORBIDDEN, CONSENT_REQUIRED)
     mark = limiter.acquire(limits)
     if mark is None:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "로그인 실패가 많습니다. 10분 뒤에 다시 시도하세요.")
-    if user is None:
-        user = User(student_id=student_id, password_hash="", consent_at=utcnow())
-        db.add(user)
-        await db.flush()
-    elif not verify_password(password, user.password_hash):
-        user.token_version += 1  # 학교 비밀번호가 바뀌었다: 예전 비밀번호로 받은 토큰을 폐기한다
     try:
-        user.password_hash = hash_password(password)
-        await save_credentials(db, user.id, student_id, password)  # LMS 로그인 확인 후 함께 커밋
+        async with auth.new_http_client() as http:
+            session = await auth.login(http, student_id, password)
     except InvalidCredentials as e:
-        await db.rollback()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "학번 또는 비밀번호가 틀렸습니다.") from e
     except LmsError as e:
-        await db.rollback()
         limiter.release(limits, mark)
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"LMS에 로그인하지 못했습니다: {e}") from e
+    finally:
+        del password
     limiter.release(limits, mark)
-    if has_access(user):  # 승인 전에는 계정 확인과 저장만 하고 학교 정보는 가져오지 않는다
+
+    if user is None:
+        user = User(student_id=student_id, consent_at=utcnow())
+        db.add(user)
+        await db.flush()
+    cred = await db.get(LmsCredential, user.id)
+    relinked = cred is None or cred.status != "ok"
+    await link_session(db, user.id, student_id, session)
+    # 처음 연동했거나 만료 후 다시 연동한 경우에만 동기화한다. 승인 전에는 학교 정보를 가져오지 않는다.
+    if relinked and has_access(user):
         await queue.enqueue("sync_user_job", user.id, job_id=f"sync:{user.id}")
     return await _issue_token(db, user)
 
@@ -158,7 +157,7 @@ async def _record_login(db: AsyncSession, user_id: int) -> None:
 
 @router.delete("/me", status_code=204, tags=["auth"])
 async def delete_me(user: AuthedUser, db: Db):
-    """계정과 저장된 학교 비밀번호, 동기화한 데이터를 모두 지운다."""
+    """계정과 저장된 학교 로그인 세션, 동기화한 데이터를 모두 지운다."""
     await db.delete(user)
     await db.commit()
 

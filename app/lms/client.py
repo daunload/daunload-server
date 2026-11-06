@@ -1,7 +1,8 @@
 """LMS 조회 클라이언트 (chlwhdtn03/LMS-API의 LmsCourseClient.kt 이식).
 
 - /learningx/* 는 Bearer 토큰, /api/v1/* 는 세션 쿠키로 인증한다.
-- 세션이 만료되면(401, 로그인 페이지로 리다이렉트) 자격증명이 있을 때 한 번 재로그인한다.
+- 세션이 만료되면(401, 로그인 페이지로 리다이렉트) 저장된 SSO 토큰으로 학습 세션을 한 번 다시 발급받는다.
+  학교 비밀번호는 보관하지 않는다.
 - 요청 사이에 최소 간격을 두어 학교 서버에 부담을 주지 않는다.
 """
 
@@ -38,12 +39,10 @@ class LmsClient:
         self,
         session: LmsSession,
         *,
-        password: str | None = None,
         http: httpx.AsyncClient | None = None,
         min_interval: float = 0.3,
     ) -> None:
         self.session = session
-        self._password = password
         self._http = http or auth.new_http_client()
         self._owns_http = http is None
         self._min_interval = min_interval
@@ -55,7 +54,8 @@ class LmsClient:
     async def login(cls, user_id: str, password: str, **kwargs) -> LmsClient:
         http = kwargs.pop("http", None) or auth.new_http_client()
         session = await auth.login(http, user_id, password)
-        client = cls(session, password=password, http=http, **kwargs)
+        del password
+        client = cls(session, http=http, **kwargs)
         client._owns_http = True
         return client
 
@@ -77,11 +77,14 @@ class LmsClient:
         """지금 세션 쿠키를 auth.import_cookies 형식으로 내보낸다(다른 클라이언트로 파일을 중계할 때)."""
         return auth.export_cookies(self._http.cookies)
 
+    def can_renew(self) -> bool:
+        return bool(self.session.sso_token or auth.sso_token(self.session.cookies))
+
     async def relogin(self) -> None:
-        if not self._password:
-            raise SessionExpired("세션이 만료되었고 재로그인할 자격증명이 없습니다.")
+        """SSO 토큰으로 학습 세션을 다시 발급받는다. SSO도 만료됐으면 SsoExpired."""
+        self.session = await auth.renew_from_sso(self.session)
         self._http.cookies.clear()
-        self.session = await auth.login(self._http, self.session.user_id, self._password)
+        auth.import_cookies(self._http, self.session.cookies)
 
     async def _throttle(self) -> None:
         async with self._lock:
@@ -100,7 +103,7 @@ class LmsClient:
             resp = await self._http.get(url, params=params, headers=h)
             if not _looks_expired(resp, bearer):
                 break
-            if attempt == 0 and self._password:
+            if attempt == 0 and self.can_renew():
                 await self.relogin()
                 continue
             raise SessionExpired(f"세션이 만료되었습니다 ({resp.status_code} {resp.url}).")

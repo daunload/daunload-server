@@ -14,13 +14,12 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     student_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
-    # 학교 비밀번호의 해시. 다음 로그인부터 LMS에 접속하지 않고 확인하는 데 쓴다.
-    password_hash: Mapped[str] = mapped_column(String(255))
-    consent_at: Mapped[datetime]  # 계정 정보 보관·학칙 안내 동의 시각
+    # 학교 비밀번호는 저장하지 않는다. 로그인할 때마다 학교 SSO로 확인한다.
+    consent_at: Mapped[datetime]  # 로그인 세션 보관·학칙 안내 동의 시각
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     last_login_at: Mapped[datetime | None]
     login_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
-    # 학교 비밀번호가 바뀌면 올린다. 이전 버전으로 발급한 토큰은 쓸 수 없다.
+    # 올리면 이전 버전으로 발급한 토큰은 쓸 수 없다.
     token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     # 관리자 승인 상태: none / pending / approved / rejected / revoked. 판단은 app.services.access.has_access 한 곳에서 한다.
     access_status: Mapped[str] = mapped_column(String(16), default="none", server_default="none")
@@ -36,9 +35,9 @@ class LmsCredential(Base):
 
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     student_id: Mapped[str] = mapped_column(String(32))
-    password_enc: Mapped[str] = mapped_column(Text)  # Fernet
-    session_enc: Mapped[str | None] = mapped_column(Text)  # Fernet(JSON LmsSession) 캐시
-    status: Mapped[str] = mapped_column(String(16), default="ok")  # ok / invalid / error
+    # Fernet(JSON LmsSession). 학습 세션과 SSO 토큰. 학교 비밀번호는 저장하지 않는다.
+    session_enc: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="ok")  # ok / invalid(다시 로그인 필요) / error
     last_error: Mapped[str | None] = mapped_column(Text)
     last_error_at: Mapped[datetime | None]
     last_login_at: Mapped[datetime | None]

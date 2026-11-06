@@ -2,21 +2,9 @@ from datetime import timedelta
 
 import jwt
 from cryptography.fernet import Fernet, InvalidToken
-from pwdlib import PasswordHash
 
 from app.config import get_settings
 from app.db.base import utcnow
-
-_hasher = PasswordHash.recommended()
-
-
-def hash_password(password: str) -> str:
-    return _hasher.hash(password)
-
-
-def verify_password(password: str, hashed: str) -> bool:
-    return _hasher.verify(password, hashed)
-
 
 def create_access_token(user_id: int, version: int = 0) -> str:
     s = get_settings()

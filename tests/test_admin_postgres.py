@@ -50,14 +50,14 @@ async def database(monkeypatch):
 async def _seed():
     now = utcnow()
     async with sessionmaker()() as db:
-        admin = User(student_id="20201234", password_hash="x", consent_at=now, last_login_at=now, login_count=1)
-        user = User(student_id="20209999", password_hash="x", consent_at=now, last_login_at=now - timedelta(days=1))
-        quiet = User(student_id="20205555", password_hash="x", consent_at=now)  # 로그인 기록 없음(NULL 정렬)
+        admin = User(student_id="20201234", consent_at=now, last_login_at=now, login_count=1)
+        user = User(student_id="20209999", consent_at=now, last_login_at=now - timedelta(days=1))
+        quiet = User(student_id="20205555", consent_at=now)  # 로그인 기록 없음(NULL 정렬)
         db.add_all([admin, user, quiet])
         await db.flush()
         db.add_all([
-            LmsCredential(user_id=admin.id, student_id="20201234", password_enc="x", status="ok"),
-            LmsCredential(user_id=user.id, student_id="20209999", password_enc="x", status="error",
+            LmsCredential(user_id=admin.id, student_id="20201234", status="ok"),
+            LmsCredential(user_id=user.id, student_id="20209999", status="error",
                           last_error="LMS 오류", last_error_at=now),
         ])
         ok_batch = PlaybackBatch(user_id=user.id, scope="all", status="done", created_at=now, started_at=now, finished_at=now)
@@ -157,7 +157,7 @@ async def test_every_admin_get_route_runs_on_postgres(database, monkeypatch):
 
 async def test_bump_daily_twice_sums(database):
     async with sessionmaker()() as db:
-        user = User(student_id="20201234", password_hash="x", consent_at=utcnow())
+        user = User(student_id="20201234", consent_at=utcnow())
         db.add(user)
         await db.commit()
         await bump_daily(db, user.id, logins=1)
@@ -188,7 +188,7 @@ async def test_access_queries_and_decisions_on_postgres(database, monkeypatch):
     now = utcnow()
     async with sessionmaker()() as db:
         users = {
-            sid: User(student_id=sid, password_hash="x", consent_at=now, access_status=st, access_requested_at=when,
+            sid: User(student_id=sid, consent_at=now, access_status=st, access_requested_at=when,
                       access_previous_status=prev)
             for sid, st, when, prev in (
                 ("20201234", "pending", now, "none"),  # 관리자는 대기 목록에 나오지 않는다
@@ -239,8 +239,8 @@ async def test_concurrent_decisions_on_same_pending_user(database, monkeypatch):
     monkeypatch.setattr(get_settings(), "admin_student_ids", ["20201234"])
     now = utcnow()
     async with sessionmaker()() as db:
-        admin = User(student_id="20201234", password_hash="x", consent_at=now)
-        target = User(student_id="20209999", password_hash="x", consent_at=now, access_status="pending",
+        admin = User(student_id="20201234", consent_at=now)
+        target = User(student_id="20209999", consent_at=now, access_status="pending",
                       access_requested_at=now, access_previous_status="none")
         db.add_all([admin, target])
         await db.commit()

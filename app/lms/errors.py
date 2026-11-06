@@ -6,6 +6,10 @@ class InvalidCredentials(LmsError):
     """학번 또는 비밀번호가 틀렸다."""
 
 
+class SsoExpired(InvalidCredentials):
+    """저장된 학교 SSO 토큰으로 학습 세션을 다시 발급받지 못했다. 사용자가 다시 로그인해야 한다."""
+
+
 class LmsParseError(LmsError):
     """LMS 페이지 구조가 예상과 다르다. 학교 사이트가 바뀌었을 가능성이 크다."""
 

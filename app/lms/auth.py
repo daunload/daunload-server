@@ -6,6 +6,9 @@ chlwhdtn03/LMS-API의 LmsAuthService.kt 흐름을 옮겼다.
 3. 그 페이지에서 Bearer 토큰(xn_api_token), 암호화된 비밀번호와 RSA 개인키, authenticity_token을 얻는다.
 4. 비밀번호를 복호화해서 Canvas에 로그인하고 세션 쿠키를 얻는다.
 5. /api/v1/users/{id}로 로그인한 사용자가 맞는지 확인한다.
+
+학교 비밀번호는 1단계에서만 쓰고 보관하지 않는다. 학습 세션(Canvas 쿠키, Bearer 토큰)이 만료되면
+renew_from_sso()가 저장된 sToken으로 2~5단계만 다시 수행한다(docs/lms-session-auth-verification.md).
 """
 
 from __future__ import annotations
@@ -20,7 +23,7 @@ import httpx
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
-from app.lms.errors import InvalidCredentials, LmsError, LmsParseError
+from app.lms.errors import InvalidCredentials, LmsError, LmsParseError, SsoExpired
 
 CANVAS_BASE_URL = "https://canvas.ssu.ac.kr"
 LMS_BASE_URL = "https://lms.ssu.ac.kr"
@@ -44,13 +47,17 @@ class LmsSession:
     user_id: str
     bearer_token: str
     cookies: list[dict[str, str]] = field(default_factory=list)
+    # 학교 SSO 토큰. 학습 세션이 만료되면 비밀번호 없이 다시 발급받는 데 쓴다.
+    sso_token: str = ""
 
     def to_dict(self) -> dict:
-        return {"user_id": self.user_id, "bearer_token": self.bearer_token, "cookies": self.cookies}
+        return {"user_id": self.user_id, "bearer_token": self.bearer_token, "cookies": self.cookies,
+                "sso_token": self.sso_token}
 
     @classmethod
     def from_dict(cls, data: dict) -> LmsSession:
-        return cls(user_id=data["user_id"], bearer_token=data["bearer_token"], cookies=data.get("cookies", []))
+        return cls(user_id=data["user_id"], bearer_token=data["bearer_token"], cookies=data.get("cookies", []),
+                   sso_token=data.get("sso_token", ""))
 
 
 def new_http_client(**kwargs) -> httpx.AsyncClient:
@@ -164,14 +171,28 @@ def import_cookies(client: httpx.AsyncClient, cookies: list[dict[str, str]]) -> 
         client.cookies.set(c["name"], c["value"], domain=c["domain"], path=c.get("path", "/"))
 
 
+SSO_COOKIE_DOMAINS = {"smartid.ssu.ac.kr", "ssu.ac.kr"}
+
+
+def sso_cookies(cookies: list[dict]) -> list[dict]:
+    """학교 SSO와 공통 도메인 쿠키만 남긴다. Canvas·LMS 포털 인증은 버린다."""
+    return [c.copy() for c in cookies if c["domain"].lstrip(".") in SSO_COOKIE_DOMAINS]
+
+
+def sso_token(cookies: list[dict]) -> str:
+    return next((c["value"] for c in cookies if c["name"] == "sToken"), "")
+
+
 # ---------------------------------------------------------------------------
 # 로그인
 # ---------------------------------------------------------------------------
 
 
 async def login(client: httpx.AsyncClient, user_id: str, password: str) -> LmsSession:
+    """학교 비밀번호로 SSO에 로그인하고 학습 세션을 발급받는다. 비밀번호는 이 함수 밖으로 나가지 않는다."""
     # 1. SSO
     sso = await client.post(SSO_LOGIN_URL, data={"userid": user_id, "pwd": password})
+    del password
     s_token = extract_sso_token(sso.text) or extract_sso_token_from_cookies(
         _all_set_cookies(sso)
     )
@@ -180,9 +201,54 @@ async def login(client: httpx.AsyncClient, user_id: str, password: str) -> LmsSe
 
     # 2. LMS 게이트웨이
     gateway = await client.get(LMS_GATEWAY_URL, params={"sToken": s_token, "sIdno": user_id})
-    redirect_url = extract_iframe_src(gateway.text)
+    redirect_url = _canvas_handoff_url(gateway)
+    return await _canvas_login(client, user_id, redirect_url, s_token)
 
-    # 3. Canvas 로그인 페이지 (Bearer 토큰, 암호화된 비밀번호)
+
+async def renew_from_sso(session: LmsSession) -> LmsSession:
+    """저장된 SSO 토큰으로 학습 세션(Canvas 쿠키, Bearer 토큰)을 새로 발급받는다. 학교 비밀번호는 쓰지 않는다.
+
+    SSO가 더 이상 유효하지 않으면 SsoExpired(사용자가 다시 로그인해야 함),
+    네트워크·학교 서버 오류는 LmsError(일시적, 세션은 그대로 둔다)를 낸다.
+    """
+    s_token = session.sso_token or sso_token(session.cookies)
+    if not s_token:
+        raise SsoExpired("학교 로그인 정보가 없습니다. 다시 로그인해 주세요.")
+    async with new_http_client() as client:
+        # 이전 Canvas·포털 쿠키는 넣지 않는다: 성공은 SSO 핸드오프에서만 나와야 한다.
+        import_cookies(client, sso_cookies(session.cookies))
+        try:
+            gateway = await client.get(LMS_GATEWAY_URL, params={"sToken": s_token, "sIdno": session.user_id})
+        except httpx.HTTPError as e:
+            raise LmsError(f"LMS 게이트웨이에 연결하지 못했습니다 ({type(e).__name__}).") from e
+        if gateway.status_code >= 500:
+            raise LmsError(f"LMS 게이트웨이 오류 ({gateway.status_code})")
+        if gateway.url.host == urlparse(SSO_LOGIN_URL).hostname:
+            raise SsoExpired("학교 로그인이 만료되었습니다. 다시 로그인해 주세요.")
+        try:
+            redirect_url = _canvas_handoff_url(gateway)
+        except LmsParseError as e:
+            raise SsoExpired("학교 로그인이 만료되었습니다. 다시 로그인해 주세요.") from e
+        try:
+            renewed = await _canvas_login(client, session.user_id, redirect_url, s_token)
+        except httpx.HTTPError as e:
+            raise LmsError(f"학습 세션을 다시 발급받지 못했습니다 ({type(e).__name__}).") from e
+    # 학교가 SSO 쿠키를 갱신했다면 그 값을 다음 재발급에 쓴다.
+    renewed.sso_token = sso_token(renewed.cookies) or s_token
+    return renewed
+
+
+def _canvas_handoff_url(gateway: httpx.Response) -> str:
+    redirect_url = extract_iframe_src(gateway.text)
+    parsed = urlparse(redirect_url)
+    if parsed.scheme != "https" or parsed.hostname != urlparse(CANVAS_BASE_URL).hostname:
+        raise LmsError("LMS 게이트웨이가 예상하지 못한 주소로 연결했습니다.")
+    return redirect_url
+
+
+async def _canvas_login(client: httpx.AsyncClient, user_id: str, redirect_url: str, s_token: str) -> LmsSession:
+    """게이트웨이가 알려 준 Canvas 로그인 페이지에서 학교가 내려준 Canvas 자격정보로 로그인한다(3~5단계)."""
+    # 3. Canvas 로그인 페이지 (Bearer 토큰, 암호화된 Canvas 비밀번호)
     page = await client.get(redirect_url)
     bearer = find_api_token(
         [redirect_url, str(page.url), *(str(r.url) for r in page.history)],
@@ -193,16 +259,15 @@ async def login(client: httpx.AsyncClient, user_id: str, password: str) -> LmsSe
         raise LmsError("API 토큰(xn_api_token)을 얻지 못했습니다. 다시 시도해 주세요.")
 
     cipher_b64, pem = extract_login_cryption(page.text)
-    canvas_password = decrypt_password(pem, cipher_b64)
     authenticity_token = extract_authenticity_token(page.text)
 
-    # 4. Canvas 로그인
+    # 4. Canvas 로그인. 학교가 발급한 Canvas용 값이며 사용자의 학교 비밀번호와 다르다.
     form = {
         "utf8": "✓",
         "redirect_to_ssl": "1",
         "after_login_url": "",
         "pseudonym_session[unique_id]": user_id,
-        "pseudonym_session[password]": canvas_password,
+        "pseudonym_session[password]": decrypt_password(pem, cipher_b64),
         "pseudonym_session[remember_me]": "0",
     }
     if authenticity_token:
@@ -217,6 +282,7 @@ async def login(client: httpx.AsyncClient, user_id: str, password: str) -> LmsSe
             "Accept": HTML_ACCEPT,
         },
     )
+    del form
     await client.get(f"{CANVAS_BASE_URL}/?login_success=1", headers={"Referer": redirect_url})
 
     # 5. 검증
@@ -224,7 +290,8 @@ async def login(client: httpx.AsyncClient, user_id: str, password: str) -> LmsSe
     if info.get("user_login") != user_id:
         raise LmsError("로그인 사용자 검증에 실패했습니다.")
 
-    return LmsSession(user_id=user_id, bearer_token=bearer, cookies=export_cookies(client.cookies))
+    return LmsSession(user_id=user_id, bearer_token=bearer, cookies=export_cookies(client.cookies),
+                      sso_token=s_token)
 
 
 async def get_user_info(client: httpx.AsyncClient, user_id: str) -> dict:

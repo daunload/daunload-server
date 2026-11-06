@@ -7,7 +7,7 @@ from tests.test_api import env  # noqa: F401  (fixture)
 
 async def test_records_and_transcripts_cascade_with_user(env):
     async with db_base.sessionmaker()() as db:
-        user = User(student_id="1", password_hash="x", consent_at=db_base.utcnow())
+        user = User(student_id="1", consent_at=db_base.utcnow())
         db.add(user)
         await db.flush()
         db.add(DownloadRecord(user_id=user.id, lms_course_id=1, item_key="v11", kind="video", title="영상"))

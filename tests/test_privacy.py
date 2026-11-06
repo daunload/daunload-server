@@ -30,7 +30,7 @@ async def test_privacy_page_is_public_and_has_no_remote_tracking():
         assert 'mailto:daun4799@gmail.com' in response.text
         assert 'chrome.storage.session' in response.text
         assert '계정 삭제' in response.text
-        assert '암호화한 학교 비밀번호' in response.text
+        assert 'DB·로그에 저장하지 않습니다' in response.text and '암호화한 학교 비밀번호' not in response.text
         assert '학교 공식 서비스가 아닙니다' in response.text
         page = PageResources()
         page.feed(response.text)

@@ -12,8 +12,8 @@ from app.lms.models import Term
 C = "https://canvas.ssu.ac.kr"
 
 
-def _client(**kw) -> LmsClient:
-    session = LmsSession(user_id="20201234", bearer_token="BEARER", cookies=[])
+def _client(sso_token: str = "", **kw) -> LmsClient:
+    session = LmsSession(user_id="20201234", bearer_token="BEARER", cookies=[], sso_token=sso_token)
     return LmsClient(session, min_interval=0, **kw)
 
 
@@ -77,7 +77,7 @@ async def test_while1_prefix_is_stripped():
 
 
 @respx.mock
-async def test_expired_without_password_raises():
+async def test_expired_without_sso_token_raises():
     respx.get(f"{C}/learningx/api/v1/courses/1/modules").respond(401)
     async with _client() as c:
         with pytest.raises(SessionExpired):
@@ -86,19 +86,41 @@ async def test_expired_without_password_raises():
 
 @respx.mock
 async def test_expired_relogins_once(monkeypatch, fixture):
-    calls = {"login": 0}
+    calls = []
 
-    async def fake_login(http, user_id, password):
-        calls["login"] += 1
-        return LmsSession(user_id=user_id, bearer_token="NEW", cookies=[])
+    async def fake_renew(session):
+        calls.append(session.sso_token)
+        return LmsSession(user_id=session.user_id, bearer_token="NEW",
+                          cookies=[{"name": "_normandy_session", "value": "S2", "domain": "canvas.ssu.ac.kr"}],
+                          sso_token="SSO")
 
-    monkeypatch.setattr(client_mod.auth, "login", fake_login)
+    def forbidden(*args, **kwargs):
+        pytest.fail("학교 비밀번호 로그인은 호출하면 안 된다")
+
+    monkeypatch.setattr(client_mod.auth, "renew_from_sso", fake_renew)
+    monkeypatch.setattr(client_mod.auth, "login", forbidden)
     route = respx.get(f"{C}/learningx/api/v1/courses/1/modules")
     route.side_effect = [respx.MockResponse(401), respx.MockResponse(200, json=fixture("modules.json"))]
-    async with _client(password="pw") as c:
+    async with _client(sso_token="SSO") as c:
         modules = await c.get_modules(1)
-    assert calls["login"] == 1 and len(modules) == 3
+        assert c.session.bearer_token == "NEW"
+        assert c.export_cookies()[0]["value"] == "S2"
+    assert calls == ["SSO"] and len(modules) == 3
     assert route.calls.last.request.headers["Authorization"] == "Bearer NEW"
+
+
+@respx.mock
+async def test_sso_expired_during_renewal_propagates(monkeypatch):
+    from app.lms.errors import SsoExpired
+
+    async def expired(session):
+        raise SsoExpired("만료")
+
+    monkeypatch.setattr(client_mod.auth, "renew_from_sso", expired)
+    respx.get(f"{C}/learningx/api/v1/courses/1/modules").respond(401)
+    async with _client(sso_token="SSO") as c:
+        with pytest.raises(SsoExpired):
+            await c.get_modules(1)
 
 
 def test_pick_current_term():
@@ -114,16 +136,16 @@ def test_pick_current_term():
 @respx.mock
 async def test_expired_learningx_bearer_400_html_relogins(monkeypatch, fixture):
     """실제로 관찰된 경우: 쿠키 세션은 유효하지만 xn_api_token이 만료되어 400 HTML이 온다."""
-    async def fake_login(http, user_id, password):
-        return LmsSession(user_id=user_id, bearer_token="NEW", cookies=[])
+    async def fake_renew(session):
+        return LmsSession(user_id=session.user_id, bearer_token="NEW", cookies=[], sso_token="SSO")
 
-    monkeypatch.setattr(client_mod.auth, "login", fake_login)
+    monkeypatch.setattr(client_mod.auth, "renew_from_sso", fake_renew)
     route = respx.get(f"{C}/learningx/api/v1/courses/1/modules")
     route.side_effect = [
         respx.MockResponse(400, html="<title>Invalid request.</title>"),
         respx.MockResponse(200, json=fixture("modules.json")),
     ]
-    async with _client(password="pw") as c:
+    async with _client(sso_token="SSO") as c:
         assert len(await c.get_modules(1)) == 3
     assert route.calls.last.request.headers["Authorization"] == "Bearer NEW"
 
@@ -131,7 +153,7 @@ async def test_expired_learningx_bearer_400_html_relogins(monkeypatch, fixture):
 @respx.mock
 async def test_plain_400_on_canvas_api_is_not_treated_as_expired():
     respx.get(f"{C}/api/v1/courses/1/students/submissions").respond(400, json={"errors": "bad"})
-    async with _client(password="pw") as c:
+    async with _client(sso_token="SSO") as c:
         from app.lms.errors import LmsError
         with pytest.raises(LmsError) as e:
             await c.get_submissions(1)
