@@ -1,16 +1,17 @@
 from collections import defaultdict
 from datetime import date, datetime, timedelta
-from typing import Literal
+from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
-from sqlalchemy import func, select, union
+from sqlalchemy import and_, exists, func, not_, or_, select, union
 
 from app.api.deps import AdminUser, Db, is_admin
 from app.config import get_settings
-from app.db.models import (CourseRow, LmsCredential, NotificationChannel, PlaybackBatch, PlaybackJob,
-                           Transcript, User, UserDailyActivity)
+from app.db.models import (AssignmentRow, CourseRow, DownloadRecord, LmsCredential, NotificationChannel,
+                           NotificationLog, PlaybackBatch, PlaybackJob, SavedVideo, TodoRow, Transcript, User,
+                           UserDailyActivity)
 from app.services.activity import local_day
 from app.services.admin_data import (activity_union, as_utc, clean_error, failed_at, failed_job_filter,
                                      period_start, problem_union)
@@ -24,6 +25,12 @@ class AdminUserOut(BaseModel):
     last_login_at: datetime | None
     login_count: int
     lms_status: str | None
+    course_count: int
+    playback_done: int
+    playback_failed: int
+    download_count: int
+    transcript_count: int
+    channels: list[str]
 
 
 class AdminUsersOut(BaseModel):
@@ -59,24 +66,61 @@ class AdminSettingsOut(BaseModel):
     channels: list[AdminChannelSettingsOut]
 
 
+def _recent_failure(user_col):
+    """최근 7일 안에 4장 정의의 재생 실패가 있는 사용자 조건."""
+    return exists().where(
+        PlaybackJob.user_id == user_col, PlaybackBatch.id == PlaybackJob.batch_id,
+        failed_job_filter(), failed_at() >= period_start(7))
+
+
+async def _by_user(db, user_ids, value, *where):
+    """user_id별 집계 한 줄: value(집계식)를 user_id IN (...)으로 항목마다 따로 구한다."""
+    column = where[0]
+    rows = (await db.execute(select(column, value).where(column.in_(user_ids), *where[1:]).group_by(column))).all()
+    return {user_id: int(n or 0) for user_id, n in rows}
+
+
 @router.get("/users", response_model=AdminUsersOut)
 async def list_users(
     admin: AdminUser, db: Db, response: Response,
     q: str = Query(default="", max_length=32),
+    lms_status: str | None = Query(default=None, max_length=16),
+    has_problem: bool | None = None,
+    sort: Literal["activity", "created", "student_id"] = "activity",
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=25, ge=1, le=100),
 ):
     response.headers["Cache-Control"] = "no-store"
     filters = [User.student_id.contains(q.strip(), autoescape=True)]
-    total = await db.scalar(select(func.count()).select_from(User).where(*filters))
-    rows = (await db.execute(
-        select(User, LmsCredential.status).outerjoin(LmsCredential, LmsCredential.user_id == User.id)
-        .where(*filters).order_by(User.last_login_at.desc().nulls_last(), User.id.desc())
-        .offset(offset).limit(limit)
-    )).all()
+    if lms_status:
+        filters.append(LmsCredential.status == lms_status)
+    if has_problem is not None:
+        problem = or_(and_(LmsCredential.user_id.is_not(None), LmsCredential.status != "ok"), _recent_failure(User.id))
+        filters.append(problem if has_problem else not_(problem))
+    base = select(User, LmsCredential.status).outerjoin(LmsCredential, LmsCredential.user_id == User.id).where(*filters)
+    total = await db.scalar(select(func.count()).select_from(base.with_only_columns(User.id).subquery()))
+    order = {
+        "activity": (User.last_login_at.desc().nulls_last(), User.id.desc()),
+        "created": (User.created_at.desc(), User.id.desc()),
+        "student_id": (User.student_id, User.id),
+    }[sort]
+    rows = (await db.execute(base.order_by(*order).offset(offset).limit(limit))).all()
+    ids = [u.id for u, _ in rows]
+    courses = await _by_user(db, ids, func.count(), CourseRow.user_id)
+    done = await _by_user(db, ids, func.count(), PlaybackJob.user_id, PlaybackJob.status == "done")
+    failed = await _by_user(db, ids, func.count(), PlaybackJob.user_id, failed_job_filter())
+    downloads = await _by_user(db, ids, func.sum(DownloadRecord.count), DownloadRecord.user_id)
+    transcripts = await _by_user(db, ids, func.count(), Transcript.user_id)
+    channels: dict[int, list[str]] = defaultdict(list)
+    for user_id, kind in (await db.execute(select(NotificationChannel.user_id, NotificationChannel.kind).where(
+            NotificationChannel.user_id.in_(ids)).order_by(NotificationChannel.id))).all():
+        channels[user_id].append(kind)
     return AdminUsersOut(total=total, users=[
         AdminUserOut(student_id=u.student_id, created_at=u.created_at,
-                     last_login_at=u.last_login_at, login_count=u.login_count, lms_status=status)
+                     last_login_at=u.last_login_at, login_count=u.login_count, lms_status=status,
+                     course_count=courses.get(u.id, 0), playback_done=done.get(u.id, 0),
+                     playback_failed=failed.get(u.id, 0), download_count=downloads.get(u.id, 0),
+                     transcript_count=transcripts.get(u.id, 0), channels=channels.get(u.id, []))
         for u, status in rows
     ])
 
@@ -338,3 +382,311 @@ async def problems(
         total=sum(counts.values()) if kind == "all" else counts[kind], counts=counts,
         problems=_problem_rows(rows),
     )
+
+
+# ---- 사용자 상세 ----
+class AdminLmsOut(BaseModel):
+    status: str
+    last_error: str | None
+    last_error_at: datetime | None
+    last_login_at: datetime | None
+    last_synced_at: datetime | None
+    next_sync_at: datetime | None
+
+
+class AdminCountsOut(BaseModel):
+    courses: int
+    todos: int
+    playback_done: int
+    playback_failed: int
+    downloads: int
+    saved_videos: int
+    transcripts: int
+    channels: int
+
+
+class AdminSummaryOut(BaseModel):
+    student_id: str
+    is_admin: bool
+    consent_at: datetime
+    created_at: datetime
+    last_login_at: datetime | None
+    login_count: int
+    lms: AdminLmsOut | None
+    counts: AdminCountsOut
+
+
+class AdminCourseOut(BaseModel):
+    lms_course_id: int
+    name: str
+    professors: str | None
+    active: bool
+    auto_play: bool
+    attendance: list[dict] | None
+
+
+class AdminTodoOut(BaseModel):
+    kind: str
+    title: str
+    course_name: str
+    deadline: datetime | None
+    due_at: datetime | None
+    done: bool  # 마지막 동기화에서 사라진(완료·마감) 항목
+
+
+class AdminAssignmentOut(BaseModel):
+    kind: str
+    title: str
+    course_name: str
+    submission_state: str
+    submitted_at: datetime | None
+    missing: bool
+    due_at: datetime | None
+    deadline: datetime | None
+
+
+class AdminDownloadOut(BaseModel):
+    title: str
+    kind: str
+    count: int
+    first_at: datetime
+    last_at: datetime
+
+
+class AdminSavedVideoOut(BaseModel):
+    title: str
+    course_name: str
+    module_title: str
+    file_name: str
+    duration: float | None
+    size: int | None
+    has_media_url: bool
+    resolve_error: str | None
+    resolved_at: datetime | None
+    resolve_failed_at: datetime | None
+
+
+class AdminTranscriptOut(BaseModel):
+    title: str
+    course_name: str
+    model: str
+    duration: float | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminJobOut(BaseModel):
+    id: int
+    title: str
+    duration: float
+    status: str
+    attempts: int
+    progress_seconds: float
+    deadline: datetime | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    error: str | None
+
+
+class AdminBatchOut(BaseModel):
+    id: int
+    scope: str
+    status: str
+    lms_course_id: int | None
+    total: int
+    done_count: int
+    failed_count: int
+    skipped_count: int
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    error: str | None
+    jobs: list[AdminJobOut]
+
+
+class AdminNotificationLogOut(BaseModel):
+    key: str
+    created_at: datetime
+
+
+def _page_out[T: BaseModel](model: type[T]):
+    class Page(BaseModel):
+        total: int
+        items: list[model]  # type: ignore[valid-type]
+    return Page
+
+
+class AdminNotificationsOut(_page_out(AdminNotificationLogOut)):  # type: ignore[misc]
+    channels: list[AdminChannelSettingsOut]
+
+
+async def _target_user(db, student_id: str) -> User:
+    user = await db.scalar(select(User).where(User.student_id == student_id))
+    if user is None:
+        raise HTTPException(404, "사용자를 찾을 수 없습니다.")
+    return user
+
+
+async def _paged(db, model, columns, user_id, order, offset, limit, *where):
+    """사용자 한 명의 행을 {total, items}로. 열을 직접 골라 제외 대상 컬럼은 읽지도 않는다."""
+    cond = (model.user_id == user_id, *where)
+    total = await db.scalar(select(func.count()).select_from(model).where(*cond))
+    rows = (await db.execute(select(*columns).where(*cond).order_by(*order).offset(offset).limit(limit))).mappings().all()
+    return total, rows
+
+
+Offset = Annotated[int, Query(ge=0)]
+Limit = Annotated[int, Query(ge=1, le=100)]
+
+
+@router.get("/users/{student_id}/summary", response_model=AdminSummaryOut)
+async def user_summary(student_id: str, admin: AdminUser, db: Db, response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    user = await _target_user(db, student_id)
+    lms = (await db.execute(select(
+        LmsCredential.status, LmsCredential.last_error, LmsCredential.last_error_at, LmsCredential.last_login_at,
+        LmsCredential.last_synced_at, LmsCredential.next_sync_at,
+    ).where(LmsCredential.user_id == user.id))).mappings().one_or_none()
+
+    async def count(column, *where, value=None):
+        return int(await db.scalar(select(value if value is not None else func.count()).where(column == user.id, *where)) or 0)
+    counts = AdminCountsOut(
+        courses=await count(CourseRow.user_id), todos=await count(TodoRow.user_id, TodoRow.active.is_(True)),
+        playback_done=await count(PlaybackJob.user_id, PlaybackJob.status == "done"),
+        playback_failed=await count(PlaybackJob.user_id, failed_job_filter()),
+        downloads=await count(DownloadRecord.user_id, value=func.sum(DownloadRecord.count)),
+        saved_videos=await count(SavedVideo.user_id), transcripts=await count(Transcript.user_id),
+        channels=await count(NotificationChannel.user_id),
+    )
+    return AdminSummaryOut(
+        student_id=user.student_id, is_admin=is_admin(user), consent_at=user.consent_at,
+        created_at=user.created_at, last_login_at=user.last_login_at, login_count=user.login_count,
+        lms=AdminLmsOut(**{**lms, "last_error": clean_error(lms["last_error"])}) if lms is not None else None,
+        counts=counts,
+    )
+
+
+@router.get("/users/{student_id}/courses", response_model=_page_out(AdminCourseOut))
+async def user_courses(student_id: str, admin: AdminUser, db: Db, response: Response,
+                       offset: Offset = 0, limit: Limit = 20):
+    response.headers["Cache-Control"] = "no-store"
+    user = await _target_user(db, student_id)
+    total, rows = await _paged(
+        db, CourseRow, (CourseRow.lms_course_id, CourseRow.name, CourseRow.professors, CourseRow.active,
+                        CourseRow.auto_play, CourseRow.attendance),
+        user.id, (CourseRow.active.desc(), CourseRow.name, CourseRow.id), offset, limit)
+    return {"total": total, "items": rows}
+
+
+@router.get("/users/{student_id}/todos", response_model=_page_out(AdminTodoOut))
+async def user_todos(student_id: str, admin: AdminUser, db: Db, response: Response,
+                     offset: Offset = 0, limit: Limit = 20):
+    response.headers["Cache-Control"] = "no-store"
+    user = await _target_user(db, student_id)
+    total, rows = await _paged(
+        db, TodoRow, (TodoRow.kind, TodoRow.title, TodoRow.course_name, TodoRow.deadline, TodoRow.due_at,
+                      (~TodoRow.active).label("done")),
+        user.id, (TodoRow.active.desc(), TodoRow.deadline.asc().nulls_last(), TodoRow.id), offset, limit)
+    return {"total": total, "items": rows}
+
+
+@router.get("/users/{student_id}/assignments", response_model=_page_out(AdminAssignmentOut))
+async def user_assignments(student_id: str, admin: AdminUser, db: Db, response: Response,
+                           offset: Offset = 0, limit: Limit = 20):
+    response.headers["Cache-Control"] = "no-store"
+    user = await _target_user(db, student_id)
+    total, rows = await _paged(
+        db, AssignmentRow, (AssignmentRow.kind, AssignmentRow.title, AssignmentRow.course_name,
+                            AssignmentRow.submission_state, AssignmentRow.submitted_at, AssignmentRow.missing,
+                            AssignmentRow.due_at, AssignmentRow.deadline),
+        user.id, (AssignmentRow.deadline.desc().nulls_last(), AssignmentRow.id), offset, limit)
+    return {"total": total, "items": rows}
+
+
+@router.get("/users/{student_id}/downloads", response_model=_page_out(AdminDownloadOut))
+async def user_downloads(student_id: str, admin: AdminUser, db: Db, response: Response,
+                         offset: Offset = 0, limit: Limit = 20):
+    response.headers["Cache-Control"] = "no-store"
+    user = await _target_user(db, student_id)
+    total, rows = await _paged(
+        db, DownloadRecord, (DownloadRecord.title, DownloadRecord.kind, DownloadRecord.count,
+                             DownloadRecord.first_at, DownloadRecord.last_at),
+        user.id, (DownloadRecord.last_at.desc(), DownloadRecord.id.desc()), offset, limit)
+    return {"total": total, "items": rows}
+
+
+@router.get("/users/{student_id}/saved-videos", response_model=_page_out(AdminSavedVideoOut))
+async def user_saved_videos(student_id: str, admin: AdminUser, db: Db, response: Response,
+                            offset: Offset = 0, limit: Limit = 20):
+    response.headers["Cache-Control"] = "no-store"
+    user = await _target_user(db, student_id)
+    # media_url은 읽지 않고 존재 여부만 계산한다.
+    total, rows = await _paged(
+        db, SavedVideo, (SavedVideo.title, SavedVideo.course_name, SavedVideo.module_title, SavedVideo.file_name,
+                         SavedVideo.duration, SavedVideo.size, SavedVideo.media_url.is_not(None).label("has_media_url"),
+                         SavedVideo.resolve_error, SavedVideo.resolved_at, SavedVideo.resolve_failed_at),
+        user.id, (SavedVideo.course_name, SavedVideo.module_position, SavedVideo.item_position, SavedVideo.id),
+        offset, limit)
+    return {"total": total, "items": [{**row, "resolve_error": clean_error(row["resolve_error"])} for row in rows]}
+
+
+@router.get("/users/{student_id}/transcripts", response_model=_page_out(AdminTranscriptOut))
+async def user_transcripts(student_id: str, admin: AdminUser, db: Db, response: Response,
+                           offset: Offset = 0, limit: Limit = 20):
+    response.headers["Cache-Control"] = "no-store"
+    user = await _target_user(db, student_id)
+    total, rows = await _paged(
+        db, Transcript, (Transcript.title, Transcript.course_name, Transcript.model, Transcript.duration,
+                         Transcript.created_at, Transcript.updated_at),
+        user.id, (Transcript.updated_at.desc(), Transcript.id.desc()), offset, limit)
+    return {"total": total, "items": rows}
+
+
+@router.get("/users/{student_id}/notifications", response_model=AdminNotificationsOut)
+async def user_notifications(student_id: str, admin: AdminUser, db: Db, response: Response,
+                             offset: Offset = 0, limit: Limit = 20):
+    response.headers["Cache-Control"] = "no-store"
+    user = await _target_user(db, student_id)
+    channels = (await db.execute(select(
+        NotificationChannel.kind, NotificationChannel.enabled, NotificationChannel.created_at,
+    ).where(NotificationChannel.user_id == user.id).order_by(NotificationChannel.id))).mappings().all()
+    total, rows = await _paged(
+        db, NotificationLog, (NotificationLog.key, NotificationLog.created_at), user.id,
+        (NotificationLog.created_at.desc(), NotificationLog.id.desc()), offset, limit)
+    return {"total": total, "items": rows, "channels": channels}
+
+
+@router.get("/users/{student_id}/playback", response_model=_page_out(AdminBatchOut))
+async def user_playback(
+    student_id: str, admin: AdminUser, db: Db, response: Response,
+    status: str | None = Query(default=None, max_length=16),
+    lms_course_id: int | None = None,
+    days: int | None = Query(default=None, ge=1, le=365),
+    offset: Offset = 0, limit: Limit = 20,
+):
+    response.headers["Cache-Control"] = "no-store"
+    user = await _target_user(db, student_id)
+    where = []
+    if status:
+        where.append(PlaybackBatch.status == status)
+    if lms_course_id is not None:
+        where.append(PlaybackBatch.lms_course_id == lms_course_id)
+    if days is not None:
+        where.append(PlaybackBatch.created_at >= period_start(days))
+    total, batches = await _paged(
+        db, PlaybackBatch, (PlaybackBatch.id, PlaybackBatch.scope, PlaybackBatch.status, PlaybackBatch.lms_course_id,
+                            PlaybackBatch.total, PlaybackBatch.done_count, PlaybackBatch.failed_count,
+                            PlaybackBatch.skipped_count, PlaybackBatch.created_at, PlaybackBatch.started_at,
+                            PlaybackBatch.finished_at, PlaybackBatch.error),
+        user.id, (PlaybackBatch.created_at.desc(), PlaybackBatch.id.desc()), offset, limit, *where)
+    jobs: dict[int, list[dict]] = defaultdict(list)
+    # PlaybackJob.video(영상 주소 JSON)는 고르지 않는다.
+    for row in (await db.execute(select(
+        PlaybackJob.batch_id, PlaybackJob.id, PlaybackJob.title, PlaybackJob.duration, PlaybackJob.status,
+        PlaybackJob.attempts, PlaybackJob.progress_seconds, PlaybackJob.deadline, PlaybackJob.started_at,
+        PlaybackJob.finished_at, PlaybackJob.error,
+    ).where(PlaybackJob.batch_id.in_([b["id"] for b in batches])).order_by(PlaybackJob.position, PlaybackJob.id)
+    )).mappings():
+        jobs[row["batch_id"]].append({**row, "error": clean_error(row["error"])})
+    return {"total": total, "items": [
+        {**b, "error": clean_error(b["error"]), "jobs": jobs.get(b["id"], [])} for b in batches]}
