@@ -246,36 +246,51 @@ async def test_concurrent_decisions_on_same_pending_user(database, monkeypatch):
         await db.commit()
         admin, target_id = (await db.get(User, admin.id)), target.id
 
+    pids = []
+
     async def decide(action):
         async with sessionmaker()() as db:
             user = await db.get(User, target_id)  # 둘 다 pending 상태를 읽는다
+            pids.append((await db.execute(text("SELECT pg_backend_pid()"))).scalar_one())
             try:
                 return action, await decide_access(db, user, action, admin)
             except HTTPException as e:
                 return action, e.status_code
 
-    async def waiting_on_lock():
+    async def both_waiting():
+        if len(pids) < 2:
+            return False
         async with sessionmaker()() as db:
             return (await db.execute(text(
-                "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()"
-            ))).scalar_one()
+                "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND pid = ANY(:pids)"
+            ), {"pids": list(pids)})).scalar_one() == 2
 
     # 행 잠금을 쥔 채 두 결정이 모두 UPDATE에서 기다리게 한 뒤 풀어 준다: 시간에 기대지 않고 겹침을 만든다.
     async with sessionmaker()() as holder:
         await holder.execute(select(User).where(User.id == target_id).with_for_update())
         tasks = [asyncio.create_task(decide("approve")), asyncio.create_task(decide("reject"))]
-        for _ in range(200):
-            if await waiting_on_lock() >= 2:
-                break
-            await asyncio.sleep(0.05)
-        else:
-            pytest.fail("두 결정이 행 잠금에서 기다리지 않았다")
+        try:
+            for _ in range(200):
+                if await both_waiting():
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                pytest.fail("두 결정이 행 잠금에서 기다리지 않았다")
+        except BaseException:
+            for t in tasks:
+                t.cancel()
+            await holder.rollback()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
         await holder.rollback()
     results = dict(await asyncio.gather(*tasks))
 
     winners = [a for a, r in results.items() if r != 409]
-    assert len(winners) == 1 and sorted(results.values(), key=str) in ([409, True], [409, False]), results
+    assert len(winners) == 1, results
     winner = winners[0]
+    loser = "reject" if winner == "approve" else "approve"
+    assert results[loser] == 409, results
+    assert results[winner] is (winner == "approve"), results  # 승인은 True(동기화 필요), 거절은 False
     async with sessionmaker()() as db:
         row = await db.get(User, target_id)
         assert row.access_status == {"approve": "approved", "reject": "rejected"}[winner]
