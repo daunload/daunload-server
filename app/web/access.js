@@ -25,13 +25,14 @@ async function showAccessScreen(me) {
     if (accessSwitching) return;
     accessSwitching = true;
     leaveApp();
-    try { me = await api("/me"); } catch { accessSwitching = false; return; }
+    const known = state.me;
+    // /me가 실패해도 403 ACCESS_REQUIRED 자체가 "승인 전"이라는 뜻이므로, 마지막으로 아는 값으로 화면을 먼저 보여 준다.
+    try { me = await api("/me"); } catch { me = { ...known, access_status: "revoked", access_retry_at: null }; }
     accessSwitching = false;
     if (me.access_status === "approved") return boot();
   }
   accessMe = me;
   leaveApp();
-  clearTimeout(accessTimer);
   renderAccess();
   $("#access").hidden = false;
   history.replaceState(null, "", location.pathname);
@@ -45,6 +46,7 @@ const ACCESS_COPY = {
 };
 
 function renderAccess() {
+  clearTimeout(accessTimer);
   const me = accessMe;
   const status = Object.hasOwn(ACCESS_COPY, me.access_status) ? me.access_status : "none";
   const [title, fixed] = ACCESS_COPY[status];
@@ -77,7 +79,7 @@ $("#access-request").addEventListener("click", async (e) => {
     accessMe = { ...accessMe, ...sent };
     renderAccess();
   } catch (err) {
-    if (err.status === 429) return recheckAccess();  // 거절 직후라 아직 못 보낸다: 서버가 가진 재요청 시각으로 다시 그린다
+    if (err.status === 429 || err.status === 400) return recheckAccess();  // 거절 직후라 아직 못 보낸다: 서버가 가진 재요청 시각으로 다시 그린다
     if (err.code === "ACCESS_REQUIRED") return;
     $("#access-error").textContent = err.message;
   }

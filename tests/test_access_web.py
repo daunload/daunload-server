@@ -118,8 +118,8 @@ async def test_request_429_shows_rejected_state(stage):
     stage.me = me_of("revoked")
     stage.handlers[("POST", "/access/request")] = (429, {"detail": {"message": "아직 요청할 수 없어요.", "access_retry_at": FUTURE}})
     await stage.goto("http://dashboard.test/")
-    await stage.get_by_role("button", name="권한 요청 보내기").click()
     stage.me = me_of("rejected", retry=FUTURE)  # 서버가 다시 알려 주는 값
+    await stage.get_by_role("button", name="권한 요청 보내기").click()
     await expect(stage.get_by_role("heading", name="요청이 거절됐어요")).to_be_visible()
     await expect(stage.get_by_role("button", name="다시 요청하기")).to_be_disabled()
     await expect(stage.locator("#access-error")).to_have_text("")
@@ -136,6 +136,22 @@ async def test_access_required_mid_session_switches_screen(stage):
     await expect(stage.get_by_role("heading", name="권한이 회수됐어요")).to_be_visible()
     await expect(stage.locator("#app")).to_be_hidden()
     await expect(stage.locator("#toast")).not_to_contain_text("관리자 승인이 필요합니다")
+
+
+@pytest.mark.parametrize("failure", ["network", "5xx"])
+async def test_me_failure_during_switch_still_shows_access_screen(stage, failure):
+    stage.me = me_of("approved")
+    await stage.goto("http://dashboard.test/#todos")
+    await expect(stage.locator("#app")).to_be_visible()
+    stage.handlers[("GET", "/notifications/channels")] = (403, {"detail": {"code": "ACCESS_REQUIRED", "message": "관리자 승인이 필요합니다."}})
+    if failure == "5xx":
+        stage.handlers[("GET", "/me")] = (503, {"detail": "잠시 후 다시 시도하세요."})
+    else:
+        await stage.route("**/me", lambda r: r.abort())
+    await stage.get_by_role("button", name="알림", exact=True).click()
+    await expect(stage.get_by_role("heading", name="권한이 회수됐어요")).to_be_visible()
+    await expect(stage.get_by_role("button", name="권한 요청 보내기")).to_be_visible()
+    await expect(stage.get_by_role("button", name="상태 다시 확인")).to_be_visible()
 
 
 async def test_revoked_user_button_in_open_tab_runs_nothing(stage):
