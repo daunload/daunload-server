@@ -7,12 +7,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy import and_, exists, func, not_, or_, select, union
 
-from app.api.deps import AdminUser, Db, is_admin
+from app.api.deps import AdminUser, Db, JobQueue, is_admin
 from app.config import get_settings
 from app.db.base import utcnow
 from app.db.models import (AssignmentRow, CourseRow, DownloadRecord, LmsCredential, NotificationChannel,
                            NotificationLog, PlaybackBatch, PlaybackJob, SavedVideo, TodoRow, Transcript, User,
                            UserDailyActivity)
+from app.services.access import Action, decide_access
 from app.services.activity import local_day
 from app.services.admin_data import (activity_union, as_utc, clean_error, failed_at, failed_job_filter,
                                      period_start, problem_union)
@@ -32,6 +33,7 @@ class AdminUserOut(BaseModel):
     download_count: int
     transcript_count: int
     channels: list[str]
+    access_status: str
 
 
 class AdminUsersOut(BaseModel):
@@ -59,6 +61,7 @@ async def list_users(
     q: str = Query(default="", max_length=32),
     lms_status: str | None = Query(default=None, max_length=16),
     has_problem: bool | None = None,
+    access: Literal["none", "pending", "approved", "rejected", "revoked"] | None = None,
     sort: Literal["activity", "created", "student_id"] = "activity",
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=25, ge=1, le=100),
@@ -70,6 +73,10 @@ async def list_users(
     if has_problem is not None:
         problem = or_(and_(LmsCredential.user_id.is_not(None), LmsCredential.status != "ok"), _recent_failure(User.id))
         filters.append(problem if has_problem else not_(problem))
+    if access:  # 관리자는 저장된 값과 관계없이 approved
+        admin_ids = get_settings().admin_student_ids
+        filters.append(or_(User.student_id.in_(admin_ids), User.access_status == access) if access == "approved"
+                       else and_(User.student_id.not_in(admin_ids), User.access_status == access))
     base = select(User, LmsCredential.status).outerjoin(LmsCredential, LmsCredential.user_id == User.id).where(*filters)
     total = await db.scalar(select(func.count()).select_from(base.with_only_columns(User.id).subquery()))
     order = {
@@ -93,7 +100,8 @@ async def list_users(
                      last_login_at=u.last_login_at, login_count=u.login_count, lms_status=status,
                      course_count=courses.get(u.id, 0), playback_done=done.get(u.id, 0),
                      playback_failed=failed.get(u.id, 0), download_count=downloads.get(u.id, 0),
-                     transcript_count=transcripts.get(u.id, 0), channels=channels.get(u.id, []))
+                     transcript_count=transcripts.get(u.id, 0), channels=channels.get(u.id, []),
+                     access_status="approved" if is_admin(u) else u.access_status)
         for u, status in rows
     ])
 
@@ -196,6 +204,7 @@ class AdminOverviewOut(BaseModel):
     failure_rate: float | None
     tracking_since: date | None
     problem_count: int
+    pending_count: int
     series: list[AdminSeriesOut]
     recent_activity: list[AdminAllActivityOut]
     recent_problems: list[AdminProblemOut]
@@ -261,6 +270,8 @@ async def overview(admin: AdminUser, db: Db, response: Response, days: int = Dep
     tracking_since = await db.scalar(select(func.min(UserDailyActivity.day)))
     problems = problem_union(start)
     problem_count = await db.scalar(select(func.count()).select_from(problems))
+    pending_count = await db.scalar(select(func.count()).select_from(User).where(
+        User.access_status == "pending", User.student_id.not_in(get_settings().admin_student_ids)))
     recent_problems = (await db.execute(
         select(problems).order_by(*_problem_order(problems)).limit(5))).mappings().all()
     activities = activity_union(None)
@@ -278,7 +289,8 @@ async def overview(admin: AdminUser, db: Db, response: Response, days: int = Dep
         playback_seconds=float(sum(duration for _, duration, _ in done)),
         downloads=sum(downloads for _, downloads in by_day.values()),
         playback_failed=failed, failure_rate=failed / (len(done) + failed) if len(done) + failed else None,
-        tracking_since=tracking_since, problem_count=problem_count, series=series,
+        tracking_since=tracking_since, problem_count=problem_count, pending_count=pending_count,
+        series=series,
         recent_activity=[AdminAllActivityOut(**row) for row in recent],
         recent_problems=_problem_rows(recent_problems),
     )
@@ -365,6 +377,7 @@ class AdminSummaryOut(BaseModel):
     created_at: datetime
     last_login_at: datetime | None
     login_count: int
+    access_status: str
     lms: AdminLmsOut | None
     counts: AdminCountsOut
 
@@ -523,6 +536,7 @@ async def user_summary(student_id: str, admin: AdminUser, db: Db, response: Resp
     return AdminSummaryOut(
         student_id=user.student_id, is_admin=is_admin(user), consent_at=user.consent_at,
         created_at=user.created_at, last_login_at=user.last_login_at, login_count=user.login_count,
+        access_status="approved" if is_admin(user) else user.access_status,
         lms=AdminLmsOut(**{**lms, "last_error": clean_error(lms["last_error"])}) if lms is not None else None,
         counts=counts,
     )
@@ -658,3 +672,48 @@ async def user_playback(
         jobs[row["batch_id"]].append({**row, "error": clean_error(row["error"])})
     return {"total": total, "items": [
         {**b, "error": clean_error(b["error"]), "jobs": jobs.get(b["id"], [])} for b in batches]}
+
+
+class AdminAccessRequestOut(BaseModel):
+    student_id: str
+    requested_at: datetime | None
+    previous_status: str
+    reject_count: int
+
+
+class AdminAccessRequestsOut(BaseModel):
+    total: int
+    items: list[AdminAccessRequestOut]
+
+
+@router.get("/access-requests", response_model=AdminAccessRequestsOut)
+async def access_requests(admin: AdminUser, db: Db, response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    users = (await db.scalars(select(User).where(
+        User.access_status == "pending", User.student_id.not_in(get_settings().admin_student_ids)
+    ).order_by(User.access_requested_at.asc().nulls_last(), User.id))).all()
+    return AdminAccessRequestsOut(total=len(users), items=[
+        AdminAccessRequestOut(student_id=u.student_id, requested_at=u.access_requested_at,
+                              previous_status=u.access_previous_status or "none", reject_count=u.access_reject_count)
+        for u in users])
+
+
+class AccessDecisionIn(BaseModel):
+    action: Action
+
+
+class AccessDecisionOut(BaseModel):
+    student_id: str
+    access_status: str
+    access_decided_at: datetime | None
+    access_decided_by: str | None
+
+
+@router.post("/users/{student_id}/access", response_model=AccessDecisionOut)
+async def decide_user_access(student_id: str, body: AccessDecisionIn, admin: AdminUser, db: Db, queue: JobQueue):
+    """관리자 API 중 유일한 쓰기 경로."""
+    user = await _target_user(db, student_id)
+    if await decide_access(db, user, body.action, admin):
+        await queue.enqueue("sync_user_job", user.id, job_id=f"sync:{user.id}")
+    return AccessDecisionOut(student_id=user.student_id, access_status=user.access_status,
+                             access_decided_at=user.access_decided_at, access_decided_by=user.access_decided_by)

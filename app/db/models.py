@@ -27,6 +27,7 @@ class User(Base):
     access_requested_at: Mapped[datetime | None]  # 마지막 요청 시각
     access_decided_at: Mapped[datetime | None]  # 마지막 승인·거절·회수 시각
     access_decided_by: Mapped[str | None] = mapped_column(String(32))  # 결정한 관리자 학번
+    access_previous_status: Mapped[str | None] = mapped_column(String(16))  # 마지막 요청 직전 상태
     access_reject_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 

@@ -11,7 +11,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import utcnow
-from app.db.models import AnnouncementRow, NotificationChannel, NotificationLog, TodoRow
+from app.config import get_settings
+from app.db.models import AnnouncementRow, NotificationChannel, NotificationLog, TodoRow, User
 from app.security import decrypt
 
 log = logging.getLogger(__name__)
@@ -58,6 +59,21 @@ async def notify_user(db: AsyncSession, user_id: int, text: str, key: str | None
         except Exception as e:  # 한 채널 실패가 다른 채널을 막지 않게
             log.warning("알림 발송 실패 user=%s channel=%s: %s", user_id, ch.id, e)
     return True
+
+
+async def notify_admins_of_request(db: AsyncSession, user: User) -> None:
+    """승인 요청을 모든 관리자의 사용 중인 디스코드 채널로 한 번씩 알린다. 실패는 기록만 한다."""
+    text = f"[승인 요청] 학번 {user.student_id} 님이 서비스 사용 승인을 요청했어요. 관리자 화면에서 확인해 주세요."
+    channels = (await db.scalars(
+        select(NotificationChannel).join(User, User.id == NotificationChannel.user_id).where(
+            User.student_id.in_(get_settings().admin_student_ids),
+            NotificationChannel.kind == "discord", NotificationChannel.enabled).order_by(NotificationChannel.id)
+    )).all()
+    for ch in channels:
+        try:
+            await send_to_channel(ch, text)
+        except Exception as e:
+            log.warning("승인 요청 알림 실패 channel=%s: %s", ch.id, e)
 
 
 # notify_user는 중복이면 롤백하고, 롤백은 세션의 ORM 객체를 모두 만료시킨다.

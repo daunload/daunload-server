@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import MutableHeaders
 
-from app.api import routes_account, routes_data, routes_media, routes_notifications, routes_playback, routes_transcripts
+from app.api import routes_access, routes_account, routes_data, routes_media, routes_notifications, routes_playback, routes_transcripts
 from app.api.deps import Queue
 from app.api import routes_admin
 from app.config import get_settings
@@ -112,6 +112,7 @@ def create_app(lifespan_=lifespan) -> FastAPI:
                   openapi_url="/openapi.json" if docs else None)
     app.add_middleware(SecurityHeaders)
     app.include_router(routes_account.router)
+    app.include_router(routes_access.router)
     app.include_router(routes_admin.router)
     app.include_router(routes_data.router)
     app.include_router(routes_playback.router)

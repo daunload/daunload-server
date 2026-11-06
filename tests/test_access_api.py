@@ -6,13 +6,13 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import respx
 from fastapi.routing import APIRoute, iter_route_contexts
-from sqlalchemy import update
+from sqlalchemy import select, update
 from starlette.routing import Mount
 
 from app.config import get_settings
 from app.db import base as db_base
-from app.db.models import SavedVideo, User
-from app.security import create_download_token
+from app.db.models import NotificationChannel, PlaybackBatch, SavedVideo, User
+from app.security import create_download_token, encrypt
 from app.services.access import access_retry_at, has_access
 from tests.test_api import _signup, env  # noqa: F401
 
@@ -23,6 +23,7 @@ OPEN = {
     ("POST", "/auth/login"),
     ("GET", "/me"),
     ("DELETE", "/me"),
+    ("POST", "/access/request"),
     ("GET", "/health"),  # 서비스 상태 확인
     ("GET", "/"),  # 대시보드 HTML(정적 파일)
     ("GET", "/index.html"),
@@ -212,3 +213,256 @@ async def test_revoked_access_blocks_existing_token(env):
     await _set_status("20201234", "revoked")
     r = await api.get("/todos", headers=h)
     assert r.status_code == 403 and r.json()["detail"] == ACCESS_REQUIRED
+
+
+# ---- 요청과 관리자 결정 (설계 6장) ----
+
+ADMIN_ID = "20200001"
+ADMIN2_ID = "20200002"
+WEBHOOK = "https://discord.com/api/webhooks/1/a"
+WEBHOOK2 = "https://discord.com/api/webhooks/2/b"
+NOW = datetime(2026, 11, 6, 3, 0, tzinfo=UTC)
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    """서비스가 쓰는 현재 시각을 고정한다. now["t"]를 바꿔 시간을 흘려 보낸다."""
+    now = {"t": NOW}
+    monkeypatch.setattr("app.services.access.utcnow", lambda: now["t"])
+    return now
+
+
+@pytest.fixture
+def admins(monkeypatch):
+    monkeypatch.setattr(get_settings(), "admin_student_ids", [ADMIN_ID, ADMIN2_ID])
+
+
+async def _user(student_id: str) -> User:
+    async with db_base.sessionmaker()() as db:
+        return await db.scalar(select(User).where(User.student_id == student_id))
+
+
+async def _add_channel(student_id: str, kind: str, target: str, enabled: bool = True) -> None:
+    user = await _user(student_id)
+    async with db_base.sessionmaker()() as db:
+        db.add(NotificationChannel(user_id=user.id, kind=kind, target_enc=encrypt(target), enabled=enabled))
+        await db.commit()
+
+
+async def test_request_transitions(env, clock):
+    api, _ = env
+    h = await _signup(api)
+
+    r = await api.post("/access/request", headers=h)
+    assert r.status_code == 200
+    assert r.json()["access_status"] == "pending" and r.json()["access_retry_at"] is None
+    assert datetime.fromisoformat(r.json()["access_requested_at"]) == NOW
+
+    # pending 재요청: 200, 요청 시각 그대로
+    clock["t"] = NOW + timedelta(hours=1)
+    r = await api.post("/access/request", headers=h)
+    assert r.status_code == 200 and r.json()["access_status"] == "pending"
+    assert datetime.fromisoformat(r.json()["access_requested_at"]) == NOW
+
+    # revoked -> pending
+    await _set_status("20201234", "revoked")
+    r = await api.post("/access/request", headers=h)
+    assert r.status_code == 200 and r.json()["access_status"] == "pending"
+    assert datetime.fromisoformat(r.json()["access_requested_at"]) == NOW + timedelta(hours=1)
+
+    # approved -> 400
+    await _set_status("20201234", "approved")
+    assert (await api.post("/access/request", headers=h)).status_code == 400
+
+
+async def test_request_after_rejection_waits_24_hours(env, clock):
+    api, _ = env
+    h = await _signup(api)
+    async with db_base.sessionmaker()() as db:
+        await db.execute(update(User).where(User.id == 1).values(access_status="rejected", access_decided_at=NOW))
+        await db.commit()
+
+    clock["t"] = NOW + timedelta(hours=23, minutes=59)
+    r = await api.post("/access/request", headers=h)
+    assert r.status_code == 429
+    assert datetime.fromisoformat(r.json()["detail"]["access_retry_at"]) == NOW + timedelta(hours=24)
+    assert (await api.get("/me", headers=h)).json()["access_status"] == "rejected"
+
+    clock["t"] = NOW + timedelta(hours=24)
+    r = await api.post("/access/request", headers=h)
+    assert r.status_code == 200 and r.json()["access_status"] == "pending"
+
+
+async def test_admin_request_is_treated_as_approved(env, admins):
+    api, _ = env
+    h = await _signup(api, ADMIN_ID)
+    assert (await api.post("/access/request", headers=h)).status_code == 400
+
+
+@respx.mock
+async def test_request_notifies_every_admin_discord_once(env, admins, clock):
+    api, _ = env
+    await _signup(api, ADMIN_ID)
+    await _signup(api, ADMIN2_ID)
+    await _signup(api, "20203333")  # 관리자가 아닌 사용자의 채널
+    await _add_channel(ADMIN_ID, "discord", WEBHOOK)
+    await _add_channel(ADMIN_ID, "telegram", "token|1")  # 텔레그램은 제외
+    await _add_channel(ADMIN2_ID, "discord", WEBHOOK2)
+    await _add_channel(ADMIN2_ID, "discord", "https://discord.com/api/webhooks/3/off", enabled=False)
+    await _add_channel("20203333", "discord", "https://discord.com/api/webhooks/4/other")
+    hooks = {u: respx.post(u).respond(204) for u in (WEBHOOK, WEBHOOK2)}
+    off = respx.post("https://discord.com/api/webhooks/3/off").respond(204)
+    other = respx.post("https://discord.com/api/webhooks/4/other").respond(204)
+    telegram = respx.post("https://api.telegram.org/bottoken/sendMessage").respond(200)
+    h = await _signup(api)
+
+    assert (await api.post("/access/request", headers=h)).status_code == 200
+    assert [hooks[WEBHOOK].call_count, hooks[WEBHOOK2].call_count] == [1, 1]
+    assert "20201234" in hooks[WEBHOOK].calls.last.request.content.decode()
+    assert off.call_count == other.call_count == telegram.call_count == 0
+
+    await api.post("/access/request", headers=h)  # pending 재요청은 알리지 않는다
+    assert [hooks[WEBHOOK].call_count, hooks[WEBHOOK2].call_count] == [1, 1]
+
+    await _set_status("20201234", "revoked")  # 회수 뒤 재요청은 다시 알린다
+    await api.post("/access/request", headers=h)
+    assert [hooks[WEBHOOK].call_count, hooks[WEBHOOK2].call_count] == [2, 2]
+
+
+@respx.mock
+async def test_request_succeeds_when_discord_fails(env, admins, clock):
+    api, _ = env
+    await _signup(api, ADMIN_ID)
+    await _add_channel(ADMIN_ID, "discord", WEBHOOK)
+    hook = respx.post(WEBHOOK).respond(500)
+    h = await _signup(api)
+    r = await api.post("/access/request", headers=h)
+    assert r.status_code == 200 and r.json()["access_status"] == "pending"
+    assert hook.call_count == 1
+
+
+async def _admin_and_target(api, target_status: str):
+    admin_h = await _signup(api, ADMIN_ID)
+    target_h = await _signup(api)
+    await _set_status("20201234", target_status)
+    return admin_h, target_h
+
+
+async def _decide(api, admin_h, action, student_id="20201234"):
+    return await api.post(f"/admin/users/{student_id}/access", headers=admin_h, json={"action": action})
+
+
+async def test_admin_decisions_table(env, admins, clock):
+    api, _ = env
+    allowed = {
+        "approve": ({"pending", "none", "rejected", "revoked"}, "approved"),
+        "reject": ({"pending"}, "rejected"),
+        "revoke": ({"approved"}, "revoked"),
+    }
+    admin_h, _ = await _admin_and_target(api, "none")
+    for action, (from_states, to) in allowed.items():
+        for status in ACCESS_STATES:
+            await _set_status("20201234", status)
+            await _clear_decision()
+            r = await _decide(api, admin_h, action)
+            if status in from_states:
+                assert r.status_code == 200, (action, status, r.text)
+                body = r.json()
+                assert body["student_id"] == "20201234" and body["access_status"] == to
+                assert body["access_decided_by"] == ADMIN_ID
+                assert datetime.fromisoformat(body["access_decided_at"]) == NOW
+                user = await _user("20201234")
+                assert user.access_decided_by == ADMIN_ID and user.access_decided_at == NOW
+                assert user.access_reject_count == (1 if action == "reject" else 0)
+            else:
+                assert r.status_code == 409, (action, status, r.text)
+                assert (await _user("20201234")).access_status == status
+
+
+ACCESS_STATES = ("none", "pending", "approved", "rejected", "revoked")
+
+
+async def _clear_decision() -> None:
+    async with db_base.sessionmaker()() as db:
+        await db.execute(update(User).where(User.student_id == "20201234").values(
+            access_decided_at=None, access_decided_by=None, access_reject_count=0))
+        await db.commit()
+
+
+async def test_decision_validation_and_permissions(env, admins):
+    api, _ = env
+    admin_h, user_h = await _admin_and_target(api, "pending")
+    assert (await _decide(api, user_h, "approve")).status_code == 403  # 일반 사용자
+    assert (await _decide(api, admin_h, "approve", ADMIN2_ID)).status_code == 404  # 가입 전 관리자
+    await _signup(api, ADMIN2_ID)
+    assert (await _decide(api, admin_h, "revoke", ADMIN2_ID)).status_code == 400  # 관리자 대상
+    assert (await _decide(api, admin_h, "nope")).status_code == 422
+    assert (await _decide(api, admin_h, "approve", "99999999")).status_code == 404
+    assert (await _user("20201234")).access_status == "pending"
+
+
+async def test_approve_queues_full_sync(env, admins):
+    api, queue = env
+    admin_h, _ = await _admin_and_target(api, "pending")
+    queue.jobs.clear()
+    assert (await _decide(api, admin_h, "approve")).status_code == 200
+    assert queue.jobs == [("sync_user_job", (2,), "sync:2")]
+    queue.jobs.clear()
+    assert (await _decide(api, admin_h, "approve")).status_code == 409  # 이미 승인됨
+    assert queue.jobs == []
+
+
+async def test_revoke_cancels_active_batch(env, admins):
+    api, _ = env
+    admin_h, _ = await _admin_and_target(api, "approved")
+    async with db_base.sessionmaker()() as db:
+        db.add(PlaybackBatch(user_id=2, scope="all", status="queued"))
+        await db.commit()
+    assert (await _decide(api, admin_h, "revoke")).status_code == 200
+    async with db_base.sessionmaker()() as db:
+        batch = (await db.scalars(select(PlaybackBatch))).one()
+        assert batch.cancel_requested is True
+
+
+async def test_access_requests_list_and_filters(env, admins, clock):
+    api, _ = env
+    admin_h = await _signup(api, ADMIN_ID)
+    for i, (sid, status, prev, rejects, at) in enumerate([
+        ("20210001", "pending", "revoked", 0, 2), ("20210002", "pending", "rejected", 2, 1),
+        ("20210003", "pending", "none", 0, 3), ("20210004", "approved", None, 0, None),
+    ]):
+        await _signup(api, sid)
+        async with db_base.sessionmaker()() as db:
+            await db.execute(update(User).where(User.student_id == sid).values(
+                access_status=status, access_previous_status=prev, access_reject_count=rejects,
+                access_requested_at=None if at is None else NOW + timedelta(hours=at)))
+            await db.commit()
+
+    r = await api.get("/admin/access-requests", headers=admin_h)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 3
+    assert [(i["student_id"], i["previous_status"], i["reject_count"]) for i in body["items"]] == [
+        ("20210002", "rejected", 2), ("20210001", "revoked", 0), ("20210003", "none", 0)]
+    assert datetime.fromisoformat(body["items"][0]["requested_at"]) == NOW + timedelta(hours=1)
+
+    users = (await api.get("/admin/users?access=pending", headers=admin_h)).json()
+    assert sorted(u["student_id"] for u in users["users"]) == ["20210001", "20210002", "20210003"]
+    assert {u["access_status"] for u in users["users"]} == {"pending"}
+    approved = (await api.get("/admin/users?access=approved", headers=admin_h)).json()
+    assert sorted(u["student_id"] for u in approved["users"]) == [ADMIN_ID, "20210004"]  # 관리자는 approved
+    assert (await api.get("/admin/users?access=bogus", headers=admin_h)).status_code == 422
+    assert len((await api.get("/admin/users", headers=admin_h)).json()["users"]) == 5
+
+    assert (await api.get("/admin/overview", headers=admin_h)).json()["pending_count"] == 3
+    summary = (await api.get("/admin/users/20210001/summary", headers=admin_h)).json()
+    assert summary["access_status"] == "pending"
+    assert (await api.get(f"/admin/users/{ADMIN_ID}/summary", headers=admin_h)).json()["access_status"] == "approved"
+
+
+async def test_concurrent_decisions_conflict(env, admins):
+    api, _ = env
+    admin_h, _ = await _admin_and_target(api, "pending")
+    assert (await _decide(api, admin_h, "approve")).status_code == 200
+    assert (await _decide(api, admin_h, "reject")).status_code == 409
+    assert (await _user("20201234")).access_status == "approved"
