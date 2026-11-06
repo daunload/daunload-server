@@ -297,3 +297,18 @@ async def test_privacy_notice_shows_once(dashboard):
     await page.reload()
     await expect(page.locator("#view")).not_to_be_empty()
     await expect(notice).to_be_hidden()
+
+
+async def test_privacy_notice_shows_again_after_access_change(dashboard):
+    page, _ = dashboard
+    await page.goto("http://dashboard.test/#todos")
+    await page.evaluate("localStorage.setItem('privacy-notice-2026-11', '1')")  # 예전 안내를 닫은 사용자
+    await page.reload()
+    notice = page.locator("#privacy-notice")
+    await expect(notice).to_be_visible()
+    await expect(notice).to_contain_text("관리자가 승인한 사용자만")
+    await notice.get_by_role("button", name="닫기").click()
+    await page.reload()
+    await expect(page.locator("#view")).not_to_be_empty()
+    await expect(notice).to_be_hidden()
+    assert await page.evaluate("localStorage.getItem('privacy-notice-2026-11-access')") == "1"

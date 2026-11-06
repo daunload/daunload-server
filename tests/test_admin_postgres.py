@@ -2,6 +2,7 @@
 
 QUEUE_TEST_DATABASE_URL=postgresql+asyncpg://... pytest tests/test_admin_postgres.py
 """
+import asyncio
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -10,6 +11,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import select, text
 
 from app.config import get_settings
@@ -19,6 +21,7 @@ from app.db.models import (AssignmentRow, CourseRow, DownloadRecord, LmsCredenti
                            User, UserDailyActivity, utcnow)
 from app.main import create_app
 from app.security import create_access_token
+from app.services.access import decide_access
 from app.services.activity import bump_daily, local_day
 
 pytestmark = pytest.mark.skipif(not os.getenv("QUEUE_TEST_DATABASE_URL"), reason="requires isolated PostgreSQL test service")
@@ -163,3 +166,118 @@ async def test_bump_daily_twice_sums(database):
         await db.commit()
         row = (await db.execute(select(UserDailyActivity))).scalar_one()
         assert (row.logins, row.downloads) == (2, 3)
+
+
+def _admin_app():
+    @asynccontextmanager
+    async def lifespan(app):
+        yield
+
+    enqueued = []
+
+    async def enqueue(*args, **kwargs):
+        enqueued.append(args)
+
+    app = create_app(lifespan)
+    app.state.queue = SimpleNamespace(enqueue=enqueue)
+    return app, enqueued
+
+
+async def test_access_queries_and_decisions_on_postgres(database, monkeypatch):
+    monkeypatch.setattr(get_settings(), "admin_student_ids", ["20201234"])
+    now = utcnow()
+    async with sessionmaker()() as db:
+        users = {
+            sid: User(student_id=sid, password_hash="x", consent_at=now, access_status=st, access_requested_at=when,
+                      access_previous_status=prev)
+            for sid, st, when, prev in (
+                ("20201234", "pending", now, "none"),  # 관리자는 대기 목록에 나오지 않는다
+                ("20200001", "pending", now - timedelta(hours=2), "none"),
+                ("20200002", "pending", now - timedelta(hours=1), "rejected"),
+                ("20200003", "approved", None, None),
+                ("20200004", "none", None, None),
+                ("20200005", "revoked", None, None),
+            )
+        }
+        db.add_all(users.values())
+        await db.commit()
+        admin_id = users["20201234"].id
+    app, enqueued = _admin_app()
+    headers = {"Authorization": "Bearer " + create_access_token(admin_id)}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as api:
+        async def get(path):
+            r = await api.get(path, headers=headers)
+            assert r.status_code == 200, f"{path}: {r.text}"
+            return r.json()
+
+        async def post(student_id, action):
+            return await api.post(f"/admin/users/{student_id}/access", json={"action": action}, headers=headers)
+
+        queue = await get("/admin/access-requests")
+        assert [i["student_id"] for i in queue["items"]] == ["20200001", "20200002"] and queue["total"] == 2
+        assert (await get("/admin/overview"))["pending_count"] == 2
+        for status, expected in (("pending", 2), ("approved", 2), ("none", 1), ("revoked", 1), ("rejected", 0)):
+            body = await get(f"/admin/users?access={status}")
+            assert body["total"] == expected, status
+        rows = {u["student_id"]: u for u in (await get("/admin/users"))["users"]}
+        assert rows["20201234"]["is_admin"] is True and rows["20200003"]["access_status"] == "approved"
+
+        r = await post("20200001", "approve")
+        assert r.status_code == 200 and r.json()["access_status"] == "approved" and r.json()["access_decided_by"] == "20201234"
+        assert enqueued == [("sync_user_job", users["20200001"].id)]
+        r = await post("20200002", "reject")
+        assert r.json()["access_status"] == "rejected"
+        assert (await post("20200002", "reject")).status_code == 409
+        assert (await post("20200004", "reject")).status_code == 409
+        assert (await post("20200003", "revoke")).json()["access_status"] == "revoked"
+        assert (await post("20201234", "revoke")).status_code == 400
+        assert (await get("/admin/overview"))["pending_count"] == 0  # 관리자 본인의 pending 행은 세지 않는다
+
+
+async def test_concurrent_decisions_on_same_pending_user(database, monkeypatch):
+    """같은 대기 사용자에게 승인과 거절이 동시에 오면 하나만 이기고 나머지는 409."""
+    monkeypatch.setattr(get_settings(), "admin_student_ids", ["20201234"])
+    now = utcnow()
+    async with sessionmaker()() as db:
+        admin = User(student_id="20201234", password_hash="x", consent_at=now)
+        target = User(student_id="20209999", password_hash="x", consent_at=now, access_status="pending",
+                      access_requested_at=now, access_previous_status="none")
+        db.add_all([admin, target])
+        await db.commit()
+        admin, target_id = (await db.get(User, admin.id)), target.id
+
+    async def decide(action):
+        async with sessionmaker()() as db:
+            user = await db.get(User, target_id)  # 둘 다 pending 상태를 읽는다
+            try:
+                return action, await decide_access(db, user, action, admin)
+            except HTTPException as e:
+                return action, e.status_code
+
+    async def waiting_on_lock():
+        async with sessionmaker()() as db:
+            return (await db.execute(text(
+                "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()"
+            ))).scalar_one()
+
+    # 행 잠금을 쥔 채 두 결정이 모두 UPDATE에서 기다리게 한 뒤 풀어 준다: 시간에 기대지 않고 겹침을 만든다.
+    async with sessionmaker()() as holder:
+        await holder.execute(select(User).where(User.id == target_id).with_for_update())
+        tasks = [asyncio.create_task(decide("approve")), asyncio.create_task(decide("reject"))]
+        for _ in range(200):
+            if await waiting_on_lock() >= 2:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            pytest.fail("두 결정이 행 잠금에서 기다리지 않았다")
+        await holder.rollback()
+    results = dict(await asyncio.gather(*tasks))
+
+    winners = [a for a, r in results.items() if r != 409]
+    assert len(winners) == 1 and sorted(results.values(), key=str) in ([409, True], [409, False]), results
+    winner = winners[0]
+    async with sessionmaker()() as db:
+        row = await db.get(User, target_id)
+        assert row.access_status == {"approve": "approved", "reject": "rejected"}[winner]
+        assert row.access_decided_by == "20201234" and row.access_decided_at is not None
+        assert row.access_reject_count == (1 if winner == "reject" else 0)
