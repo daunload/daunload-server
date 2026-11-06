@@ -379,12 +379,21 @@ async def test_user_summary_fields(env, monkeypatch):
         await _seed_two_users(db)
         db.add(TodoRow(user_id=1, lms_course_id=1, course_name="A", kind="video", lms_item_id=1, title="v", active=True))
         db.add(TodoRow(user_id=1, lms_course_id=1, course_name="A", kind="video", lms_item_id=2, title="w", active=False))
+        # 마감이 지났지만 다음 동기화가 아직 지우지 않은 줄: 학생 /todos처럼 세지 않는다
+        db.add(TodoRow(user_id=1, lms_course_id=1, course_name="A", kind="video", lms_item_id=3, title="past",
+                       active=True, deadline=datetime.now(UTC) - timedelta(minutes=1)))
+        db.add(TodoRow(user_id=1, lms_course_id=1, course_name="A", kind="quiz", lms_item_id=4, title="future",
+                       active=True, deadline=datetime.now(UTC) + timedelta(days=1)))
         await db.commit()
     body = (await api.get("/admin/users/20201234/summary", headers=admin)).json()
     assert body["student_id"] == "20201234" and body["is_admin"] is True
     assert body["lms"]["status"] == "ok" and {"consent_at", "created_at", "login_count", "last_login_at"} <= set(body)
-    assert body["counts"] == {"courses": 2, "todos": 1, "playback_done": 3, "playback_failed": 0, "downloads": 5,
+    assert body["counts"] == {"courses": 2, "todos": 2, "playback_done": 3, "playback_failed": 0, "downloads": 5,
                               "saved_videos": 0, "transcripts": 2, "channels": 2}
+    # 할 일 탭은 지난 줄과 사라진 줄도 그대로 보여 준다
+    assert (await api.get("/admin/users/20201234/todos", headers=admin)).json()["total"] == 4
+    student = (await api.get("/todos", headers=admin)).json()
+    assert len(student) == body["counts"]["todos"]
 
 
 async def test_playback_tab_groups_batches_and_cleans_errors(env, monkeypatch):

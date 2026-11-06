@@ -9,6 +9,7 @@ from sqlalchemy import and_, exists, func, not_, or_, select, union
 
 from app.api.deps import AdminUser, Db, is_admin
 from app.config import get_settings
+from app.db.base import utcnow
 from app.db.models import (AssignmentRow, CourseRow, DownloadRecord, LmsCredential, NotificationChannel,
                            NotificationLog, PlaybackBatch, PlaybackJob, SavedVideo, TodoRow, Transcript, User,
                            UserDailyActivity)
@@ -503,7 +504,10 @@ async def user_summary(student_id: str, admin: AdminUser, db: Db, response: Resp
     async def count(column, *where, value=None):
         return int(await db.scalar(select(value if value is not None else func.count()).where(column == user.id, *where)) or 0)
     counts = AdminCountsOut(
-        courses=await count(CourseRow.user_id), todos=await count(TodoRow.user_id, TodoRow.active.is_(True)),
+        courses=await count(CourseRow.user_id),
+        # 학생 /todos와 같은 조건: 남아 있고 마감이 없거나 아직 안 지난 할 일. 다음 동기화 전 지난 줄은 세지 않는다.
+        todos=await count(TodoRow.user_id, TodoRow.active.is_(True),
+                          or_(TodoRow.deadline.is_(None), TodoRow.deadline > utcnow())),
         playback_done=await count(PlaybackJob.user_id, PlaybackJob.status == "done"),
         playback_failed=await count(PlaybackJob.user_id, failed_job_filter()),
         downloads=await count(DownloadRecord.user_id, value=func.sum(DownloadRecord.count)),
