@@ -28,7 +28,7 @@ const ADMIN_BATCH_STATUS = {
 };
 const ADMIN_LMS_STATUS = { ok: { label: "정상", tone: "ok" }, invalid: { label: "비밀번호가 바뀜", tone: "bad" }, error: { label: "최근 오류", tone: "warn" } };
 const ADMIN_CHANNEL = { discord: "Discord", telegram: "Telegram" };
-const ADMIN_USER_SORTS = { activity: "최근 활동순", created: "가입일순", student_id: "학번순" };
+const ADMIN_USER_SORTS = { activity: "최근 로그인순", created: "가입일순", student_id: "학번순" };
 const ADMIN_USERS_LIMIT = 25;
 const ADMIN_DETAIL_LIMIT = 20;
 const ADMIN_DETAIL_TABS = [
@@ -188,7 +188,7 @@ const ADMIN_PLAYBACK_STATUS = {
 
 function adminActivityLabel(item) {
   if (item.kind === "playback") return ADMIN_PLAYBACK_STATUS[item.status] || item.status;
-  if (item.kind === "download") return `다운로드 ${adminNumber(item.count)}회`;
+  if (item.kind === "download") return `다운로드 누적 ${adminNumber(item.count)}회`;  // count는 기간 합계가 아니라 그 항목의 전체 누적이다
   if (item.kind === "transcript") return "전사 저장";
   return item.kind;
 }

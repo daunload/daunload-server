@@ -28,7 +28,10 @@ def overview(days=7, **over):
         "recent_activity": [{"id": 1, "kind": "playback", "title": "자료구조 3강 <img src=x onerror=alert(1)>",
                              "course_name": "자료구조", "status": "done", "recorded_at": now.isoformat(),
                              "started_at": now.isoformat(), "finished_at": now.isoformat(), "count": 1,
-                             "student_id": "20231234"}],
+                             "student_id": "20231234"},
+                            {"id": 2, "kind": "download", "title": "자료구조 4강", "course_name": "자료구조",
+                             "status": "link_issued", "recorded_at": now.isoformat(), "started_at": None,
+                             "finished_at": None, "count": 9, "student_id": "20231234"}],
         "recent_problems": [
             {"kind": "playback", "occurred_at": now.isoformat(), "student_id": "20220456", "course_name": "운영체제",
              "title": "7강 스케줄링", "error": "플레이어 로딩 시간 초과", "not_run": 0},
@@ -141,6 +144,7 @@ async def test_overview_cards_chart_and_problems(dashboard):  # noqa: F811
 
     await expect(view.locator(".admin-feed")).to_contain_text("20231234")
     await expect(view.locator(".admin-feed")).to_contain_text("<img src=x onerror=alert(1)>")
+    await expect(view.locator(".admin-feed")).to_contain_text("다운로드 누적 9회")  # 기간 합계가 아니라 누적
     problems = view.locator(".admin-problems")
     await expect(problems.locator("tbody tr")).to_have_count(3)
     await expect(problems).to_contain_text("플레이어 로딩 시간 초과")
@@ -416,6 +420,8 @@ async def test_users_table_search_filters_sort(dashboard):  # noqa: F811
         await view.get_by_label("LMS 상태").select_option("invalid")
     async with page.expect_request(lambda r: (query(r) or {}).get("has_problem") == ["true"]):
         await view.get_by_label("문제 있음만").check()
+    # activity 값은 마지막 로그인 순이다. 이름이 실제 기준을 말한다.
+    await expect(view.get_by_label("정렬").locator('option[value="activity"]')).to_have_text("최근 로그인순")
     async with page.expect_request(lambda r: (query(r) or {}).get("sort") == ["student_id"]) as req:
         await view.get_by_label("정렬").select_option("student_id")
     last = query(await req.value)
@@ -481,7 +487,7 @@ async def test_detail_header_and_counts(dashboard):  # noqa: F811
 
 TABS = [
     # (탭 이름, 주소 조각, API 꼬리, 보여야 할 글, 다음 페이지가 있는지)
-    ("전체 타임라인", "timeline", "activities", ["다운로드 2회", "운영체제 · 7강 스케줄링", "재생 실패"], True),
+    ("전체 타임라인", "timeline", "activities", ["다운로드 누적 2회", "운영체제 · 7강 스케줄링", "재생 실패"], True),
     ("과목·출석", "courses", "courses", ["김교수", "현재 학기", "지난 학기", "켜짐", "출석 기록 없음"], True),
     ("할 일·과제", "todos", "todos", ["마감 없음", "목록에서 사라짐(완료 또는 마감)", "제출함", "마감 지나 미제출"], True),
     ("재생", "playback", "playback", ["주차", "이번 주", "일부 실패", "미실행", "앞 영상 실패로 중단"], False),
@@ -687,7 +693,7 @@ async def test_activity_tab_filters_and_links_student(dashboard):  # noqa: F811
     await expect(rows).to_have_count(3)
     await expect(rows.nth(0)).to_contain_text("재생 실패")
     await expect(rows.nth(0)).to_contain_text(f"운영체제 · 7강 스케줄링 {XSS}")
-    await expect(rows.nth(1)).to_contain_text("다운로드 2회")
+    await expect(rows.nth(1)).to_contain_text("다운로드 누적 2회")
     await expect(rows.nth(2)).to_contain_text("전사 저장")
     await expect(view.locator("img")).to_have_count(0)
     await expect(view.get_by_role("button", name="전체 45")).to_have_attribute("aria-pressed", "true")
