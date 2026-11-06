@@ -223,7 +223,7 @@ async def test_admin_shell_mobile_and_access(dashboard, tmp_path):
     await page.locator("#admin-menu").click()
     await expect(page).to_have_url("http://dashboard.test/#admin/overview")
     view = page.locator("#view")
-    await expect(view.get_by_role("heading", name="사용자 관리", exact=True)).to_be_visible()
+    await expect(view.get_by_role("heading", name="운영 현황", exact=True)).to_be_visible()
     await expect(view.locator(".admin-kpi")).to_have_count(4)
     await page.screenshot(path=tmp_path / "admin-desktop.png", full_page=True)
     await page.emulate_media(reduced_motion="reduce")

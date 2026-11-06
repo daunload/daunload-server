@@ -148,7 +148,7 @@ function viewAdmin(path = state.adminPath) {
     history.replaceState(null, "", viewHash());
   }
   $("#view").innerHTML = `<div class="admin">
-    <div class="view-head"><h1>사용자 관리</h1><div class="admin-actions" id="admin-actions"></div></div>
+    <div class="view-head"><h1>운영 현황</h1><div class="admin-actions" id="admin-actions"></div></div>
     <nav class="admin-tabs" aria-label="관리자 메뉴">${ADMIN_TABS.map((t) =>
       `<a class="admin-tab" href="#admin/${t.key}" data-admin-tab="${t.key}"${t.key === tab ? ' aria-current="page"' : ""}>${adminTabLabel(t)}</a>`).join("")}</nav>
     <div class="admin-body" id="admin-body"></div></div>`;

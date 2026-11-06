@@ -31,6 +31,7 @@ log = logging.getLogger(__name__)
 
 AUTO_RETRY_COOLDOWN = timedelta(hours=12)
 AUTO_MAX_FAILURES = 3  # 자동 묶음에서 이만큼 시도해 실패한 영상은 더 자동으로 넣지 않는다(수동 재생은 된다)
+AUTO_GIVE_UP_WINDOW = timedelta(days=7)  # 실패 횟수는 이 기간 안의 것만 센다. 지나면 다시 자동으로 시도한다
 
 
 async def sync_user_job(ctx, user_id: int) -> str:
@@ -61,7 +62,8 @@ async def sync_user_job(ctx, user_id: int) -> str:
 async def create_auto_batch(db, user_id: int) -> PlaybackBatch | None:
     """자동 수강이 켜진 과목의 미수강 영상으로 묶음을 만든다. 이미 진행 중이면 만들지 않는다.
     최근 실패한 항목은 같은 실패를 반복하지 않도록 일정 시간 제외한다. 자동 묶음에서 AUTO_MAX_FAILURES번
-    시도해 실패한 영상은 아예 제외한다. 마감 없는 영상은 미수강 목록에서 빠지지 않아 끝없이 재시도되기 때문이다."""
+    시도해 실패한 영상은 AUTO_GIVE_UP_WINDOW 동안 제외한다. 마감 없는 영상은 미수강 목록에서 빠지지 않아
+    끝없이 재시도되기 때문이다. 기간이 지나면 다시 세므로 일시적인 장애로 실패한 영상도 다시 자동으로 시도한다."""
     if await playback.active_batch(db, user_id):
         return None
     course_ids = set((await db.scalars(
@@ -85,6 +87,7 @@ async def create_auto_batch(db, user_id: int) -> PlaybackBatch | None:
             PlaybackBatch.scope == "auto",
             PlaybackJob.status.in_(("failed", "locked")),
             PlaybackJob.started_at.is_not(None),
+            sql_func.coalesce(PlaybackJob.finished_at, PlaybackJob.started_at) >= utcnow() - AUTO_GIVE_UP_WINDOW,
         )
         .group_by(PlaybackJob.module_item_id)
         .having(sql_func.count() >= AUTO_MAX_FAILURES)

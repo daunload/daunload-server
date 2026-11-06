@@ -116,6 +116,38 @@ async def test_auto_batch_gives_up_after_three_attempted_failures(env):
 
 
 @respx.mock
+async def test_auto_give_up_counts_only_recent_failures(env):
+    """자동 묶음의 실패 횟수는 최근 AUTO_GIVE_UP_WINDOW 안의 것만 센다. 오래전 실패(예: LMS 장애)는 다시 세지 않는다."""
+    api, _ = env
+    h = await _setup(api)
+    respx.post(WEBHOOK).respond(204)
+    LmsMock().install()
+    await worker.sync_user_job({"queue": Q()}, 1)
+    await api.put(f"/courses/{COURSE_ID}/auto-play", headers=h, json={"enabled": True})
+    old = utcnow() - worker.AUTO_GIVE_UP_WINDOW - timedelta(hours=1)
+    recent = utcnow() - worker.AUTO_RETRY_COOLDOWN - timedelta(hours=1)
+
+    async def failures(item, when, count):
+        async with db_base.sessionmaker()() as db:
+            for _ in range(count):
+                b = PlaybackBatch(user_id=1, scope="auto", status="failed", total=1)
+                db.add(b)
+                await db.flush()
+                db.add(PlaybackJob(batch_id=b.id, user_id=1, position=0, lms_course_id=COURSE_ID, module_item_id=item,
+                                   title="x", duration=60, video={}, status="failed", started_at=when, finished_at=when))
+            await db.commit()
+
+    await failures(21, old, 3)  # 기간 밖: 다시 자동으로 시도한다
+    await failures(11, old, 2)
+    await failures(11, recent, 1)  # 기간 안 1번 + 기간 밖 2번: 아직 3번이 아니다
+    await failures(12, recent, 3)  # 기간 안 3번: 뺀다
+    async with db_base.sessionmaker()() as db:
+        batch = await worker.create_auto_batch(db, 1)
+        ids = sorted((await db.scalars(select(PlaybackJob.module_item_id).where(PlaybackJob.batch_id == batch.id))).all())
+    assert ids == [11, 21]
+
+
+@respx.mock
 async def test_manual_failures_do_not_count_toward_auto_give_up(env):
     api, _ = env
     h = await _setup(api)
