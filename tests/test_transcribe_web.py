@@ -266,3 +266,10 @@ async def test_failed_job_closes_extension_job(dashboard):
     await page.get_by_role("button", name="텍스트로 변환", exact=True).click()
     await expect(page.locator("#task-sheet")).to_contain_text("디코더 오류")
     assert (await page.evaluate("window.__ext"))[-1]["action"] == "audio-close"
+
+
+async def _start_one(page, data, worker, audio_seconds=3, duration=3):
+    """다른 테스트 파일이 쓰는 도우미: 변환 하나를 시작한다(가짜 확장 프로그램은 항상 3초를 준다)."""
+    saved = await _setup(page, data, worker=worker, duration=duration)
+    await page.get_by_role("button", name="텍스트로 변환", exact=True).click()
+    return saved
