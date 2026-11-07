@@ -1,4 +1,4 @@
-"""브라우저 텍스트 변환 흐름. 실제 Whisper 대신 가짜 Worker로 PCM 스트림 → Worker → 서버 저장 경로를 확인한다."""
+"""브라우저 텍스트 변환 흐름. 실제 Whisper 대신 가짜 Worker로 확장 프로그램 PCM → Worker → 서버 저장 경로를 확인한다."""
 
 import json
 
@@ -36,33 +36,177 @@ def _video(mid, title, transcript=None):
             "downloaded_at": None, "transcript_id": transcript}
 
 
-async def test_transcribe_streams_pcm_to_worker_and_saves(dashboard):
-    page, data = dashboard
-    await page.add_init_script(FAKE_WORKER)
-    data["/saved-videos"] = []
-    data["/courses/1/videos"] = [_video(12, "2강 재귀")]
-    data["/courses/1/videos/12/audio-link"] = {"url": "/audio/tok", "file_name": "a.mp4", "expires_in_minutes": 10}
-    saved = []
+CDN_URL = "https://cdn.commonscdn.com/a.mp4"
+DIRECT = {"url": CDN_URL, "file_name": "a.mp4", "receipt": "r"}
 
-    async def audio(route):
-        await route.fulfill(body=b"\x00\x10" * 32001, headers={"X-Audio-Duration": "2", "Content-Type": "application/octet-stream"})
+# 확장 프로그램을 흉내 낸다. 호출은 window.__ext에 남고, window.__read(n, call)로 audio-read 응답을 바꿀 수 있다.
+FAKE_EXT = """
+crypto.randomUUID = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), x => x.toString(16).padStart(2, '0')).join('');  // http 테스트 주소에는 없다
+window.__ext = [];
+window.__ping = { version: 1, sessions: true, queue: true, audio: true };
+window.__reads = 0;
+window.__hang = false;
+window.__sine = (sec) => {
+  const n = 16000 * sec, pcm = new Int16Array(n);
+  for (let i = 0; i < n; i++) pcm[i] = Math.round(Math.sin(2 * Math.PI * 440 * i / 16000) * 16000);
+  let s = ""; const b = new Uint8Array(pcm.buffer);
+  for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+  return btoa(s);
+};
+window.__read = async (n) => {
+  if (n === 1 && window.__hang) return new Promise(() => {});
+  return n < 3 ? { pcm: window.__sine(1), seconds: 1 } : { done: true, duration: 3 };
+};
+window.extensionRequest = async (action, data = {}) => {
+  window.__ext.push({ action, ...data });
+  if (action === "ping") return window.__ping;
+  if (action === "audio-open") return { opened: true };
+  if (action === "audio-close") return { closed: true };
+  if (action === "audio-read") {
+    const r = await window.__read(window.__reads++, data);
+    if (r?.error) throw new Error(r.error);
+    return r;
+  }
+  throw new Error("unexpected " + action);
+};
+"""
+
+TRANSCRIPT_OK = {"id": 9, "lms_course_id": 1, "module_item_id": 12, "course_name": "컴퓨터프로그래밍",
+                 "title": "2강 재귀", "model": "whisper-small/webgpu", "duration": 3, "updated_at": "2026-10-29T00:00:00Z"}
+
+
+async def _setup(page, data, *, worker=None, duration=3, fake_ext=True, extra_videos=()):
+    await page.add_init_script(worker or FAKE_WORKER)
+    data["/saved-videos"] = []
+    data["/courses/1/videos"] = [{**_video(12, "2강 재귀"), "duration": duration}, *extra_videos]
+    for v in extra_videos:
+        data[f"/courses/1/videos/{v['module_item_id']}/direct-download"] = DIRECT
+    data["/courses/1/videos/12/direct-download"] = DIRECT
+    saved = []
 
     async def transcript(route):
         saved.append(json.loads(route.request.post_data))
-        await route.fulfill(json={"id": 9, "lms_course_id": 1, "module_item_id": 12, "course_name": "컴퓨터프로그래밍",
-                                  "title": "2강 재귀", "model": "whisper-small/webgpu", "duration": 2,
-                                  "updated_at": "2026-10-29T00:00:00Z"})
+        await route.fulfill(json=TRANSCRIPT_OK)
 
-    await page.route("**/audio/tok", audio)
-    await page.route("**/courses/1/videos/12/transcript", transcript)
+    await page.route("**/courses/1/videos/*/transcript", transcript)
     await page.goto("http://dashboard.test/#videos")
+    await expect(page.locator("#video-list li.video-row").first).to_be_visible()
+    if fake_ext:
+        await page.evaluate("() => {" + FAKE_EXT + "}")
+    return saved
+
+
+async def test_transcribe_pulls_pcm_from_extension_and_saves(dashboard):
+    page, data = dashboard
+    forbidden = []
+    page.on("request", lambda r: forbidden.append(r.url) if ("/downloads/complete" in r.url or "/audio" in r.url) else None)
+    saved = await _setup(page, data)
     await page.get_by_role("button", name="텍스트로 변환", exact=True).click()
     await expect(page.locator("#video-list").get_by_role("button", name="텍스트 보기")).to_be_visible()
-    assert await page.evaluate("window.__samples") == 32001  # 홀수 바이트 경계 없이 모든 샘플 전달
+    assert abs(await page.evaluate("window.__samples") - 48000) <= 1
     body = saved[0]
     assert body["text"] == "안녕하세요\n강의를 시작합니다"
     assert body["model"] == "whisper-small/webgpu" and body["course_name"] == "컴퓨터프로그래밍"
     assert [s["text"] for s in body["segments"]] == ["안녕하세요", "강의를 시작합니다"]
+    ext = await page.evaluate("window.__ext")
+    opens = [c for c in ext if c["action"] == "audio-open"]
+    assert [o["url"] for o in opens] == [CDN_URL]
+    assert ext[-1]["action"] == "audio-close" and ext[-1]["job"] == opens[0]["job"]
+    assert forbidden == []
+
+
+async def test_transcribe_without_extension_shows_install_guide(dashboard):
+    page, data = dashboard
+    await _setup(page, data, fake_ext=False)
+    await page.evaluate("""() => { window.extensionRequest = async () => {
+      throw Object.assign(new Error("아유 하기싫어 확장프로그램에 연결하지 못했습니다."), { code: "EXTENSION_MISSING" }); }; }""")
+    await page.get_by_role("button", name="텍스트로 변환", exact=True).click()
+    await expect(page.locator("#video-list details")).to_have_attribute("open", "")
+    await expect(page.locator("#task-sheet")).to_contain_text("확장프로그램에 연결하지 못했습니다")
+
+
+async def test_old_extension_asks_update_for_transcribe(dashboard):
+    page, data = dashboard
+    await _setup(page, data)
+    await page.evaluate("window.__ping = { version: 1, sessions: true, queue: true }")
+    await page.get_by_role("button", name="텍스트로 변환", exact=True).click()
+    await expect(page.locator("#task-sheet")).to_contain_text("아유 하기싫어 확장프로그램을 업데이트해 주세요.")
+
+
+async def test_transcribe_hidden_on_phone(dashboard):
+    page, data = dashboard
+    await page.add_init_script("""const mm = window.matchMedia.bind(window);
+      window.matchMedia = (q) => q.includes("hover: none") ? { matches: true, media: q, addEventListener() {}, removeEventListener() {} } : mm(q);""")
+    await page.add_init_script(FAKE_WORKER)
+    data["/saved-videos"] = []
+    data["/courses/1/videos"] = [_video(12, "2강 재귀"), _video(13, "3강 정렬"), _video(14, "4강 탐색", transcript=9)]
+    await page.goto("http://dashboard.test/#videos")
+    await expect(page.locator("#video-list li.video-row")).to_have_count(3)
+    await expect(page.locator("[data-tx]")).to_have_count(0)
+    await expect(page.locator("[data-tx-group]")).to_have_count(0)
+    await expect(page.locator("[data-tx-open]")).to_have_count(1)
+
+
+async def test_cancel_closes_extension_job(dashboard):
+    page, data = dashboard
+    await _setup(page, data, extra_videos=[{**_video(13, "3강 정렬"), "duration": 3}])
+    await page.evaluate("window.__hang = true")
+    await page.locator("[data-tx-group]").click()
+    await page.wait_for_function("window.__reads === 2")
+    first = await page.evaluate("tx.current.extJob")
+    await page.evaluate("window.__hang = false; window.__reads = 0; cancelTranscription()")
+    await page.wait_for_function("tx.current?.moduleItemId === 13")
+    ext = await page.evaluate("window.__ext")
+    idx = next(i for i, c in enumerate(ext) if c["action"] == "audio-close" and c["job"] == first)
+    assert not [c for c in ext[idx + 1:] if c["action"] == "audio-read" and c["job"] == first]
+
+
+async def test_refresh_reissues_url(dashboard):
+    page, data = dashboard
+    await _setup(page, data)
+    posts = []
+    new_url = "https://cdn.commonscdn.com/b.mp4"
+
+    async def direct(route):
+        posts.append(1)
+        await route.fulfill(json={**DIRECT, "url": CDN_URL if len(posts) == 1 else new_url})
+
+    await page.route("**/courses/1/videos/12/direct-download", direct)
+    await page.evaluate("""const base = window.__read;
+      window.__read = (n, call) => n === 0 ? Promise.resolve({ refresh: true }) : base(n - 1, call);""")
+    await page.get_by_role("button", name="텍스트로 변환", exact=True).click()
+    await expect(page.locator("#video-list").get_by_role("button", name="텍스트 보기")).to_be_visible()
+    assert len(posts) == 2
+    reads = [c for c in await page.evaluate("window.__ext") if c["action"] == "audio-read"]
+    assert "url" not in reads[0] and reads[1]["url"] == new_url
+
+
+async def test_extension_error_is_shown(dashboard):
+    page, data = dashboard
+    saved = await _setup(page, data)
+    await page.evaluate('window.__read = async () => ({ error: "이 영상에는 소리 트랙이 없습니다." })')
+    await page.get_by_role("button", name="텍스트로 변환", exact=True).click()
+    await expect(page.locator("#task-sheet")).to_contain_text("이 영상에는 소리 트랙이 없습니다.")
+    assert saved == []
+    assert (await page.evaluate("window.__ext"))[-1]["action"] == "audio-close"
+
+
+async def test_short_audio_is_rejected(dashboard):
+    page, data = dashboard
+    saved = await _setup(page, data, duration=10)
+    await page.get_by_role("button", name="텍스트로 변환", exact=True).click()
+    await expect(page.locator("#task-sheet")).to_contain_text("오디오가 중간에 끊겼습니다")
+    assert saved == []
+
+
+async def test_read_timeout_fails_job_and_closes(dashboard):
+    page, data = dashboard
+    await _setup(page, data)
+    await page.evaluate("""() => { window.__read = async () => { throw new Error("아유 하기싫어 확장프로그램에 연결하지 못했습니다."); }; }""")
+    await page.get_by_role("button", name="텍스트로 변환", exact=True).click()
+    await expect(page.locator("#task-sheet")).to_contain_text("연결하지 못했습니다")
+    exts = [c["action"] for c in await page.evaluate("window.__ext")]
+    assert exts.count("audio-read") == 1 and exts[-1] == "audio-close"
 
 
 async def test_transcript_dialog_toggle_and_delete(dashboard):
@@ -116,39 +260,9 @@ window.Worker = class {
 """
 
 
-async def _start_one(page, data, worker, audio_seconds, duration):
-    await page.add_init_script(worker)
-    data["/saved-videos"] = []
-    data["/courses/1/videos"] = [_video(12, "2강 재귀")]
-    data["/courses/1/videos/12/audio-link"] = {"url": "/audio/tok", "file_name": "a.mp4", "expires_in_minutes": 10}
-    saved = []
-
-    async def audio(route):
-        await route.fulfill(body=b"\x00\x10" * (16000 * audio_seconds),
-                            headers={"X-Audio-Duration": str(duration), "Content-Type": "application/octet-stream"})
-
-    async def transcript(route):
-        saved.append(route.request.post_data)
-        await route.fulfill(json={"id": 9})
-
-    await page.route("**/audio/tok", audio)
-    await page.route("**/courses/1/videos/12/transcript", transcript)
-    await page.goto("http://dashboard.test/#videos")
+async def test_failed_job_closes_extension_job(dashboard):
+    page, data = dashboard
+    await _setup(page, data, worker=FAILING_WORKER)
     await page.get_by_role("button", name="텍스트로 변환", exact=True).click()
-    return saved
-
-
-async def test_failed_job_aborts_audio_stream(dashboard):
-    page, data = dashboard
-    saved = await _start_one(page, data, FAILING_WORKER, audio_seconds=2, duration=2)
     await expect(page.locator("#task-sheet")).to_contain_text("디코더 오류")
-    # 실패한 작업의 오디오 요청을 끊어야 서버의 동시 실행 자리가 풀린다
-    assert await page.evaluate("tx.finished[0].ctrl.signal.aborted") is True
-    assert saved == []
-
-
-async def test_truncated_audio_is_not_saved(dashboard):
-    page, data = dashboard
-    saved = await _start_one(page, data, FAKE_WORKER, audio_seconds=2, duration=60)
-    await expect(page.locator("#task-sheet")).to_contain_text("오디오가 중간에 끊겼습니다")
-    assert saved == []
+    assert (await page.evaluate("window.__ext"))[-1]["action"] == "audio-close"

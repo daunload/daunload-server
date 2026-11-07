@@ -1,7 +1,7 @@
 "use strict";
 
 /* ---------------- 브라우저 Whisper 텍스트 변환 ----------------
- * 서버의 16kHz PCM 스트림을 Worker로 넘겨 텍스트로 변환하고, 끝나면 결과를 서버에 저장한다.
+ * 확장 프로그램이 학교 CDN에서 읽어 오디오를 뽑아 주고, 브라우저 Whisper가 텍스트로 바꾼다. 끝나면 결과를 서버에 저장한다.
  * 한 번에 하나씩 처리한다. 탭을 닫으면 진행 중인 작업은 사라진다. */
 
 const WHISPER_RATE = 16000;
@@ -84,20 +84,14 @@ async function runNext() {
   job.done = new Promise((resolve, reject) => { job.resolve = resolve; job.reject = reject; });
   job.done.catch(() => {});  // 처리하지 않은 거부 경고 방지(아래에서 await)
   try {
-    const link = await api(job.audioPath, { method: "POST" });
-    const res = await fetch(link.url, { signal: job.ctrl.signal });
-    if (!res.ok) {
-      const data = await res.json().catch(() => null);
-      if (res.status === 403 && data?.detail?.code === "ACCESS_REQUIRED") {
-        showAccessScreen();  // 화면을 접으면서 변환도 멈춘다
-        throw new ApiError(403, data.detail.message, "ACCESS_REQUIRED");
-      }
-      throw new Error(typeof data?.detail === "string" ? data.detail : `오디오를 받지 못했습니다 (${res.status})`);
-    }
-    job.duration = Number(res.headers.get("X-Audio-Duration")) || job.duration;
+    try { await requireAudioExtension(); }
+    catch (err) { if (err.code === "EXTENSION_MISSING") reportDownloadError(err); throw err; }
+    const link = await api(job.mediaPath, { method: "POST" });
+    job.extJob = crypto.randomUUID();
+    await extensionRequest("audio-open", { job: job.extJob, url: link.url });
     const worker = ensureWorker();
     worker.postMessage({ type: "start", jobId: job.id, duration: job.duration });
-    await pumpAudio(res.body, job, worker);
+    await pumpAudio(job, worker);
     worker.postMessage({ type: "end", jobId: job.id });
     await job.done;
     const saved = await api(`/courses/${job.courseId}/videos/${job.moduleItemId}/transcript`, { method: "PUT", json: {
@@ -110,8 +104,9 @@ async function runNext() {
   } catch (err) {
     if (job.status !== "cancelled") { job.status = "failed"; job.error = err.message; }
   } finally {
-    // 실패해도 오디오 요청을 끊어야 서버의 동시 실행 자리가 풀린다
+    // 실패해도 확장 프로그램의 오디오 작업을 닫아야 다음 작업이 읽을 수 있다
     job.ctrl.abort();
+    if (job.extJob) await extensionRequest("audio-close", { job: job.extJob }).catch(() => {});
     tx.worker?.postMessage({ type: "cancel", jobId: job.id });
   }
   // 로그아웃으로 취소된 작업은 다음 사용자에게 보이면 안 되므로 기록하지 않는다
@@ -122,37 +117,46 @@ async function runNext() {
   if (state.view === "videos" && state.videoTab === "videos" && state.videoList) renderVideoList();
 }
 
-async function pumpAudio(body, job, worker) {
-  const reader = body.getReader();
-  let carry = null;
+function pcmFromBase64(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const pcm = new Int16Array(bytes.buffer, 0, bytes.length >> 1);  // 16비트 리틀 엔디언
+  const samples = new Float32Array(pcm.length);
+  for (let i = 0; i < pcm.length; i++) samples[i] = pcm[i] / 32768;
+  return samples;
+}
+
+async function pumpAudio(job, worker) {
   let sent = 0;
+  let url;
+  let doneDuration = 0;
   for (;;) {
     while (sent / WHISPER_RATE - job.seconds > READ_AHEAD_SECONDS) {
       await Promise.race([new Promise((r) => { job.wake = r; }), job.done]);
     }
-    const { value, done } = await reader.read();
-    if (done) break;
-    let bytes = value;
-    if (carry) {
-      const merged = new Uint8Array(carry.length + bytes.length);
-      merged.set(carry);
-      merged.set(bytes, carry.length);
-      bytes = merged;
-      carry = null;
+    job.ctrl.signal.throwIfAborted();
+    // 읽기가 시간 초과되면 확장이 이미 샘플을 소비했을 수 있어 이어 받지 않고 작업을 실패시킨다
+    const read = extensionRequest("audio-read", { job: job.extJob, ...(url ? { url } : {}) });
+    read.catch(() => {});
+    const result = await Promise.race([read, job.done]);  // 취소·워커 오류로 job.done이 거부되면 응답을 기다리지 않는다
+    job.ctrl.signal.throwIfAborted();
+    url = undefined;
+    if (result.refresh) {
+      url = (await api(job.mediaPath, { method: "POST" })).url;
+      continue;
     }
-    const even = bytes.length - (bytes.length % 2);  // 16비트 샘플 경계
-    if (even < bytes.length) carry = bytes.slice(even);
-    const pcm = new Int16Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + even));
-    const samples = new Float32Array(pcm.length);
-    for (let i = 0; i < pcm.length; i++) samples[i] = pcm[i] / 32768;
+    if (result.done) { doneDuration = Number(result.duration) || 0; break; }
+    const samples = pcmFromBase64(result.pcm);
     worker.postMessage({ type: "chunk", jobId: job.id, samples }, [samples.buffer]);
     sent += samples.length;
   }
   job.totalSeconds = sent / WHISPER_RATE;
-  if (sent === 0) throw new Error("오디오가 비어 있습니다. 소리가 없는 영상이거나 서버에서 변환하지 못했습니다.");
-  // 서버는 변환 중 오류가 나도 스트림을 정상 종료하므로 길이로 끊김을 알아낸다
-  if (job.duration && job.totalSeconds < job.duration * MIN_AUDIO_RATIO) {
-    throw new Error(`오디오가 중간에 끊겼습니다 (${fmtDuration(job.totalSeconds)} / ${fmtDuration(job.duration)}). 다시 시도하세요.`);
+  if (sent === 0) throw new Error("오디오가 비어 있습니다. 소리가 없는 영상입니다.");
+  // 영상 길이보다 짧으면 중간에 끊긴 것이다
+  const expected = job.duration || doneDuration;
+  if (expected && job.totalSeconds < expected * MIN_AUDIO_RATIO) {
+    throw new Error(`오디오가 중간에 끊겼습니다 (${fmtDuration(job.totalSeconds)} / ${fmtDuration(expected)}). 다시 시도하세요.`);
   }
 }
 
@@ -176,18 +180,18 @@ function txStatusOf(courseId, moduleItemId) {
 
 function transcribeButton(v, courseId) {
   // 줄마다 한 칸만 쓴다. 다시 변환은 드문 일이라 텍스트 창 안에 둔다.
-  const st = v.audioPath ? txStatusOf(courseId, v.module_item_id) : null;
+  const st = v.mediaPath ? txStatusOf(courseId, v.module_item_id) : null;
   if (st) {
     const label = st === "running" ? "변환 중" : "대기 중";
     return `<button class="btn small ghost" data-tx="${v.module_item_id}" title="${label}" disabled>${iconOnly(st === "running" ? "loader" : "clock", label)}</button>`;
   }
   if (v.transcript_id) return `<button class="btn small ghost" data-tx-open="${v.transcript_id}" title="텍스트 보기">${iconOnly("text-view", "텍스트 보기")}</button>`;
-  if (!v.audioPath) return "";
+  if (!v.mediaPath) return "";
   return `<button class="btn small ghost" data-tx="${v.module_item_id}" title="텍스트로 변환">${iconOnly("text-convert", "텍스트로 변환")}</button>`;
 }
 
 function transcribeGroupButton(items, title) {
-  const n = items.filter((v) => v.audioPath && !v.transcript_id).length;
+  const n = items.filter((v) => v.mediaPath && !v.transcript_id).length;
   if (n < 2) return "";  // 1개뿐이면 그 줄의 버튼과 같은 동작이다
   const label = `전체 텍스트로 변환 (${n})`;
   return `<button class="btn small link" data-tx-group="${esc(items[0].module_id)}" aria-label="${esc(title)} ${label}" title="${label}">${icon("text-convert")}전체 ${n}</button>`;
@@ -195,18 +199,18 @@ function transcribeGroupButton(items, title) {
 
 function wireTranscribe(box, items, courseId) {
   const toJob = (v) => ({ courseId, moduleItemId: v.module_item_id, title: v.title, courseName: v.courseName,
-                          audioPath: v.audioPath, duration: v.duration });
+                          mediaPath: v.mediaPath, duration: v.duration });
   box.querySelectorAll("[data-tx]").forEach((b) => b.addEventListener("click", () => {
     const v = items.find((x) => String(x.module_item_id) === b.dataset.tx);
     if (v) { enqueueTranscription([toJob(v)]); renderVideoList(); }
   }));
   box.querySelectorAll("[data-tx-group]").forEach((b) => b.addEventListener("click", () => {
-    enqueueTranscription(items.filter((v) => String(v.module_id) === b.dataset.txGroup && v.audioPath && !v.transcript_id).map(toJob));
+    enqueueTranscription(items.filter((v) => String(v.module_id) === b.dataset.txGroup && v.mediaPath && !v.transcript_id).map(toJob));
     renderVideoList();
   }));
   box.querySelectorAll("[data-tx-open]").forEach((b) => b.addEventListener("click", () => {
     const v = items.find((x) => String(x.transcript_id) === b.dataset.txOpen);
-    openTranscript(Number(b.dataset.txOpen), v?.audioPath ? toJob(v) : null);
+    openTranscript(Number(b.dataset.txOpen), v?.mediaPath ? toJob(v) : null);
   }));
 }
 

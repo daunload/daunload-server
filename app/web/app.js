@@ -1323,7 +1323,7 @@ function iconLegend(items, phone) {
   const rows = [
     !phone && has((v) => v.linkPath && !v.downloaded_at) && ["download", "내려받기"],
     has((v) => v.downloaded_at) && ["download-done", "받음"],
-    has((v) => v.audioPath && !v.transcript_id) && ["text-convert", "텍스트로 변환"],
+    has((v) => v.mediaPath && !v.transcript_id) && ["text-convert", "텍스트로 변환"],
     has((v) => v.transcript_id) && ["text-view", "텍스트 보기"],
     ...Object.entries(VIDEO_STATUS).map(([key, row]) => has((v) => videoStatus(v) === key) && row),
   ].filter(Boolean);
@@ -1340,19 +1340,18 @@ function renderVideoList() {
   for (const s of saved.values()) {
     if (!live.has(s.module_item_id)) items.push({ ...s, module_id: `saved-${s.module_title}`, available: false, completed: false, savedRow: s });
   }
+  const phone = isPhoneDevice();
   for (const v of items) {
     v.courseName = course?.name || v.savedRow?.course_name || "";
     v.downloaded_at = v.downloaded_at || v.savedRow?.downloaded_at || null;
     v.transcript_id = v.transcript_id ?? v.savedRow?.transcript_id ?? null;
     v.linkPath = v.available ? `/courses/${courseId}/videos/${v.module_item_id}/direct-download`
       : v.savedRow?.saved ? `/saved-videos/${v.savedRow.id}/direct-download` : null;
-    v.audioPath = v.available ? `/courses/${courseId}/videos/${v.module_item_id}/audio-link`
-      : v.savedRow?.saved ? `/saved-videos/${v.savedRow.id}/audio-link` : null;
+    v.mediaPath = phone ? null : v.linkPath;  // 오디오는 PC의 확장 프로그램이 뽑는다
   }
   if (state.notDownloadedOnly) items = items.filter((v) => !v.downloaded_at);
   const box = $("#video-list");
   box.removeAttribute("aria-busy");
-  const phone = isPhoneDevice();
   if (!items.length) {
     box.innerHTML = `<div class="empty"><p>${state.notDownloadedOnly ? "아직 받지 않은 영상이 없습니다." : "이 과목에는 내려받을 수 있는 강의 영상이 없습니다."}</p></div>`;
     return;

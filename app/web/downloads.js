@@ -161,6 +161,12 @@ async function requireDownloadExtension() {
   state.extensionMissing = null;
 }
 
+async function requireAudioExtension() {
+  await requireDownloadExtension();
+  const result = await extensionRequest("ping");
+  if (!result?.audio) throw new Error("아유 하기싫어 확장프로그램을 업데이트해 주세요.");
+}
+
 async function enqueueDirectVideo(item, signal, session = null) {
   signal.throwIfAborted();
   if (!session) session = (await extensionRequest("prepare")).session;

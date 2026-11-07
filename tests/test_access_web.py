@@ -261,7 +261,7 @@ async def test_bulk_download_signed_link_403_switches_to_access_screen(stage):
     await expect(stage.locator("#toast")).not_to_contain_text("관리자 승인이 필요합니다")
 
 
-async def test_transcribe_audio_403_switches_to_access_screen(stage):
+async def test_transcribe_direct_download_403_switches_to_access_screen(stage):
     stage.me = me_of("approved")
     video = {"module_item_id": 12, "module_id": 1, "module_title": "1주차", "title": "2강 재귀", "content_type": "movie",
              "duration": 2, "size": 1, "completed": False, "available": True, "thumbnail_url": None,
@@ -269,9 +269,10 @@ async def test_transcribe_audio_403_switches_to_access_screen(stage):
     stage.handlers[("GET", "/courses")] = (200, [COURSE])
     stage.handlers[("GET", "/saved-videos")] = (200, [])
     stage.handlers[("GET", "/courses/1/videos")] = (200, [video])
-    stage.handlers[("POST", "/courses/1/videos/12/audio-link")] = (200, {"url": "/audio/tok", "file_name": "a.mp4", "expires_in_minutes": 10})
-    stage.handlers[("GET", "/audio/tok")] = REQUIRED
+    stage.handlers[("POST", "/courses/1/videos/12/direct-download")] = REQUIRED
     await stage.goto("http://dashboard.test/#videos")
+    await stage.evaluate("""window.extensionRequest = async (action) => action === "ping"
+      ? { version: 1, sessions: true, queue: true, audio: true } : { opened: true, closed: true };""")
     stage.me = me_of("revoked")
     await stage.get_by_role("button", name="텍스트로 변환", exact=True).click()
     await expect(stage.get_by_role("heading", name="권한이 회수됐어요")).to_be_visible()
