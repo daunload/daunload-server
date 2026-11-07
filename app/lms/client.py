@@ -1,7 +1,7 @@
 """LMS 조회 클라이언트 (chlwhdtn03/LMS-API의 LmsCourseClient.kt 이식).
 
 - /learningx/* 는 Bearer 토큰, /api/v1/* 는 세션 쿠키로 인증한다.
-- 세션이 만료되면(401, 로그인 페이지로 리다이렉트) 저장된 SSO 토큰으로 학습 세션을 한 번 다시 발급받는다.
+- 세션이 만료되면(401, 로그인 페이지로 리다이렉트) 등록된 복구 함수 또는 SSO로 한 번 다시 발급받는다.
   학교 비밀번호는 보관하지 않는다.
 - 요청 사이에 최소 간격을 두어 학교 서버에 부담을 주지 않는다.
 """
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any, TypeVar
 
@@ -41,8 +42,11 @@ class LmsClient:
         *,
         http: httpx.AsyncClient | None = None,
         min_interval: float = 0.3,
+        renew: Callable[[LmsSession], Awaitable[LmsSession]] | None = None,
     ) -> None:
         self.session = session
+        self._renew = renew
+        self._renew_lock = asyncio.Lock()
         self._http = http or auth.new_http_client()
         self._owns_http = http is None
         self._min_interval = min_interval
@@ -78,13 +82,14 @@ class LmsClient:
         return auth.export_cookies(self._http.cookies)
 
     def can_renew(self) -> bool:
-        return bool(self.session.sso_token or auth.sso_token(self.session.cookies))
+        return bool(self._renew or self.session.sso_token or auth.sso_token(self.session.cookies))
 
     async def relogin(self) -> None:
-        """SSO 토큰으로 학습 세션을 다시 발급받는다. SSO도 만료됐으면 SsoExpired."""
-        self.session = await auth.renew_from_sso(self.session)
-        self._http.cookies.clear()
-        auth.import_cookies(self._http, self.session.cookies)
+        """서비스의 개인 토큰/SSO 복구 함수 또는 기본 SSO 경로로 재발급한다."""
+        async with self._renew_lock:
+            self.session = await (self._renew or auth.renew_from_sso)(self.session)
+            self._http.cookies.clear()
+            auth.import_cookies(self._http, self.session.cookies)
 
     async def _throttle(self) -> None:
         async with self._lock:

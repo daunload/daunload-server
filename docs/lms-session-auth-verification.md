@@ -225,3 +225,27 @@ debug/sso-renewal-20261106T092937Z.jsonl
 - [AWS KMS 기본 키 정책과 관리자 권한](https://docs.aws.amazon.com/kms/latest/developerguide/key-policy-default.html)
 - [OWASP 세션 만료 설명](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html#automatic-session-expiration)
 - [MDN 쿠키 설명](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Cookies)
+
+## 11. 개인 액세스 토큰 기반 복구 (2026-11-07)
+
+구현: `app/lms/personal_token.py`, `app/services/lms_access.py`.
+
+개인 토큰은 LearningX Bearer 토큰과 다르다. 실제 계정에서 개인 토큰을 LearningX에 직접 보내면
+HTTP 400, Canvas 쿠키만 보내면 HTTP 401이 반환됐다. 다음 정상 연결로 별도의 LearningX 토큰을 얻었다.
+
+1. 개인 토큰으로 Canvas `/api/v1/users/self/profile` 본인 확인.
+2. `/login/session_token`의 일회용 주소로 새 Canvas 웹 세션 생성 및 사용자 재확인.
+3. 수강 과목의 탭에서 주차학습 메뉴를 탐색하고 Canvas가 만든 서명된 LTI 폼 확인.
+4. 폼을 `/learningx/lti/modulebuilder`에 전달해 `xn_api_token` 발급.
+5. 별도 쿠키 없는 클라이언트에서 LearningX Bearer 인증으로 학기·과목·출석·모듈 확인.
+
+기존 쿠키와 비밀번호 없는 상태에서 이 흐름을 반복 확인했고, 구현한 함수로도 과목 10개,
+출석현황 10개, 표본 과목의 모듈 15개 및 영상 상세정보를 조회했다.
+영상 진입 페이지의 서명된 연결 폼도 확인했으나 영상 도구 실행·재생·출석 변경은 수행하지 않았다.
+장기 유효성과 실제 서버 측 만료 후 복구는 아직 별도 측정 대상이다.
+
+계정 화면에서 개인 토큰을 선택적으로 등록할 수 있다. 전체 연결 검증 성공 후에만 개인 토큰과
+새 세션을 별도로 암호화해 저장한다. 세션 만료 시 개인 토큰으로 복구하고 실패하면 기존 SSO로
+복구한다. 명확한 개인 토큰 거절만 만료로 표시하며 네트워크 장애·권한 부족은 토큰 폐기로 간주하지 않는다.
+등록·제거·세션 갱신은 버전 조건으로 저장해 오래된 워커가 최신 자격정보를 덮어쓰지 못한다.
+개인 토큰 제거는 서비스 내 암호문만 삭제하며 Canvas에서 토큰 자체를 폐기하지 않는다.

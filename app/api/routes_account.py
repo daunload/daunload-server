@@ -3,21 +3,22 @@ from typing import Annotated
 
 import re
 import time
+import json
 
 from fastapi import APIRouter, Form, HTTPException, Request, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthedUser, CurrentUser, Db, JobQueue, is_admin
-from app.api.schemas import CredentialsOut, TokenOut
+from app.api.schemas import CredentialsOut, TokenOut, PersonalTokenIn
 from app.db.base import utcnow
 from app.db.models import LmsCredential, User
 from app.lms.errors import InvalidCredentials, LmsError
-from app.lms import auth
-from app.security import create_access_token
+from app.lms import auth, personal_token
+from app.security import create_access_token, encrypt, decrypt
 from app.services.access import access_retry_at, has_access
 from app.services.activity import bump_daily
-from app.services.lms_access import link_session
+from app.services.lms_access import link_session, save_credentials, preserve_sso, CredentialsChanged
 
 router = APIRouter()
 
@@ -123,7 +124,10 @@ async def login(
         await db.flush()
     cred = await db.get(LmsCredential, user.id)
     relinked = cred is None or cred.status != "ok"
-    await link_session(db, user.id, student_id, session)
+    try:
+        await link_session(db, user.id, student_id, session)
+    except CredentialsChanged as e:
+        raise HTTPException(409, str(e)) from None
     # 처음 연동했거나 만료 후 다시 연동한 경우에만 동기화한다. 승인 전에는 학교 정보를 가져오지 않는다.
     if relinked and has_access(user):
         await queue.enqueue("sync_user_job", user.id, job_id=f"sync:{user.id}")
@@ -167,6 +171,54 @@ async def get_credentials(user: CurrentUser, db: Db):
     cred = await db.get(LmsCredential, user.id)
     if cred is None:
         raise HTTPException(404, "LMS 계정 정보가 없습니다. 다시 로그인하세요.")
+    return cred
+
+
+@router.put("/lms/access-token", response_model=CredentialsOut, tags=["lms"])
+async def register_personal_token(body: PersonalTokenIn, user: CurrentUser, db: Db, queue: JobQueue):
+    cred = await db.get(LmsCredential, user.id)
+    if cred is None:
+        raise HTTPException(400, "학교 계정에 먼저 로그인하세요.")
+    version = cred.credential_version
+    token = body.access_token.get_secret_value().strip()
+    if not token or len(token) > 4096 or any(c.isspace() or ord(c) < 32 for c in token):
+        raise HTTPException(400, "올바른 개인 액세스 토큰을 입력하세요.")
+    limits = {f"token:{user.id}": MAX_FAILURES}
+    mark = limiter.acquire(limits)
+    if mark is None:
+        raise HTTPException(429, "토큰 확인 요청이 많습니다. 10분 뒤에 다시 시도하세요.")
+    try:
+        session = await personal_token.session_from_token(token, user.student_id)
+    except InvalidCredentials as e:
+        raise HTTPException(400, str(e)) from None
+    except LmsError as e:
+        limiter.release(limits, mark)
+        raise HTTPException(502, str(e)) from None
+    limiter.release(limits, mark)
+    if cred.session_enc:
+        old = auth.LmsSession.from_dict(json.loads(decrypt(cred.session_enc)))
+        preserve_sso(session, old)
+    saved = await save_credentials(db, cred, version,
+        personal_token_enc=encrypt(token), personal_token_status="ok", personal_token_registered_at=utcnow(),
+        session_enc=encrypt(json.dumps(session.to_dict())), status="ok", last_error=None, last_error_at=None,
+        last_login_at=utcnow(), next_sync_at=utcnow(),
+    )
+    del token
+    if not saved:
+        raise HTTPException(409, "인증 정보가 변경되었습니다. 새로고침한 뒤 다시 등록하세요.")
+    await queue.enqueue("sync_user_job", user.id, job_id=f"sync:{user.id}")
+    return cred
+
+
+@router.delete("/lms/access-token", response_model=CredentialsOut, tags=["lms"])
+async def remove_personal_token(user: CurrentUser, db: Db):
+    cred = await db.get(LmsCredential, user.id)
+    if cred is None:
+        raise HTTPException(404, "LMS 계정 정보가 없습니다.")
+    if not await save_credentials(db, cred, cred.credential_version,
+        personal_token_enc=None, personal_token_status="none", personal_token_registered_at=None,
+    ):
+        raise HTTPException(409, "인증 정보가 변경되었습니다. 새로고침한 뒤 다시 제거하세요.")
     return cred
 
 

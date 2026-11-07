@@ -37,6 +37,15 @@ class LmsCredential(Base):
     student_id: Mapped[str] = mapped_column(String(32))
     # Fernet(JSON LmsSession). 학습 세션과 SSO 토큰. 학교 비밀번호는 저장하지 않는다.
     session_enc: Mapped[str | None] = mapped_column(Text)
+    personal_token_enc: Mapped[str | None] = mapped_column(Text)
+    personal_token_status: Mapped[str] = mapped_column(String(16), default="none", server_default="none")
+    personal_token_registered_at: Mapped[datetime | None]
+    credential_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+    @property
+    def personal_token_registered(self) -> bool:
+        return bool(self.personal_token_enc)
+
     status: Mapped[str] = mapped_column(String(16), default="ok")  # ok / invalid(다시 로그인 필요) / error
     last_error: Mapped[str | None] = mapped_column(Text)
     last_error_at: Mapped[datetime | None]

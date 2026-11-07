@@ -1531,13 +1531,56 @@ function viewAccount() {
       ${c ? `<p class="muted small-text">마지막 LMS 로그인 ${c.last_login_at ? fmtDate(new Date(c.last_login_at)) : "없음"},
         다음 자동 동기화 ${c.next_sync_at ? fmtDate(new Date(c.next_sync_at)) : "예정 없음"}</p>` : ""}
       ${c?.last_error ? `<p class="error">${esc(c.last_error)}</p>` : ""}
-      <p class="small-text">학교 로그인이 만료되면 자동 수강과 동기화가 멈춥니다. 로그아웃한 뒤 다시 로그인하면 이어집니다. 학교 비밀번호는 저장하지 않습니다.</p>
+      <p class="small-text">학습 연결이 만료되면 등록한 개인 토큰, 학교 로그인 정보 순으로 복구합니다. 모두 만료되면 다시 로그인하거나 새 토큰을 등록하세요. 학교 비밀번호는 저장하지 않습니다.</p>
+    </div></div>
+    <div class="panel"><div class="panel-body">
+      <h3>개인 액세스 토큰</h3>
+      <p class="small-text">${c?.personal_token_registered ? (c.personal_token_status === "invalid" ? "만료되거나 폐기된 토큰입니다. 새 토큰을 등록하세요." : "등록됨 · 학습 연결 자동 복구에 사용합니다.") : "토큰을 등록하면 학교 비밀번호 없이 학습 연결을 복구할 수 있습니다."}
+        ${c?.personal_token_registered_at ? `등록일 ${fmtDate(new Date(c.personal_token_registered_at))}` : ""}</p>
+      <p class="muted small-text" id="personal-token-help"><a href="https://canvas.ssu.ac.kr/profile/settings" target="_blank" rel="noopener noreferrer">Canvas 설정에서 토큰 발급</a> 후 붙여넣으세요. 토큰은 서버에 암호화해 보관합니다. 만료·폐기 시 새 토큰이 필요합니다.</p>
+      <form id="personal-token-form">
+        <label for="personal-token">개인 액세스 토큰</label>
+        <input id="personal-token" type="password" required maxlength="4096" autocomplete="off" spellcheck="false" aria-describedby="personal-token-help personal-token-error">
+        <p id="personal-token-error" class="error small-text" role="alert" tabindex="-1"></p>
+        <div class="actions"><button class="btn primary" type="submit">${c?.personal_token_registered ? "토큰 교체" : "토큰 등록"}</button>
+        ${c?.personal_token_registered ? '<button class="btn ghost" type="button" id="remove-personal-token">저장된 토큰 제거</button>' : ""}</div>
+      </form>
+      <p class="muted small-text">여기서 제거해도 학교의 토큰과 현재 학습 세션은 유지됩니다. 토큰 자체를 폐기하려면 Canvas 설정에서 삭제하세요.</p>
     </div></div>
     <div class="panel"><div class="panel-body">
       <h3>계정 삭제</h3>
       <p class="muted small-text">저장된 학교 로그인 세션과 동기화한 과목·할 일·공지, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다.</p>
       <div><button class="btn danger" id="delete-me">계정 삭제</button></div>
     </div></div>`;
+  const tokenForm = $("#personal-token-form");
+  async function updatePersonalToken(method) {
+    const input = $("#personal-token", tokenForm);
+    const error = $("#personal-token-error", tokenForm);
+    const submit = tokenForm.querySelector('[type="submit"]');
+    const buttons = [...tokenForm.querySelectorAll("button")];
+    const label = submit.textContent;
+    let body = method === "PUT" ? { access_token: input.value.trim() } : undefined;
+    input.value = "";
+    error.textContent = "";
+    buttons.forEach(b => { b.disabled = true; });
+    input.disabled = true;
+    submit.textContent = method === "PUT" ? "학교 연결 확인 중…" : "제거 중…";
+    try {
+      state.cred = await api("/lms/access-token", { method, ...(body ? { json: body } : {}) });
+      if (state.view === "account") viewAccount();
+      toast(method === "PUT" ? "토큰을 등록하고 학습 연결을 확인했습니다" : "저장된 개인 토큰을 제거했습니다");
+    } catch (err) {
+      error.textContent = err.message;
+      if (tokenForm.isConnected) error.focus();
+    } finally {
+      body = undefined;
+      buttons.forEach(b => { b.disabled = false; });
+      input.disabled = false;
+      submit.textContent = label;
+    }
+  }
+  tokenForm.addEventListener("submit", e => { e.preventDefault(); updatePersonalToken("PUT"); });
+  $("#remove-personal-token")?.addEventListener("click", () => updatePersonalToken("DELETE"));
   $("#delete-me").addEventListener("click", async () => {
     const ok = await confirmDialog({
       title: "계정을 삭제할까요?",

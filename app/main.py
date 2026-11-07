@@ -4,6 +4,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.responses import JSONResponse
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import MutableHeaders
@@ -111,6 +114,13 @@ def create_app(lifespan_=lifespan) -> FastAPI:
                   docs_url="/docs" if docs else None, redoc_url="/redoc" if docs else None,
                   openapi_url="/openapi.json" if docs else None)
     app.add_middleware(SecurityHeaders)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request, exc):
+        if request.url.path == "/lms/access-token":
+            # Pydantic's default errors echo invalid input, including raw secrets.
+            return JSONResponse(status_code=422, content={"detail": "올바른 개인 액세스 토큰을 입력하세요."})
+        return await request_validation_exception_handler(request, exc)
     app.include_router(routes_account.router)
     app.include_router(routes_access.router)
     app.include_router(routes_admin.router)

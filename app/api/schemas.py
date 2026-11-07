@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 
 class Orm(BaseModel):
@@ -20,6 +20,13 @@ class CredentialsOut(Orm):
     last_login_at: datetime | None
     last_synced_at: datetime | None
     next_sync_at: datetime | None
+    personal_token_registered: bool = False
+    personal_token_status: Literal["none", "ok", "invalid"] = "none"
+    personal_token_registered_at: datetime | None = None
+
+
+class PersonalTokenIn(BaseModel):
+    access_token: SecretStr
 
 
 class CourseOut(Orm):

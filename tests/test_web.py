@@ -312,3 +312,43 @@ async def test_privacy_notice_shows_again_after_access_change(dashboard):
     await expect(page.locator("#view")).not_to_be_empty()
     await expect(notice).to_be_hidden()
     assert await page.evaluate("localStorage.getItem('privacy-notice-2026-11-access')") == "1"
+
+
+async def test_personal_token_registration_error_and_removal(dashboard):
+    page, data = dashboard
+    received = []
+    success = False
+
+    async def token_route(route):
+        nonlocal success
+        method = route.request.method
+        if method == 'PUT':
+            received.append(route.request.post_data_json)
+            if not success:
+                await route.fulfill(status=400, json={'detail': '다른 계정의 토큰입니다.'})
+                return
+            data['/lms/credentials'].update(personal_token_registered=True, personal_token_status='ok')
+        else:
+            data['/lms/credentials'].update(personal_token_registered=False, personal_token_status='none')
+        await route.fulfill(json=data['/lms/credentials'])
+
+    await page.route('**/lms/access-token', token_route)
+    await page.goto('http://dashboard.test/#account')
+    field = page.get_by_label('개인 액세스 토큰', exact=True)
+    await field.fill('private-ui-secret')
+    await page.get_by_role('button', name='토큰 등록', exact=True).click()
+    await expect(page.locator('#personal-token-error')).to_have_text('다른 계정의 토큰입니다.')
+    await expect(field).to_have_value('')
+    await expect(page.locator('#personal-token-error')).to_be_focused()
+    assert received == [{'access_token': 'private-ui-secret'}]
+    assert not await page.evaluate("JSON.stringify(localStorage).includes('private-ui-secret')")
+    success = True
+    await field.fill('private-ui-secret')
+    await page.get_by_role('button', name='토큰 등록', exact=True).click()
+    await expect(page.get_by_role('button', name='토큰 교체', exact=True)).to_be_visible()
+    await expect(field).to_have_value('')
+    for width in (1440, 390, 320):
+        await page.set_viewport_size({'width': width, 'height': 844})
+        assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    await page.get_by_role('button', name='저장된 토큰 제거', exact=True).click()
+    await expect(page.get_by_role('button', name='토큰 등록', exact=True)).to_be_visible()
