@@ -448,6 +448,26 @@ async def test_audio_close_stops_fetching(tmp_path, school_cdn):
         assert await page.evaluate('extensionRequest("audio-close", {job: "55555555-5555-4555-8555-555555555555"})') == {'closed': True}
 
 
+async def test_second_open_tells_the_first_job_why_it_stopped(tmp_path, school_cdn):
+    port, _, _ = school_cdn
+    first, second = '99999999-9999-4999-8999-999999999991', '99999999-9999-4999-8999-999999999992'
+    url = f'{CDN}/tone-opus-12s.mp4'
+    async with dashboard(tmp_path, port) as (context, page):
+        assert await page.evaluate(FIRST_PCM, {'job': first, 'url': url, 'chunkBytes': SMALL_RANGE}) == 80000
+        assert await page.evaluate(FIRST_PCM, {'job': second, 'url': url, 'chunkBytes': SMALL_RANGE}) == 80000
+        message = await page.evaluate(AUDIO_ERROR, {'action': 'audio-read', 'data': {'job': first}})
+        assert message == '다른 탭에서 텍스트 변환을 시작해 이 변환을 멈췄습니다.', message
+        # The running job is unaffected; closing it leaves no offscreen document behind.
+        assert await page.evaluate('job => extensionRequest("audio-close", {job})', second) == {'closed': True}
+        for _ in range(50):
+            contexts = await context.service_workers[0].evaluate(
+                "chrome.runtime.getContexts({contextTypes: ['OFFSCREEN_DOCUMENT']}).then(c => c.length)")
+            if contexts == 0:
+                break
+            await asyncio.sleep(.1)
+        assert contexts == 0
+
+
 async def worker_targets(cdp):
     targets = (await cdp.send('Target.getTargets'))['targetInfos']
     return [t['targetId'] for t in targets if t['type'] == 'service_worker' and t['url'].endswith('/worker.js')]

@@ -183,6 +183,7 @@ async function handleAudio(message) {
   }
   const reply = await chrome.runtime.sendMessage(forward);
   if (!reply) throw new Error("텍스트 변환 작업이 끝났습니다. 다시 시도해 주세요.");
+  if (reply.idle) await chrome.offscreen.closeDocument().catch(() => {});
   if (reply.error) throw new Error(reply.error);
   return reply.result;
 }

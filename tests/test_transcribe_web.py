@@ -1,6 +1,7 @@
 """브라우저 텍스트 변환 흐름. 실제 Whisper 대신 가짜 Worker로 확장 프로그램 PCM → Worker → 서버 저장 경로를 확인한다."""
 
 import json
+from pathlib import Path
 
 import pytest
 from playwright.async_api import expect
@@ -273,3 +274,31 @@ async def _start_one(page, data, worker, audio_seconds=3, duration=3):
     saved = await _setup(page, data, worker=worker, duration=duration)
     await page.get_by_role("button", name="텍스트로 변환", exact=True).click()
     return saved
+
+
+async def test_audio_requests_wait_60s_and_blame_the_school_server(dashboard):
+    page, _ = dashboard
+    await page.add_script_tag(path=str(Path(__file__).parent.parent / "app/web/downloads.js"))
+    await page.clock.install()
+    # No extension answers here, so every request ends by timeout.
+    await page.evaluate("""() => {
+      window.__out = {};
+      window.postMessage = () => {};  // the page origin is opaque here; nobody answers anyway
+      if (!crypto.randomUUID) crypto.randomUUID = () => Math.random().toString(16).slice(2);  // test page is plain http
+      for (const action of ["audio-read", "ping", "status"]) {
+        extensionRequest(action).then(() => { window.__out[action] = "ok"; },
+          (e) => { window.__out[action] = { message: e.message, code: e.code }; });
+      }
+    }""")
+    await page.clock.run_for(2000)
+    out = await page.evaluate("window.__out")
+    assert out["ping"]["code"] == "EXTENSION_MISSING"
+    assert "audio-read" not in out and "status" not in out
+    await page.clock.run_for(13500)  # 15.5 s: other actions time out, audio does not
+    out = await page.evaluate("window.__out")
+    assert "연결하지 못했습니다" in out["status"]["message"] and "audio-read" not in out
+    await page.clock.run_for(44000)  # 59.5 s
+    assert "audio-read" not in await page.evaluate("window.__out")
+    await page.clock.run_for(1000)
+    out = await page.evaluate("window.__out")
+    assert out["audio-read"] == {"message": "학교 서버 응답이 늦어 텍스트 변환을 멈췄습니다. 다시 시도해 주세요.", "code": None}

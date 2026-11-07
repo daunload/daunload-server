@@ -7,6 +7,11 @@ const READ_CHUNK_SECONDS = 5;
 const LIMIT = RATE * READ_CHUNK_SECONDS;
 const FAILED = "학교 서버가 영상을 주지 않았습니다. 목록을 새로고침한 뒤 다시 시도하세요.";
 const MISSING = "텍스트 변환 작업이 끝났습니다. 다시 시도해 주세요.";
+const REPLACED = "다른 탭에서 텍스트 변환을 시작해 이 변환을 멈췄습니다.";
+const REPLACED_TTL_MS = 10 * 60 * 1000;
+
+// 다른 작업이 열려 밀려난 작업 번호. 그 작업의 다음 read가 이유를 알 수 있게 잠시 기억한다.
+const replaced = new Map();
 
 let current = null;
 let reads = Promise.resolve();
@@ -14,10 +19,18 @@ let reads = Promise.resolve();
 function closeJob(job) {
   if (!job) return;
   job.ctrl.abort();
+  // yield에 멈춘 생성기의 finally(디코더 정리)가 돌도록 닫는다.
+  Promise.resolve(job.iterator?.return?.()).catch(() => {});
   if (current === job) current = null;
 }
 
 function open(id, url, chunkBytes) {
+  if (current && current.id !== id) {
+    const now = Date.now();
+    for (const [key, at] of replaced) if (now - at > REPLACED_TTL_MS) replaced.delete(key);
+    replaced.set(current.id, now);
+  }
+  replaced.delete(id);
   closeJob(current);
   const ctrl = new AbortController();
   const job = {
@@ -115,13 +128,13 @@ async function handle(message) {
   }
   if (message.action === "audio-read") {
     const run = reads.then(async () => {
-      if (!job || current !== job) throw new Error(MISSING);
+      if (!job || current !== job) throw new Error(replaced.has(message.job) ? REPLACED : MISSING);
       try {
         return await read(job, message.url);
       } catch (error) {
         const active = current === job;
         closeJob(job);
-        if (!active) throw new Error(MISSING);
+        if (!active) throw new Error(replaced.has(message.job) ? REPLACED : MISSING);
         console.warn("audio extraction failed", error);
         throw new Error(error instanceof AudioExtractError ? error.message : FAILED);
       }
@@ -135,8 +148,9 @@ async function handle(message) {
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (message?.target !== "offscreen-audio" || sender.id !== chrome.runtime.id || sender.tab) return false;
   handle(message).then(
-    (result) => respond({ result }),
-    (error) => respond({ error: error.message }),
+    // idle: 남은 작업이 없으면 서비스 워커가 오프스크린 문서를 닫는다.
+    (result) => respond({ result, idle: current === null }),
+    (error) => respond({ error: error.message, idle: current === null }),
   );
   return true;
 });

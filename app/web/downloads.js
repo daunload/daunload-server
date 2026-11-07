@@ -132,7 +132,9 @@ async function saveToFolder(dir, item, signal) {
 
 
 // The bridge is injected only on the configured dashboard origin by the extension.
+const AUDIO_REQUEST_TIMEOUT_MS = 60000;  // 학교 CDN이 느릴 수 있어 오디오 요청은 더 기다린다
 function extensionRequest(action, data = {}) {
+  const isAudio = action.startsWith("audio-");
   return new Promise((resolve, reject) => {
     const id = crypto.randomUUID();
     const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); };
@@ -145,10 +147,11 @@ function extensionRequest(action, data = {}) {
     };
     const timer = setTimeout(() => {
       cleanup();
+      if (isAudio) return reject(new Error("학교 서버 응답이 늦어 텍스트 변환을 멈췄습니다. 다시 시도해 주세요."));
       const error = new Error("아유 하기싫어 확장프로그램에 연결하지 못했습니다. 설치·사용 설정 후 페이지를 새로고침해 주세요.");
       if (action === "ping") error.code = "EXTENSION_MISSING";
       reject(error);
-    }, action === "ping" ? 1500 : 15000);
+    }, action === "ping" ? 1500 : isAudio ? AUDIO_REQUEST_TIMEOUT_MS : 15000);
     window.addEventListener("message", receive);
     window.postMessage({ channel: "ssu-download-request", id, action, ...data }, location.origin);
   });
