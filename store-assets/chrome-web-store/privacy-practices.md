@@ -20,7 +20,11 @@ chrome.storage.session에 다운로드 작업의 영상 주소, 파일명, 대�
 
 ## offscreen 권한 이유 — 복사할 문구
 
-사용자가 대시보드에서 텍스트 변환을 시작하면, 학교 CDN의 강의 영상에서 오디오를 디코딩(AudioDecoder, mp4box)하기 위해 오프스크린 문서를 사용합니다. 서비스 워커는 오디오 디코딩과 장시간 작업을 유지할 수 없어 필요합니다. 오프스크린 문서는 확장 ZIP에 포함된 코드만 실행하며 원격 코드를 사용하지 않습니다. 작업이 끝나면 문서를 닫습니다.
+사용자가 https://daunload.cloud/ 대시보드에서 강의 영상의 텍스트 변환(자막 생성)을 직접 시작했을 때만 오프스크린 문서를 엽니다. 이 문서는 학교 CDN에서 해당 영상을 구간별로 읽어, 브라우저 내장 WebCodecs AudioDecoder로 소리만 디코딩하고 16kHz 모노 오디오로 바꿔 대시보드 탭에 넘깁니다. 서비스 워커에는 AudioDecoder가 없고 수십 분짜리 작업 상태를 유지할 수 없어서 오프스크린 문서가 필요합니다. 화면에 아무것도 표시하지 않고, 확장 ZIP에 포함된 코드(offscreen.js, audio-extract.mjs, 번들된 mp4box)만 실행하며, 영상과 오디오를 어떤 서버로도 보내지 않습니다. 변환이 끝나거나 취소되면 문서를 닫습니다.
+
+(영문이 필요하면)
+
+The offscreen document is opened only when the user starts transcription of a lecture video on the https://daunload.cloud/ dashboard. It reads that video from the school CDN in byte ranges, decodes only the audio track with the browser's built-in WebCodecs AudioDecoder, converts it to 16 kHz mono PCM and hands it to the dashboard tab for in-browser speech-to-text. A service worker cannot do this: AudioDecoder is not available there and it cannot keep the state of a job that runs for tens of minutes. The document shows no UI, runs only code bundled in the extension package (offscreen.js, audio-extract.mjs and the bundled mp4box library), and never sends video or audio to any server. It is closed when the transcription finishes or is cancelled.
 
 ## declarativeNetRequest 권한 이유 — 복사할 문구
 
