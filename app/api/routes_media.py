@@ -7,7 +7,6 @@
 """
 
 from collections import defaultdict
-from contextlib import aclosing
 from datetime import datetime
 
 import anyio
@@ -24,7 +23,6 @@ from app.db.base import sessionmaker
 from app.db.models import CourseRow, SavedVideo
 from app.config import get_settings
 from app.lms import auth
-from app.lms.audio import SAMPLE_RATE, ffmpeg_path, pcm_stream
 from app.lms.errors import InvalidCredentials, LmsError
 from app.lms.materials import CourseMaterial, check_file_host, commons_download_url, course_materials
 from app.lms.media import (
@@ -47,7 +45,6 @@ router = APIRouter(tags=["videos"])
 
 MAX_DOWNLOADS_PER_USER = 2
 _active: dict[int, int] = defaultdict(int)
-_audio_streams = 0
 
 
 class VideoOut(BaseModel):
@@ -220,15 +217,6 @@ async def create_link(course_id: int, module_item_id: int, user: CurrentUser, db
     return LinkOut(url=request.app.url_path_for("download_video", token=token), file_name=video.file_name)
 
 
-@router.post("/courses/{course_id}/videos/{module_item_id}/audio-link", response_model=LinkOut)
-async def create_audio_link(course_id: int, module_item_id: int, user: CurrentUser, db: Db, request: Request):
-    """전사용 오디오(16kHz 모노 PCM) 스트림 링크. 다운로드 이력에는 남기지 않는다."""
-    video = await _open_video(db, user.id, course_id, module_item_id)
-    token = create_download_token(user.id, {"kind": "audio", "content_id": video.content_id,
-                                            "duration": video.duration, "file_name": video.file_name})
-    return LinkOut(url=request.app.url_path_for("stream_audio", token=token), file_name=video.file_name)
-
-
 @router.get("/courses/{course_id}/materials", response_model=list[MaterialOut])
 async def list_materials(course_id: int, user: CurrentUser, db: Db):
     """과목의 수업자료(commons 파일 + 위키 첨부, LMS에서 실시간 조회)."""
@@ -281,18 +269,6 @@ async def create_saved_link(saved_id: int, user: CurrentUser, db: Db, request: R
     token = create_download_token(user.id, {"media_url": row.media_url, "file_name": row.file_name})
     await record_download(db, user.id, row.lms_course_id, video_key(row.module_item_id), "video", row.title)
     return LinkOut(url=request.app.url_path_for("download_video", token=token), file_name=row.file_name)
-
-
-@router.post("/saved-videos/{saved_id}/audio-link", response_model=LinkOut)
-async def create_saved_audio_link(saved_id: int, user: CurrentUser, db: Db, request: Request):
-    row = await db.get(SavedVideo, saved_id)
-    if row is None or row.user_id != user.id:
-        raise HTTPException(404, "저장된 영상이 아닙니다.")
-    if row.media_url is None:
-        raise HTTPException(409, row.resolve_error or "아직 영상 주소를 저장하지 못했습니다. 다음 동기화 뒤에 다시 시도하세요.")
-    token = create_download_token(user.id, {"kind": "audio", "media_url": row.media_url,
-                                            "duration": row.duration, "file_name": row.file_name})
-    return LinkOut(url=request.app.url_path_for("stream_audio", token=token), file_name=row.file_name)
 
 
 # ----------------------------------------------------------------------
@@ -365,24 +341,16 @@ class _Slot:
     """동시 실행 자리. 검사와 증가 사이에 await가 없어서 동시 요청도 한도를 넘지 못한다.
     release()는 여러 번 불러도 한 번만 돌려놓는다(스트림 정리와 BackgroundTask 양쪽에서 부른다)."""
 
-    def __init__(self, user_id: int, busy: str, audio: bool = False) -> None:
-        global _audio_streams
+    def __init__(self, user_id: int, busy: str) -> None:
         if _active[user_id] >= MAX_DOWNLOADS_PER_USER:
             raise HTTPException(429, f"동시에 {MAX_DOWNLOADS_PER_USER}개까지 받을 수 있습니다. {busy}")
-        if audio and _audio_streams >= get_settings().max_audio_streams:
-            raise HTTPException(429, "서버가 바쁩니다. 잠시 뒤 다시 시도하세요.")
         _active[user_id] += 1
-        if audio:
-            _audio_streams += 1
-        self.user_id, self.audio, self.held = user_id, audio, True
+        self.user_id, self.held = user_id, True
 
     def release(self) -> None:
-        global _audio_streams
         if self.held:
             self.held = False
             _active[self.user_id] -= 1
-            if self.audio:
-                _audio_streams -= 1
 
 
 async def _require_owner_access(user_id: int) -> None:
@@ -443,42 +411,3 @@ async def download_video(token: str, request: Request):
     media_type = "video/mp4" if data.get("kind", "video") == "video" else upstream.headers.get("content-type", "application/octet-stream")
     return StreamingResponse(body(), status_code=upstream.status_code, media_type=media_type,
                              headers=out_headers, background=BackgroundTask(cleanup))
-
-
-@router.get("/audio/{token}", name="stream_audio")
-async def stream_audio(token: str):
-    decoded = decode_download_token(token)
-    if decoded is None or decoded[1].get("kind") != "audio":
-        raise HTTPException(401, "전사 링크가 만료되었거나 올바르지 않습니다. 다시 시도하세요.")
-    user_id, data = decoded
-    await _require_owner_access(user_id)
-    if ffmpeg_path() is None:
-        raise HTTPException(503, "서버에 ffmpeg가 설치되어 있지 않습니다.")
-    slot = _Slot(user_id, "진행 중인 작업이 끝난 뒤 다시 시도하세요.", audio=True)
-    try:
-        if saved_url := data.get("media_url"):
-            url = check_media_host(saved_url)
-        else:
-            async with _relay_client() as http:
-                url = await resolve_media_url(http, data["content_id"])
-    except BaseException as e:
-        slot.release()
-        if isinstance(e, MediaError):
-            raise HTTPException(422, str(e)) from e
-        if isinstance(e, httpx.HTTPError):
-            raise HTTPException(502, f"학교 서버에 연결하지 못했습니다: {e}") from e
-        raise
-
-    async def body():
-        try:
-            async with aclosing(pcm_stream(url, COMMONS_HEADERS)) as pcm:
-                async for chunk in pcm:
-                    yield chunk
-        finally:
-            slot.release()
-
-    headers = {"X-Audio-Sample-Rate": str(SAMPLE_RATE), "Cache-Control": "no-store"}
-    if data.get("duration"):
-        headers["X-Audio-Duration"] = str(data["duration"])
-    return StreamingResponse(body(), media_type="application/octet-stream",
-                             headers=headers, background=BackgroundTask(slot.release))

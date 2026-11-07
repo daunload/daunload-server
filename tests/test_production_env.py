@@ -7,6 +7,8 @@ import sys
 from cryptography.fernet import Fernet
 import pytest
 
+from app.config import Settings
+
 VALIDATOR = Path(__file__).resolve().parents[1] / "deploy/hetzner/validate_env.py"
 spec = importlib.util.spec_from_file_location("production_env", VALIDATOR)
 validator = importlib.util.module_from_spec(spec)
@@ -27,7 +29,7 @@ def production_env(tmp_path, monkeypatch):
 
 def test_regular_settings_can_change_with_existing_keys(production_env, monkeypatch):
     monkeypatch.setenv("ADMIN_STUDENT_IDS", '["20260002"]')
-    monkeypatch.setenv("MAX_AUDIO_STREAMS", "2")
+    monkeypatch.setenv("SYNC_JITTER_MINUTES", "10")
     validator.validate_environment(production_env)
 
 
@@ -47,3 +49,8 @@ def test_invalid_values_do_not_appear_in_validation_logs(production_env, monkeyp
     assert "PRODUCTION_ENV validation failed" in result.stderr
     assert sentinel not in result.stdout + result.stderr
     assert os.environ["FERNET_KEY"] not in result.stdout + result.stderr
+
+
+def test_server_has_no_ffmpeg_audio_path():
+    assert "ffmpeg" not in (Path(__file__).resolve().parent.parent / "Dockerfile").read_text()
+    assert not hasattr(Settings(), "max_audio_streams")

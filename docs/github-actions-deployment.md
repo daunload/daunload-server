@@ -64,7 +64,6 @@ JWT_SECRET=기존_서버의_값
 ADMIN_STUDENT_IDS=["관리자학번"]
 PLAYBACK_HEADLESS=true
 PLAYBACK_BROWSER_CHANNEL=chrome
-MAX_AUDIO_STREAMS=1
 TIMEZONE=Asia/Seoul
 TZ=Asia/Seoul
 ```
@@ -160,7 +159,7 @@ GitHub **Actions → Deploy production**에서 실행 결과를 확인한다.
 6. 새 `DOMAIN`의 공개 HTTPS 상태 확인 후 성공한 이미지 참조를 서버의 `.release.env`에 저장.
 7. 성공·실패 여부와 관계없이 이번 실행의 임시 SSH 규칙 정리.
 
-브라우저·ffmpeg·외부 PostgreSQL 통합 테스트는 자동 배포의 테스트 단계에서 제외한다.
+브라우저·외부 PostgreSQL 통합 테스트는 자동 배포의 테스트 단계에서 제외한다.
 HTTP 상태 확인은 실제 LMS 재생 성공까지 보장하지 않는다.
 새 이미지는 모든 변경을 포함하므로 API·재생 워커·동기화 워커를 함께 업데이트한다.
 

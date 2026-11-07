@@ -120,7 +120,7 @@ def test_uploaded_environment_is_applied_after_backup_and_stopping_services(depl
     config, _, run = deployment
     before = (config / ".env").read_bytes()
     name = ".env.ci-123-1"
-    candidate = b'FERNET_KEY=keep-existing-key\nJWT_SECRET=new-secret\nMAX_AUDIO_STREAMS=2\n'
+    candidate = b'FERNET_KEY=keep-existing-key\nJWT_SECRET=new-secret\nSYNC_JITTER_MINUTES=10\n'
     (config / name).write_bytes(candidate)
     result, calls, order = run(env_name=name)
     assert result.returncode == 0, result.stderr
@@ -138,7 +138,7 @@ def test_failed_environment_deploy_preserves_previous_settings_and_cleans_upload
     config, _, run = deployment
     before = (config / ".env").read_bytes()
     name = ".env.ci-456-1"
-    candidate = b'MAX_AUDIO_STREAMS=2\n'
+    candidate = b'SYNC_JITTER_MINUTES=10\n'
     (config / name).write_bytes(candidate)
     result, _, order = run(env_name=name, fail=failure)
     assert result.returncode != 0

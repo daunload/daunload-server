@@ -17,7 +17,7 @@ CPX02는 RAM 1GB·디스크 20GB라서 이 문서의 전체 서비스 실행과 
 ```
 
 - 강의는 서버 전체에서 하나씩 재생하고, 사용자별 영상 한 개씩 순환 처리한다.
-- 오디오 추출은 동시 1개로 시작한다. Whisper 음성 인식은 사용자 브라우저에서 실행한다.
+- 오디오 추출과 Whisper 음성 인식은 사용자 브라우저(확장 프로그램)에서 실행한다. 서버는 영상과 소리를 받지 않는다.
 - API·PostgreSQL·Redis는 호스트 포트를 열지 않는다. 외부 웹 접속은 Caddy만 받는다.
 - 운영용 설정은 `deploy/hetzner/compose.yml`이다. 루트의 `docker-compose.yml`과 합쳐 실행하지 않는다.
 - 운영용 Compose는 API 시작 때 자동 마이그레이션을 하지 않는다. 관리자가 먼저 한 번 실행한다.
@@ -198,7 +198,7 @@ nano deploy/hetzner/.env
 ```
 
 `DOMAIN=lms.example.com`을 실제 도메인으로 바꾼다. `https://`나 경로는 넣지 않는다.
-`MAX_AUDIO_STREAMS=1`은 유지한다. `LMS_ID`, `LMS_PASSWORD`는 서버 운영에 필요 없다.
+`LMS_ID`, `LMS_PASSWORD`는 서버 운영에 필요 없다.
 
 - `POSTGRES_PASSWORD`: URL에 안전한 16진수로 생성한다. 기존 DB 볼륨이 생긴 뒤 `.env`의 값만 바꿔도 DB 비밀번호는 바뀌지 않는다.
 - `FERNET_KEY`: 저장한 학교 계정 정보를 복호화하는 키다. DB와 함께 복구할 수 있도록 별도로 안전하게 보관한다.
@@ -220,7 +220,7 @@ dc ps
 ```
 
 - `api` 이미지를 한 번 빌드하고 두 워커가 같은 이미지를 사용한다.
-- Playwright·Chrome·ffmpeg를 설치하므로 최초 빌드는 시간이 걸리고 디스크를 수 GB 사용한다.
+- Playwright·Chrome을 설치하므로 최초 빌드는 시간이 걸리고 디스크를 수 GB 사용한다.
 - `alembic upgrade head`가 성공한 뒤 다음 명령으로 넘어간다. 실패하면 워커를 시작하지 말고 오류부터 해결한다.
 - 운영용 Compose는 프로필 없이 재생 워커까지 시작한다. `--profile amd64`를 추가할 필요 없다.
 - API 상태가 정상인 뒤 워커와 Caddy가 시작된다. `--wait`는 워커 프로세스 내부의 정상 동작까지 보장하지 않으므로 로그도 확인한다.
@@ -410,7 +410,6 @@ dc up -d --wait
 | DB 인증 실패 | 최초 볼륨 생성 당시 비밀번호와 운영 `.env`가 일치하는지 확인 |
 | `CHANGE_ME` 또는 키 오류 | `deploy/hetzner/.env`의 세 비밀값과 실제 도메인을 설정했는지 확인 |
 | 빌드 도중 종료·서버 느려짐 | `free -h`, `df -h /`, `sudo docker stats --no-stream`, 호스트 `sudo journalctl -k --grep='Out of memory'` |
-| 오디오 추출이 바쁨(429) | 초기 동시 한도 1개. 먼저 CPU 사용을 확인하고 작업 종료 후 재시도 |
 | DB 연결 수 초과 | API나 워커를 추가로 실행했는지 확인. 기본 구성은 각 1개이며 DB 최대 연결 수는 60 |
 | 웹은 되지만 학교 연동 실패 | API·동기화·재생 워커 로그, 학교 로그인 변화, 유럽 리전에서 학교 CDN 연결 여부 |
 

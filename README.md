@@ -43,7 +43,6 @@ CX23의 서버 생성·HTTPS·환경변수·백업·업데이트·복구는
 cp .env.example .env    # FERNET_KEY, JWT_SECRET 채우기
 uv sync
 uv run playwright install chrome   # Chrome이 이미 설치돼 있으면 생략 가능
-brew install ffmpeg                # 호스트에서 API를 띄울 때(텍스트 변환용 오디오 변환). Docker 이미지에는 들어 있다
 ```
 
 **Docker (API·Postgres·Redis·동기화 워커)**
@@ -101,7 +100,8 @@ API 서버 주소(`http://localhost:8000/`)로 접속하면 대시보드가 열�
   영상은 **크롬 확장프로그램으로 학교 CDN에서 PC에 직접 저장**하며 서버가 중계하지 않는다. 확장 설치와 배포는 [설치 가이드](docs/chrome-download-extension.md)를 따른다.
   영상은 확장프로그램의 저장 완료를 확인한 뒤 받은 것으로 기록한다. 주차의 `전체 내려받기 (N)`는 2개씩 처리하며 대시보드와 다운로드 창을 열어 두어야 한다.
   수업자료는 기존 서버 중계와 링크 발급 기준 이력을 유지하고, 주차의 `전체 내려받기 (N)`는 고른 폴더에 저장한다(데스크톱 Chrome·Edge의 File System Access API).
-- **강의 텍스트 변환(Whisper)**: 텍스트 변환은 서버가 아니라 **사용자 브라우저**에서 한다. 서버는 ffmpeg로 오디오만 16kHz PCM으로 바꿔 스트리밍하고(저장하지 않음), 결과 텍스트만 보관한다.
+- **강의 텍스트 변환(Whisper)**: 텍스트 변환은 서버가 아니라 **사용자 브라우저**에서 한다. 확장 프로그램이 학교 CDN에서 영상을 읽어 사용자 브라우저에서 오디오를 뽑는다. 서버는 영상 주소 발급과 결과 텍스트 저장만 하고, 영상과 소리는 서버로 보내지 않는다.
+  텍스트 변환은 PC Chrome + 확장 프로그램에서만 쓸 수 있고, 휴대폰에서는 변환 버튼이 숨겨진다.
   처음 한 번 Whisper small 모델(수백 MB)을 내려받아 브라우저에 캐시한다. WebGPU가 있으면 GPU로, 없으면 CPU로 돌며 CPU는 강의 길이보다 오래 걸릴 수 있다.
   변환하는 동안 탭을 열어 두어야 하고, 한 번에 하나씩 처리한다. 결과는 다른 기기에서도 보고 .txt로 받을 수 있다.
 
@@ -139,7 +139,6 @@ API 서버 주소(`http://localhost:8000/`)로 접속하면 대시보드가 열�
 | `GET /courses/{id}/videos` · `POST /courses/{id}/videos/{module_item_id}/direct-download` · `POST /saved-videos/{id}/direct-download` · `POST /downloads/complete` | 영상 목록 / 본인 영상의 CDN 주소 발급 / 확장프로그램으로 PC 직접 다운로드 / 완료 보고. 기존 영상 중계는 기본 차단(`ALLOW_VIDEO_RELAY=false`) |
 | `POST /notifications/channels` `{kind: discord\|telegram, ...}` · `POST .../{id}/test` | 알림 채널 |
 | `GET /courses/{id}/materials` · `POST /courses/{id}/materials/{key}/download-link` | 수업자료 목록(commons 파일 + 위키 첨부) / 10분 링크 발급(같은 `/downloads/{token}`으로 중계) |
-| `POST /courses/{id}/videos/{item}/audio-link` · `POST /saved-videos/{id}/audio-link` · `GET /audio/{token}` | 텍스트 변환용 16kHz 모노 PCM 스트림(ffmpeg, 서버 전체 `MAX_AUDIO_STREAMS`개) |
 | `PUT /courses/{id}/videos/{item}/transcript` · `GET /transcripts` · `GET/DELETE /transcripts/{id}` | 브라우저 텍스트 변환 결과 저장(최대 2MB, 다시 하면 덮어씀)·조회·삭제 |
 
 알림: 새 공지, 마감 24시간·3시간 전, 일괄 재생 결과, LMS 로그인 실패. 첫 동기화 때 기존 공지는 알리지 않는다.
@@ -147,7 +146,7 @@ API 서버 주소(`http://localhost:8000/`)로 접속하면 대시보드가 열�
 ## 테스트
 
 ```bash
-uv run pytest            # test_player·*_web은 실제 Chrome으로 가짜 페이지를 띄운다. ffmpeg 테스트는 ffmpeg가 없으면 건너뛴다
+uv run pytest            # test_player·*_web은 실제 Chrome으로 가짜 페이지를 띄운다.
 uv run pytest -m "not browser"
 ```
 

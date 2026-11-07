@@ -26,7 +26,7 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen
       - name: Run tests without a browser or external services
-        run: uv run pytest -m 'not browser and not ffmpeg' -q
+        run: uv run pytest -m 'not browser' -q
 
   build:
     needs: test

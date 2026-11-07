@@ -57,10 +57,7 @@ def _user_routes(app):
 
 
 def _signed(user_id: int, path: str) -> str:
-    if path == "/audio/{token}":
-        data = {"kind": "audio", "media_url": "https://ssuin-object.commonscdn.com/a.mp4", "file_name": "a.mp4"}
-    else:
-        data = {"media_url": "https://ssuin-object.commonscdn.com/a.mp4", "file_name": "a.mp4"}
+    data = {"media_url": "https://ssuin-object.commonscdn.com/a.mp4", "file_name": "a.mp4"}
     return path.replace("{token}", create_download_token(user_id, data))
 
 
@@ -90,7 +87,7 @@ async def test_unapproved_user_is_blocked_everywhere(env):
     h = await _signup(api)
     app = api._transport.app
     routes = _user_routes(app)
-    assert len(routes) >= 37  # 경로를 실제로 훑었는지(작성 시점 37개)
+    assert len(routes) >= 34  # 경로를 실제로 훑었는지(작성 시점 34개)
     assert OPEN <= set(_all_routes(app))  # 열린 경로 목록이 실제 경로와 맞는지
     for status in ("none", "pending", "rejected", "revoked"):
         await _set_status("20201234", status)
@@ -190,11 +187,9 @@ async def test_signed_links_check_owner_access(env):
                           file_name="a.mp4"))
         await db.commit()
     download = (await api.post("/saved-videos/1/download-link", headers=h)).json()["url"]
-    audio = (await api.post("/saved-videos/1/audio-link", headers=h)).json()["url"]
     await _set_status("20201234", "revoked")
-    for url in (download, audio):
-        r = await api.get(url)
-        assert r.status_code == 403 and r.json()["detail"] == ACCESS_REQUIRED, (url, r.text)
+    r = await api.get(download)
+    assert r.status_code == 403 and r.json()["detail"] == ACCESS_REQUIRED, r.text
 
 
 @respx.mock  # 막히지 않으면 학교 서버로 나가는 요청이 실패로 드러난다
@@ -506,3 +501,9 @@ async def test_webhook_url_never_reaches_logs(env, admins, clock, caplog):
         assert (await api.post("/access/request", headers=h)).status_code == 200
     assert secret not in caplog.text and "discord.com/api/webhooks" not in caplog.text
     assert "500" in caplog.text  # 상태 코드는 남는다
+
+
+async def test_audio_routes_are_gone(env):
+    api, _ = env
+    paths = {p for _, p in _all_routes(api._transport.app)}
+    assert not any(p.startswith("/audio/") or p.endswith("/audio-link") for p in paths)
