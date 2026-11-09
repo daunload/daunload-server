@@ -197,9 +197,25 @@ async def test_access_screen_has_logout_delete_and_recheck(stage):
     stage.me = me_of("none")
     await stage.evaluate('localStorage.setItem("token", "t")')
     await stage.reload()
-    await stage.get_by_role("button", name="로그아웃", exact=True).click()
+    async with stage.expect_request(lambda r: r.url.endswith("/auth/logout") and r.method == "POST") as req:
+        await stage.get_by_role("button", name="로그아웃", exact=True).click()
+    assert (await req.value).headers["authorization"] == "Bearer t"  # 서버에서도 토큰을 폐기한다
     await expect(stage.locator("#auth")).to_be_visible()
     await expect(stage.locator("#access")).to_be_hidden()
+
+
+async def test_renewed_token_header_replaces_stored_token(stage):
+    stage.me = me_of("pending", requested=REQUESTED)
+
+    async def renewing_me(r):
+        await r.fulfill(json=stage.me, headers={"X-Access-Token": "renewed"})
+    await stage.route("http://dashboard.test/me", renewing_me)
+    await stage.goto("http://dashboard.test/")
+    await expect(stage.get_by_role("heading", name="승인을 기다리는 중")).to_be_visible()
+    assert await stage.evaluate('localStorage.getItem("token")') == "renewed"
+    async with stage.expect_request("http://dashboard.test/me") as req:
+        await stage.get_by_role("button", name="상태 다시 확인").click()
+    assert (await req.value).headers["authorization"] == "Bearer renewed"
 
 
 @pytest.mark.parametrize("me", [me_of("none"), me_of("pending", requested=REQUESTED), me_of("rejected", retry=FUTURE)])

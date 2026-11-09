@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     # 학교 로그인 세션 암호화용 Fernet 키 (Fernet.generate_key()로 생성)
     fernet_key: str = ""
     jwt_secret: str = "change-me"
-    jwt_expire_minutes: int = 60 * 24
+    jwt_expire_minutes: int = 60 * 24 * 30  # 쓰는 동안은 절반이 지날 때마다 서버가 새 토큰을 내려준다
     admin_student_ids: list[str] = []
     # /docs, /redoc, /openapi.json 공개 여부. 운영에서는 끈다(개발용 .env에서 켠다).
     api_docs: bool = False

@@ -97,7 +97,7 @@ async function recheckAccess() {
 }
 $("#access-recheck").addEventListener("click", (e) => withPending(e.currentTarget, "확인 중", recheckAccess));
 
-$("#access-logout").addEventListener("click", logout);
+$("#access-logout").addEventListener("click", serverLogout);
 $("#access-delete").addEventListener("click", async (e) => {
   // 학번을 모르면(열린 탭에서 /me가 실패해 전환된 경우) 입력 확인을 건너뛰지 않고 먼저 학번을 알아낸다
   if (!accessMe.student_id) {

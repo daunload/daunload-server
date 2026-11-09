@@ -97,7 +97,13 @@ async function api(path, { method = "GET", json, form } = {}) {
   let body;
   if (json !== undefined) { headers["Content-Type"] = "application/json"; body = JSON.stringify(json); }
   if (form) body = new URLSearchParams(form);
+  const sentToken = state.token;
   const res = await fetch(path, { method, headers, body, ...(path.startsWith("/playback/") ? { cache: "no-store" } : {}) });
+  const renewed = res.headers.get("X-Access-Token");
+  if (renewed && sentToken && state.token === sentToken) {  // 그 사이 로그아웃·계정 전환했으면 버린다
+    state.token = renewed;
+    store.set("token", renewed);
+  }
   if (res.status === 401 && state.token) { logout(); throw new ApiError(401, "다시 로그인하세요."); }
   if (res.status === 204) return null;
   const data = await res.json().catch(() => null);
@@ -221,7 +227,13 @@ function logout() {
   $("#password-toggle").setAttribute("aria-pressed", "false");
   showAuth();
 }
-$("#logout-btn").addEventListener("click", logout);
+/** 사용자가 직접 로그아웃할 때: 서버에서도 토큰을 폐기한다. api()는 401이면 logout()을 다시 부르므로 쓰지 않는다. */
+function serverLogout() {
+  const token = state.token;
+  if (token) fetch("/auth/logout", { method: "POST", headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
+  logout();
+}
+$("#logout-btn").addEventListener("click", serverLogout);
 
 /* ---------------- 데이터 ---------------- */
 

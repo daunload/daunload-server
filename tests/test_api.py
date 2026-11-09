@@ -186,6 +186,58 @@ async def test_delete_me_removes_everything(env):
         assert (await db.scalars(select(LmsCredential))).all() == []
 
 
+def _token_expiring_in(user_id: int, seconds: float, version: int = 0) -> dict:
+    import jwt
+    exp = datetime.now(UTC) + timedelta(seconds=seconds)
+    token = jwt.encode({"sub": str(user_id), "ver": version, "exp": exp}, get_settings().jwt_secret, algorithm="HS256")
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def _user_id(api, h) -> int:
+    async with db_base.sessionmaker()() as db:
+        from app.db.models import User
+        return (await db.scalars(select(User))).one().id
+
+
+async def test_fresh_token_is_not_renewed(env):
+    api, _ = env
+    h = await _signup(api)
+    r = await api.get("/me", headers=h)
+    assert r.status_code == 200 and "x-access-token" not in r.headers
+
+
+async def test_token_past_half_life_is_renewed_by_server(env):
+    api, _ = env
+    uid = await _user_id(api, await _signup(api))
+    half = get_settings().jwt_expire_minutes * 60 / 2
+    r = await api.get("/me", headers=_token_expiring_in(uid, half - 60))
+    assert r.status_code == 200
+    renewed = r.headers["x-access-token"]
+    r2 = await api.get("/me", headers={"Authorization": f"Bearer {renewed}"})
+    assert r2.status_code == 200 and "x-access-token" not in r2.headers  # 새 토큰은 다시 수명이 꽉 찼다
+
+
+async def test_expired_token_is_rejected_without_renewal(env):
+    api, _ = env
+    uid = await _user_id(api, await _signup(api))
+    r = await api.get("/me", headers=_token_expiring_in(uid, -5))
+    assert r.status_code == 401 and "x-access-token" not in r.headers
+
+
+async def test_logout_revokes_all_tokens_of_user(env):
+    api, _ = env
+    h = await _signup(api)
+    uid = await _user_id(api, h)
+    other_device = await api.post("/auth/login", data={"username": "20201234", "password": "right"})
+    h2 = {"Authorization": f"Bearer {other_device.json()['access_token']}"}
+    renewing = _token_expiring_in(uid, 60)
+    assert (await api.post("/auth/logout", headers=h)).status_code == 204
+    for headers in (h, h2, renewing):
+        assert (await api.get("/me", headers=headers)).status_code == 401
+    r = await api.post("/auth/login", data={"username": "20201234", "password": "right"})
+    assert (await api.get("/me", headers={"Authorization": f"Bearer {r.json()['access_token']}"})).status_code == 200
+
+
 @respx.mock
 async def test_full_flow_sync_batch_and_notifications(env):
     from app.services.notify import notify_announcements, notify_deadlines

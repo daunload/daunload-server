@@ -21,6 +21,7 @@ ACCESS_REQUIRED = {"code": "ACCESS_REQUIRED", "message": "관리자 승인이 �
 # 승인 없이 열어 두는 경로(설계 6장 "차단"). 관리자 경로는 AdminUser가 따로 막는다.
 OPEN = {
     ("POST", "/auth/login"),
+    ("POST", "/auth/logout"),  # 승인 대기 화면에도 로그아웃이 있다
     ("GET", "/me"),
     ("DELETE", "/me"),
     ("POST", "/access/request"),

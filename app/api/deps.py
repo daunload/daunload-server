@@ -1,12 +1,12 @@
 from typing import Annotated, Any
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import get_db
 from app.db.models import User
-from app.security import decode_access_token
+from app.security import create_access_token, decode_access_token, should_renew
 from app.services.access import has_access, is_admin
 
 oauth2 = OAuth2PasswordBearer(tokenUrl="/auth/login")
@@ -14,12 +14,18 @@ oauth2 = OAuth2PasswordBearer(tokenUrl="/auth/login")
 Db = Annotated[AsyncSession, Depends(get_db)]
 
 
-async def authed_user(db: Db, token: Annotated[str, Depends(oauth2)]) -> User:
-    """로그인만 확인한다. 승인 없이 열어 두는 경로(GET·DELETE /me, 권한 요청)만 AuthedUser로 쓴다."""
+RENEWED_TOKEN_HEADER = "X-Access-Token"
+
+
+async def authed_user(db: Db, response: Response, token: Annotated[str, Depends(oauth2)]) -> User:
+    """로그인만 확인한다. 승인 없이 열어 두는 경로(GET·DELETE /me, 로그아웃, 권한 요청)만 AuthedUser로 쓴다."""
     decoded = decode_access_token(token)
     user = await db.get(User, decoded[0]) if decoded else None
     if user is None or user.token_version != decoded[1]:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "인증이 필요합니다.", headers={"WWW-Authenticate": "Bearer"})
+    if should_renew(decoded[2]):
+        # 쓰는 동안은 로그인이 끊기지 않게 한다. Response를 직접 반환하는 경로에는 붙지 않지만 다음 요청에서 갱신된다.
+        response.headers[RENEWED_TOKEN_HEADER] = create_access_token(user.id, user.token_version)
     return user
 
 

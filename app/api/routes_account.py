@@ -140,6 +140,14 @@ async def _issue_token(db: AsyncSession, user: User) -> TokenOut:
     return TokenOut(access_token=create_access_token(user_id, version))
 
 
+@router.post("/auth/logout", status_code=204, tags=["auth"])
+async def logout(user: AuthedUser, db: Db):
+    """이 사용자의 모든 기기 토큰(다운로드 완료 영수증 포함)을 폐기한다."""
+    await db.execute(update(User).where(User.id == user.id).values(token_version=User.token_version + 1)
+                     .execution_options(synchronize_session=False))
+    await db.commit()
+
+
 @router.get("/me", tags=["auth"])
 async def me(user: AuthedUser):
     """승인 전에도 열려 있다. 화면은 access_status를 보고 앱 또는 권한 화면을 띄운다."""
