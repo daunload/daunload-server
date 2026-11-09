@@ -9,13 +9,16 @@ import json
 import logging
 from contextvars import ContextVar
 from html.parser import HTMLParser
-from urllib.parse import quote, urljoin, urlsplit
+from dataclasses import dataclass
+from datetime import datetime
+from urllib.parse import quote, unquote, urljoin, urlsplit
 
 import httpx
 
 from app.lms.auth import CANVAS_BASE_URL as BASE, LmsSession, export_cookies, find_api_token, new_http_client
 from app.lms.errors import InvalidCredentials, LmsError
 
+log = logging.getLogger(__name__)
 _private_request = ContextVar("private_school_auth_request", default=False)
 
 
@@ -200,3 +203,113 @@ async def _session_from_token(token: str, student_id: str) -> LmsSession:
                             raise LmsError("LearningX 학습 정보를 확인하지 못했습니다.")
                     return LmsSession(user_id=student_id, bearer_token=bearer, cookies=export_cookies(http.cookies))
         raise LmsError("연결 가능한 주차학습 메뉴가 없습니다. 수강 과목을 확인하세요.")
+
+
+# ---------------------------------------------------------------------------
+# Server-managed personal token (Canvas Access Tokens API)
+# ---------------------------------------------------------------------------
+
+MANAGED_TOKEN_PURPOSE = "SSU LMS 자동 수강 (서버 관리)"
+
+
+class ManagedTokenUnavailable(LmsError):
+    """Canvas refused to create a token for this account (e.g. restricted by the school)."""
+
+
+@dataclass
+class ManagedToken:
+    token: str
+    token_id: str
+    expires_at: datetime | None
+
+    def __repr__(self) -> str:  # never print the secret
+        return f"ManagedToken(token_id={self.token_id!r}, expires_at={self.expires_at!r})"
+
+
+def _parse_created(response) -> ManagedToken:
+    if response.status_code in (401, 403):
+        raise ManagedTokenUnavailable("학교 Canvas가 액세스 토큰 자동 발급을 허용하지 않습니다.")
+    if response.status_code != 200:
+        raise LmsError(f"학교 토큰 발급에 실패했습니다 (HTTP {response.status_code}).")
+    data = _json(response)
+    if not isinstance(data, dict):
+        raise LmsError("학교 토큰 발급 응답 형식이 변경되었습니다.")
+    token = data.get("visible_token") or data.get("token")
+    token_id = data.get("id")
+    if not isinstance(token, str) or not token or token_id is None:
+        raise LmsError("학교 토큰 발급 응답 형식이 변경되었습니다.")
+    expires = data.get("expires_at")
+    try:
+        expires_at = datetime.fromisoformat(expires.replace("Z", "+00:00")) if isinstance(expires, str) else None
+    except ValueError:
+        expires_at = None
+    return ManagedToken(token=token, token_id=str(token_id), expires_at=expires_at)
+
+
+async def _csrf_header(http: httpx.AsyncClient) -> dict:
+    """Canvas cookie-authenticated writes need X-CSRF-Token from the _csrf_token cookie."""
+    def cookie():
+        return next((c.value for c in http.cookies.jar if c.name == "_csrf_token" and c.value
+                     and (c.domain or "").lstrip(".") == "canvas.ssu.ac.kr"), None)
+    value = cookie()
+    if value is None:
+        await _request(http, "GET", "/profile/settings", headers={"Accept": "text/html"})
+        value = cookie()
+    if value is None:
+        raise LmsError("학교 Canvas 보안 토큰을 확인하지 못했습니다.")
+    return {"X-CSRF-Token": unquote(value)}
+
+
+async def _verify(token: str, student_id: str) -> None:
+    async with new_http_client() as api:
+        response = await _request(api, "GET", "/api/v1/users/self/profile",
+                                  headers={"Authorization": f"Bearer {token}"})
+        profile = _json(response)
+    if not isinstance(profile, dict) or str(profile.get("login_id") or profile.get("sis_user_id") or "") != student_id:
+        raise TokenIdentityMismatch("발급된 토큰의 계정이 로그인한 학번과 다릅니다.")
+
+
+# Newer Canvas exposes an API; the SSU Canvas (older) answers 404 there and only has the profile page's web
+# routes. Measured on SSU (2026-11-09): those routes work only with a password-login web session. A session
+# made from a token (/login/session_token) is redirected to /login, and the Bearer DELETE API returns 422.
+# So tokens are created and revoked only during a password login; there is no rotation.
+API_TOKENS = "/api/v1/users/self/tokens"
+WEB_TOKENS = "/profile/tokens"
+
+
+async def _create(http: httpx.AsyncClient, student_id: str) -> ManagedToken:
+    """Create with the login session in `http`, then prove the new token belongs to this student."""
+    headers = {**await _csrf_header(http), "Accept": "application/json"}
+    response = await _request(http, "POST", API_TOKENS, headers=headers, data={"token[purpose]": MANAGED_TOKEN_PURPOSE})
+    if response.status_code == 404:
+        response = await _request(http, "POST", WEB_TOKENS, headers=headers,
+                                  data={"access_token[purpose]": MANAGED_TOKEN_PURPOSE})
+    created = _parse_created(response)
+    try:
+        await _verify(created.token, student_id)
+    except LmsError:
+        await revoke_token(http, created.token_id)
+        raise
+    return created
+
+
+async def issue_managed_token(http: httpx.AsyncClient, student_id: str) -> ManagedToken:
+    """Create a personal token with the Canvas web session that a fresh password login left in `http`."""
+    try:
+        return await _create(http, student_id)
+    except (ValueError, KeyError, TypeError, AttributeError):
+        raise LmsError("학교 토큰 발급 응답 형식이 변경되었습니다.") from None
+
+
+async def revoke_token(http: httpx.AsyncClient, token_id: str) -> bool:
+    """Best effort, with the password-login session in `http`. Returns False instead of raising."""
+    try:
+        headers = {**await _csrf_header(http), "Accept": "application/json"}
+        response = await _request(http, "DELETE", f"{WEB_TOKENS}/{quote(str(token_id), safe='')}", headers=headers)
+        # A session that may not manage tokens is redirected to the login page, which ends as HTTP 200.
+        landed_on_login = urlsplit(str(response.url)).path.startswith("/login")
+        ok = response.status_code in (200, 204, 404) and not landed_on_login  # 404: already gone
+    except LmsError:
+        ok = False
+    log.info("managed token revoke result=%s", "ok" if ok else "failed")
+    return ok

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Boolean, Float, ForeignKey, Integer, String, Text, UniqueConstraint, Index, text
+from sqlalchemy import JSON, BigInteger, Boolean, Float, ForeignKey, Integer, String, Text, UniqueConstraint, Index, false, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, utcnow
@@ -40,6 +40,10 @@ class LmsCredential(Base):
     personal_token_enc: Mapped[str | None] = mapped_column(Text)
     personal_token_status: Mapped[str] = mapped_column(String(16), default="none", server_default="none")
     personal_token_registered_at: Mapped[datetime | None]
+    # 서버가 로그인 직후 Canvas Access Tokens API로 발급한 토큰이면 True. Canvas 토큰 ID로 회전·폐기한다.
+    personal_token_managed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    personal_token_id: Mapped[str | None] = mapped_column(String(32))
+    personal_token_expires_at: Mapped[datetime | None]
     credential_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     @property

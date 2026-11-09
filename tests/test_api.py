@@ -103,6 +103,12 @@ async def env(tmp_path, monkeypatch):
         return LmsSession(user_id=user_id, bearer_token="B", cookies=[])
 
     monkeypatch.setattr("app.lms.auth.login", fake_login)
+
+    async def no_managed_token(http, student_id):  # 기본값: 학교가 자동 발급을 막은 것처럼 (네트워크 없음)
+        from app.lms.personal_token import ManagedTokenUnavailable
+        raise ManagedTokenUnavailable("disabled in tests")
+
+    monkeypatch.setattr("app.lms.personal_token.issue_managed_token", no_managed_token)
     from app.api import routes_account
     monkeypatch.setattr(routes_account, "limiter", routes_account.AttemptLimiter())
 

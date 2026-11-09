@@ -1,9 +1,10 @@
 from datetime import timedelta
 from typing import Annotated
 
+import json
+import logging
 import re
 import time
-import json
 
 from fastapi import APIRouter, Form, HTTPException, Request, status
 from sqlalchemy import select, update
@@ -18,9 +19,12 @@ from app.lms import auth, personal_token
 from app.security import create_access_token, encrypt, decrypt
 from app.services.access import access_retry_at, has_access
 from app.services.activity import bump_daily
-from app.services.lms_access import link_session, save_credentials, preserve_sso, CredentialsChanged
+from app.services.lms_access import (
+    CredentialsChanged, link_session, managed_token_values, needs_managed_token, preserve_sso, save_credentials,
+)
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 # 로그인은 매번 학교 SSO로 확인 요청이 가므로, 학번별·IP별 실패 횟수를 제한한다.
 STUDENT_ID = re.compile(r"\d{8,10}")
@@ -106,32 +110,62 @@ async def login(
     mark = limiter.acquire(limits)
     if mark is None:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "로그인 실패가 많습니다. 10분 뒤에 다시 시도하세요.")
-    try:
-        async with auth.new_http_client() as http:
+    existing = await db.get(LmsCredential, user.id) if user else None
+    # 승인 전에는 학교 계정에 아무것도 만들지 않는다(승인 후 다음 로그인에 발급).
+    issue_token = user is not None and has_access(user) and needs_managed_token(existing)
+    managed = None
+    # SSU Canvas는 비밀번호 로그인 세션에서만 토큰을 발급·폐기할 수 있으므로 요청 끝까지 이 세션을 유지한다.
+    async with auth.new_http_client() as http:
+        try:
             session = await auth.login(http, student_id, password)
-    except InvalidCredentials as e:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "학번 또는 비밀번호가 틀렸습니다.") from e
-    except LmsError as e:
+            if issue_token:
+                managed = await _issue_managed_token(http, student_id)
+        except InvalidCredentials as e:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "학번 또는 비밀번호가 틀렸습니다.") from e
+        except LmsError as e:
+            limiter.release(limits, mark)
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"LMS에 로그인하지 못했습니다: {e}") from e
+        finally:
+            del password
         limiter.release(limits, mark)
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"LMS에 로그인하지 못했습니다: {e}") from e
-    finally:
-        del password
-    limiter.release(limits, mark)
 
-    if user is None:
-        user = User(student_id=student_id, consent_at=utcnow())
-        db.add(user)
-        await db.flush()
-    cred = await db.get(LmsCredential, user.id)
-    relinked = cred is None or cred.status != "ok"
-    try:
-        await link_session(db, user.id, student_id, session)
-    except CredentialsChanged as e:
-        raise HTTPException(409, str(e)) from None
+        if user is None:
+            user = User(student_id=student_id, consent_at=utcnow())
+            db.add(user)
+            await db.flush()
+        cred = await db.get(LmsCredential, user.id)
+        relinked = cred is None or cred.status != "ok"
+        try:
+            cred = await link_session(db, user.id, student_id, session)
+        except CredentialsChanged as e:
+            if managed:
+                await personal_token.revoke_token(http, managed.token_id)
+            raise HTTPException(409, str(e)) from None
+        if managed:
+            old_id = cred.personal_token_id if cred.personal_token_managed else None
+            if await save_credentials(db, cred, cred.credential_version, **managed_token_values(managed)):
+                if old_id:
+                    await personal_token.revoke_token(http, old_id)  # 더 이상 쓰지 않는 이전 서버 관리 토큰
+            else:
+                await personal_token.revoke_token(http, managed.token_id)
+            del managed
     # 처음 연동했거나 만료 후 다시 연동한 경우에만 동기화한다. 승인 전에는 학교 정보를 가져오지 않는다.
     if relinked and has_access(user):
         await queue.enqueue("sync_user_job", user.id, job_id=f"sync:{user.id}")
     return await _issue_token(db, user)
+
+
+async def _issue_managed_token(http, student_id: str):
+    """실패해도 로그인은 계속한다(학교가 토큰 발급을 막았거나 일시 장애). 이 경우 SSO 복구와 수동 등록이 남는다."""
+    try:
+        managed = await personal_token.issue_managed_token(http, student_id)
+        log.info("managed token issue result=ok")
+        return managed
+    except personal_token.ManagedTokenUnavailable:
+        log.info("managed token issue result=restricted")
+    except LmsError:
+        log.info("managed token issue result=unavailable")
+    return None
 
 
 async def _issue_token(db: AsyncSession, user: User) -> TokenOut:
@@ -169,7 +203,8 @@ async def _record_login(db: AsyncSession, user_id: int) -> None:
 
 @router.delete("/me", status_code=204, tags=["auth"])
 async def delete_me(user: AuthedUser, db: Db):
-    """계정과 저장된 학교 로그인 세션, 동기화한 데이터를 모두 지운다."""
+    """계정과 저장된 학교 로그인 세션, 동기화한 데이터를 모두 지운다.
+    서버가 만든 Canvas 토큰은 비밀번호 로그인 세션 없이 폐기할 수 없으므로, Canvas 설정에서 지우도록 화면에서 안내한다."""
     await db.delete(user)
     await db.commit()
 
@@ -208,6 +243,7 @@ async def register_personal_token(body: PersonalTokenIn, user: CurrentUser, db: 
         preserve_sso(session, old)
     saved = await save_credentials(db, cred, version,
         personal_token_enc=encrypt(token), personal_token_status="ok", personal_token_registered_at=utcnow(),
+        personal_token_managed=False, personal_token_id=None, personal_token_expires_at=None,
         session_enc=encrypt(json.dumps(session.to_dict())), status="ok", last_error=None, last_error_at=None,
         last_login_at=utcnow(), next_sync_at=utcnow(),
     )
@@ -223,8 +259,10 @@ async def remove_personal_token(user: CurrentUser, db: Db):
     cred = await db.get(LmsCredential, user.id)
     if cred is None:
         raise HTTPException(404, "LMS 계정 정보가 없습니다.")
+    # SSU Canvas는 토큰에서 만든 세션으로 폐기할 수 없다. 서비스의 암호문만 지우고, Canvas 쪽 삭제는 화면에서 안내한다.
     if not await save_credentials(db, cred, cred.credential_version,
         personal_token_enc=None, personal_token_status="none", personal_token_registered_at=None,
+        personal_token_managed=False, personal_token_id=None, personal_token_expires_at=None,
     ):
         raise HTTPException(409, "인증 정보가 변경되었습니다. 새로고침한 뒤 다시 제거하세요.")
     return cred

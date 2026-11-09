@@ -249,3 +249,28 @@ HTTP 400, Canvas 쿠키만 보내면 HTTP 401이 반환됐다. 다음 정상 연
 복구한다. 명확한 개인 토큰 거절만 만료로 표시하며 네트워크 장애·권한 부족은 토큰 폐기로 간주하지 않는다.
 등록·제거·세션 갱신은 버전 조건으로 저장해 오래된 워커가 최신 자격정보를 덮어쓰지 못한다.
 개인 토큰 제거는 서비스 내 암호문만 삭제하며 Canvas에서 토큰 자체를 폐기하지 않는다.
+
+## 12. SSO 수명과 서버 관리 개인 토큰 (2026-11-09)
+
+### SSO 토큰 수명
+
+`debug/sso-renewal-20261106T092937Z.jsonl`: 같은 SSO 토큰으로 09:29~10:29 UTC 재발급 성공, 10:59 UTC `no_canvas_handoff`.
+30분 간격으로 사용해도 약 1~1.5시간 뒤 만료됐고 토큰 값은 바뀌지 않았다. 사용으로 수명을 늘릴 수 없다.
+개인 토큰이 없는 사용자는 학습 세션이 만료되는 몇 시간 뒤 `SsoExpired`로 복구에 실패한다.
+
+### 서버 관리 개인 토큰 (구현: `app/lms/personal_token.py`, `app/api/routes_account.py`)
+
+본인 계정 측정 결과(`app/lms/managed_token_probe.py`):
+
+| 동작 | 결과 |
+| --- | --- |
+| `POST /api/v1/users/self/tokens`, `/api/v1/users/{id}/tokens`, `/users/self/tokens` | 404 (구버전 Canvas, API 없음) |
+| `POST /profile/tokens` (`access_token[purpose]`, 비밀번호 로그인 세션 + CSRF) | 발급 성공, 만료일 없음 |
+| 발급 토큰으로 LearningX 세션 복구 | 성공 |
+| `DELETE /api/v1/users/self/tokens/{id}` (Bearer) | 422 |
+| 토큰에서 만든 세션(`/login/session_token`)으로 `DELETE /profile/tokens/{id}` | 302 → `/login` |
+| 비밀번호 로그인 세션으로 `DELETE /profile/tokens/{id}` | 200, 이후 토큰 401 |
+
+따라서 토큰 발급·폐기는 비밀번호 로그인 요청 안에서만 한다. 회전은 불가능하며(만료일이 없어 불필요),
+토큰 제거·계정 삭제 시에는 서비스의 암호문만 지우고 Canvas 쪽 삭제는 사용자에게 안내한다.
+승인된 사용자에게만 발급하며, 첫 가입 로그인에는 발급하지 않는다(승인 후 다음 로그인).

@@ -1547,7 +1547,11 @@ function viewAccount() {
     </div></div>
     <div class="panel"><div class="panel-body">
       <h3>개인 액세스 토큰</h3>
-      <p class="small-text">${c?.personal_token_registered ? (c.personal_token_status === "invalid" ? "만료되거나 폐기된 토큰입니다. 새 토큰을 등록하세요." : "등록됨 · 학습 연결 자동 복구에 사용합니다.") : "토큰을 등록하면 학교 비밀번호 없이 학습 연결을 복구할 수 있습니다."}
+      <p class="small-text">${c?.personal_token_registered
+        ? (c.personal_token_status === "invalid"
+          ? (c.personal_token_managed ? "자동 발급한 토큰이 만료되거나 폐기됐습니다. 다시 로그인하면 새로 발급합니다." : "만료되거나 폐기된 토큰입니다. 새 토큰을 등록하세요.")
+          : (c.personal_token_managed ? "로그인할 때 서버가 자동 발급해 관리합니다 · 학습 연결 자동 복구에 사용합니다. 제거해도 Canvas 설정 > 승인된 통합의 ‘SSU LMS 자동 수강’ 토큰은 직접 삭제해야 합니다." : "등록됨 · 학습 연결 자동 복구에 사용합니다."))
+        : "로그인하면 서버가 토큰을 자동 발급합니다. 직접 발급한 토큰을 등록할 수도 있습니다."}
         ${c?.personal_token_registered_at ? `등록일 ${fmtDate(new Date(c.personal_token_registered_at))}` : ""}</p>
       <p class="muted small-text" id="personal-token-help"><a href="https://canvas.ssu.ac.kr/profile/settings" target="_blank" rel="noopener noreferrer">Canvas 설정에서 토큰 발급</a> 후 붙여넣으세요. 토큰은 서버에 암호화해 보관합니다. 만료·폐기 시 새 토큰이 필요합니다.</p>
       <form id="personal-token-form">
@@ -1596,7 +1600,8 @@ function viewAccount() {
   $("#delete-me").addEventListener("click", async () => {
     const ok = await confirmDialog({
       title: "계정을 삭제할까요?",
-      body: ["저장된 학교 로그인 세션과 동기화한 과목·할 일·공지, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다."],
+      body: ["저장된 학교 로그인 세션과 동기화한 과목·할 일·공지, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다.",
+        "서버가 발급한 Canvas 토큰은 Canvas 설정 > 승인된 통합에서 ‘SSU LMS 자동 수강’ 항목을 직접 삭제해 주세요."],
       requireText: state.me.student_id, requireLabel: "확인을 위해 학번을 입력하세요",
       confirmLabel: "계정 삭제", danger: true,
     });

@@ -128,3 +128,18 @@ async def _mark(db: AsyncSession, cred: LmsCredential, status: str, error: str) 
     if status == "invalid":
         values["session_enc"] = None
     await save_credentials(db, cred, cred.credential_version, **values)
+
+
+# ---------------------------------------------------------------------------
+# Server-managed personal token
+# ---------------------------------------------------------------------------
+
+def managed_token_values(created: personal_token.ManagedToken) -> dict:
+    return dict(personal_token_enc=encrypt(created.token), personal_token_status="ok",
+                personal_token_registered_at=utcnow(), personal_token_managed=True,
+                personal_token_id=created.token_id, personal_token_expires_at=created.expires_at)
+
+
+def needs_managed_token(cred: LmsCredential | None) -> bool:
+    """A user-registered working token is never replaced; a managed one only when it stopped working."""
+    return cred is None or not (cred.personal_token_enc and cred.personal_token_status == "ok")

@@ -23,6 +23,7 @@ class CredentialsOut(Orm):
     personal_token_registered: bool = False
     personal_token_status: Literal["none", "ok", "invalid"] = "none"
     personal_token_registered_at: datetime | None = None
+    personal_token_managed: bool = False
 
 
 class PersonalTokenIn(BaseModel):
