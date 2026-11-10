@@ -49,6 +49,17 @@ def test_pending_videos_deadline_cases(due, late, included, deadline):
         assert videos[0].deadline == expected
 
 
+@pytest.mark.parametrize("due, late, included", [
+    (FUTURE, None, True),   # 출석 인정 기간 없이 마감만 있는 영상
+    (None, FUTURE, True),
+    (PAST, None, False),
+    (None, None, False),    # 출석도 마감도 없는 참고 영상
+])
+def test_deadline_only_video_without_attendance(due, late, included):
+    videos = pending_videos(COURSE, _modules(use_attendance=False, due_at=due, late_at=late), NOW)
+    assert bool(videos) is included
+
+
 def test_no_deadline_video_still_waits_for_unlock():
     assert pending_videos(COURSE, _modules(unlock_at="2026-10-08T00:00:00Z"), NOW) == []
     assert len(pending_videos(COURSE, _modules(unlock_at="2026-10-01T00:00:00Z"), NOW)) == 1

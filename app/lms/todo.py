@@ -89,12 +89,16 @@ def pending_videos(course: Course, modules: list[Module], now: datetime) -> list
                 continue
             if data.item_content_data is None or data.item_content_data.duration is None:
                 continue
-            if data.use_attendance is False or item.completed is True:
+            if item.completed is True:
                 continue
             deadline_raw = data.late_at if data.late_at and data.late_at.strip() else data.due_at
             try:
                 deadline = parse_dt(deadline_raw)
             except ValueError:  # 값이 있는데 읽을 수 없으면 기간을 알 수 없으므로 넣지 않는다
+                continue
+            # 출석 인정 기간 없이 마감만 정해진 영상은 use_attendance가 false로 온다.
+            # 마감이 있으면 할 일로 보고, 출석도 마감도 없는 영상(참고 자료)만 뺀다.
+            if data.use_attendance is False and deadline is None:
                 continue
             if deadline is not None and deadline <= now:
                 continue

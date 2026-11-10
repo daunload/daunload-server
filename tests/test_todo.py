@@ -44,7 +44,7 @@ def test_parse_dt():
 
 def test_pending_videos_filters_and_orders(modules):
     videos = pending_videos(COURSE, modules, NOW)
-    assert [v.title for v in videos] == ["1주차 영상", "2주차 영상 1", "2주차 영상 2"]
+    assert [v.title for v in videos] == ["1주차 영상", "출석 미반영", "2주차 영상 1", "2주차 영상 2"]
     assert all(isinstance(v, VideoTodo) for v in videos)
 
 
