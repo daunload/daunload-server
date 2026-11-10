@@ -22,7 +22,7 @@ async def mobile_page():
         "/me": {"student_id": "20260001", "access_status": "approved"},
         "/lms/credentials": {"status": "ok", "last_synced_at": "2026-11-05T00:00:00+00:00"},
         "/courses": [{"lms_course_id": 1, "name": "컴퓨터프로그래밍", "professors": "김교수", "attendance": [], "auto_play": False}],
-        "/todos": [], "/playback/batches": [], "/announcements": [], "/notifications/channels": [],
+        "/todos": [], "/playback/batches": [], "/notifications/channels": [],
         "/saved-videos": [
             {"id": 5, "lms_course_id": 1, "course_name": "컴퓨터프로그래밍", "module_item_id": 99, "module_id": 1,
              "module_title": "1주차", "title": "만료 영상", "saved": False, "resolve_error": "주소가 만료됐어요",

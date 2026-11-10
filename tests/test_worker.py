@@ -210,8 +210,8 @@ async def test_schedule_syncs_skips_users_without_auto_play(env):
 
 async def test_deadline_reminders_survive_duplicate_rollbacks(env):
     """중복 알림으로 롤백된 뒤에도 다음 항목을 처리해야 한다(이전엔 MissingGreenlet으로 크론이 실패)."""
-    from app.db.models import AnnouncementRow, TodoRow
-    from app.services.notify import notify_announcements, notify_deadlines
+    from app.db.models import TodoRow
+    from app.services.notify import notify_deadlines
 
     api, _ = env
     await _setup(api)
@@ -220,8 +220,6 @@ async def test_deadline_reminders_survive_duplicate_rollbacks(env):
         for i in range(3):
             db.add(TodoRow(user_id=1, lms_course_id=1, course_name="c", kind="assignment", lms_item_id=i,
                            title=f"과제{i}", deadline=now + timedelta(hours=2)))
-        anns = [AnnouncementRow(user_id=1, lms_course_id=1, course_name="c", lms_id=i, title=f"공지{i}") for i in range(3)]
-        db.add_all(anns)
         await db.commit()
 
     with respx.mock:
@@ -229,10 +227,6 @@ async def test_deadline_reminders_survive_duplicate_rollbacks(env):
         async with db_base.sessionmaker()() as db:
             assert await notify_deadlines(db, 1) == 3
             assert await notify_deadlines(db, 1) == 0  # 모두 중복 → 롤백이 반복돼도 실패하지 않아야 함
-        async with db_base.sessionmaker()() as db:
-            rows = list((await db.scalars(select(AnnouncementRow))).all())
-            await notify_announcements(db, 1, rows)
-            await notify_announcements(db, 1, rows)
     assert await worker.deadline_reminders({}) == 0
 
 

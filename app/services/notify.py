@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import utcnow
 from app.config import get_settings
-from app.db.models import AnnouncementRow, NotificationChannel, NotificationLog, TodoRow, User
+from app.db.models import NotificationChannel, NotificationLog, TodoRow, User
 from app.security import decrypt
 
 log = logging.getLogger(__name__)
@@ -92,12 +92,6 @@ async def notify_admins_of_request(db: AsyncSession, user: User) -> None:
 # notify_user는 중복이면 롤백하고, 롤백은 세션의 ORM 객체를 모두 만료시킨다.
 # 그 뒤 객체 속성을 읽으면 비동기 세션에서 지연 로딩(MissingGreenlet)이 일어나므로,
 # 보낼 내용을 먼저 문자열로 뽑아 둔 뒤 보낸다.
-
-
-async def notify_announcements(db: AsyncSession, user_id: int, rows: list[AnnouncementRow]) -> None:
-    messages = [(f"📢 [{a.course_name}] 새 공지: {a.title}\n{a.url or ''}", f"ann:{a.lms_id}") for a in rows]
-    for text, key in messages:
-        await notify_user(db, user_id, text, key=key)
 
 
 async def notify_deadlines(db: AsyncSession, user_id: int, now: datetime | None = None) -> int:

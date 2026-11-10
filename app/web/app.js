@@ -22,7 +22,7 @@ const store = {
 };
 
 const PRIVACY_NOTICE_KEY = "privacy-notice-2026-11-access";
-const VIEW_NAMES = { dashboard: "학습 현황", courses: "과목", announcements: "공지", playback: "강의 재생", videos: "내려받기·텍스트 변환", notifications: "알림", account: "계정", admin: "사용자 관리" };
+const VIEW_NAMES = { dashboard: "학습 현황", courses: "과목", playback: "강의 재생", videos: "내려받기·텍스트 변환", notifications: "알림", account: "계정", admin: "사용자 관리" };
 /** 주소의 해시를 화면 이름과 하위 경로로 나눈다. `#admin/users/2020%201234` → { view: "admin", path: ["users", "2020 1234"] } */
 function parseHash(hash) {
   const parts = String(hash || "").replace(/^#/, "").split("/").filter(Boolean).map((part) => {
@@ -37,20 +37,14 @@ const state = {
   dashboardPlan: null, dashboardError: null, dashboardLoading: false, playbackStarting: false,
   view: Object.hasOwn(VIEW_NAMES, initialView.view) ? initialView.view : "dashboard",
   adminPath: initialView.view === "admin" && initialView.path.length ? initialView.path : ["overview"],
-  me: null, cred: null, todos: [], courses: [], announcements: null,
-  batches: [], active: null, plan: null, noticeCourse: null,
+  me: null, cred: null, todos: [], courses: [],
+  batches: [], active: null, plan: null,
   videoCourse: null, videoList: null, savedVideos: null,
   videoTab: "videos", materialList: null, notDownloadedOnly: false, bulk: null,
 };
 
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
-
-function textOf(html) {
-  const doc = new DOMParser().parseFromString(html || "", "text/html");
-  doc.querySelectorAll("br, p, div, li").forEach((el) => el.append("\n"));
-  return (doc.body.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 const pad = (n) => String(n).padStart(2, "0");
@@ -202,11 +196,10 @@ function logout() {
   tx.epoch++;  // 취소된 작업이 나중에 끝나도 다음 사용자의 기록에 남지 않게 한다
   cancelTranscription();
   tx.finished = [];
-  Object.assign(state, { me: null, cred: null, todos: [], courses: [], announcements: null,
+  Object.assign(state, { me: null, cred: null, todos: [], courses: [],
     dashboardPlan: null, dashboardError: null, dashboardLoading: false, playbackStarting: false,
     batches: [], active: null, plan: null, planForm: null, planQuery: null,
-    videoCourse: null, videoList: null, savedVideos: null, materialList: null, bulk: null,
-  noticeCourse: null });
+    videoCourse: null, videoList: null, savedVideos: null, materialList: null, bulk: null });
   closeConfirmDialog();
   $("#transcript-dialog")?.close();
   clearToasts();
@@ -309,7 +302,6 @@ $("#sync-btn").addEventListener("click", async () => {
       if (cred.last_synced_at !== before || cred.status !== "ok") { state.cred = cred; break; }
     }
     await loadCore();
-    state.announcements = null;
     renderAll();
     const updated = state.cred?.last_synced_at && state.cred.last_synced_at !== before;
     toast(state.cred?.status !== "ok" ? "동기화하지 못했습니다. 계정 상태를 확인하세요."
@@ -376,7 +368,7 @@ function renderView() {
     b.classList.toggle("on", selected);
     if (selected) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
   });
-  const views = { dashboard: viewDashboard, courses: viewCourses, announcements: viewAnnouncements, playback: viewPlayback, videos: viewVideos, notifications: viewNotifications, account: viewAccount, admin: () => viewAdmin(state.adminPath) };  // viewAdmin은 admin.js에 있다
+  const views = { dashboard: viewDashboard, courses: viewCourses, playback: viewPlayback, videos: viewVideos, notifications: viewNotifications, account: viewAccount, admin: () => viewAdmin(state.adminPath) };  // viewAdmin은 admin.js에 있다
   (views[state.view] || viewDashboard)();
 }
 
@@ -545,40 +537,6 @@ async function onAutoPlay(e) {
     input.checked = !input.checked;
     toast(err.message, true);
   } finally { input.disabled = false; }
-}
-
-/* ---------------- 공지 ---------------- */
-
-async function viewAnnouncements() {
-  if (needCred()) return;
-  if (!state.announcements) {
-    $("#view").innerHTML = `<div class="view-head"><h1>공지</h1></div><div class="panel empty"><p>불러오는 중… 나도 하기 싫어…</p></div>`;
-    try { state.announcements = await api("/announcements?limit=200"); } catch (err) { if (state.view === "announcements") viewError(err.message, viewAnnouncements); return; }
-    if (state.view !== "announcements") return;
-  }
-  const sel = state.noticeCourse;
-  const list = state.announcements.filter((a) => !sel || a.lms_course_id === sel);
-  const courseIds = [...new Set(state.announcements.map((a) => a.lms_course_id))];
-  const nameOf = (id) => state.announcements.find((a) => a.lms_course_id === id)?.course_name || id;
-  const filters = [`<button data-c="" class="${sel ? "" : "on"}">전체</button>`,
-    ...courseIds.map((id) => `<button data-c="${id}" class="${sel === id ? "on" : ""}">${esc(nameOf(id))}</button>`)].join("");
-  const items = list.map((a) => {
-    const files = (a.attachments || []).map((f) => safeUrl(f.url) ? `<a href="${esc(safeUrl(f.url))}" target="_blank" rel="noopener">${esc(f.name)}</a>` : esc(f.name)).join("<br>");
-    const url = safeUrl(a.url);
-    return `<details class="notice"><summary><span class="title">${esc(a.title)}</span>
-      <span class="meta row"><span>${esc(a.course_name)}</span>${a.author ? `<span>${esc(a.author)}</span>` : ""}${a.posted_at ? `<span>${fmtDate(new Date(a.posted_at))}</span>` : ""}</span></summary>
-      <div class="notice-body">${esc(textOf(a.message))}${files ? `<p>${files}</p>` : ""}${url ? `<p><a href="${esc(url)}" target="_blank" rel="noopener">LMS에서 보기</a></p>` : ""}</div></details>`;
-  }).join("");
-  $("#view").innerHTML = `
-    <div class="view-head"><h1>공지</h1></div>
-    <div class="filters">${filters}</div>
-    <div class="panel">${items || `<div class="empty"><p>공지가 없습니다.</p></div>`}</div>`;
-  $("#view .filters").addEventListener("click", (e) => {
-    const b = e.target.closest("button");
-    if (!b) return;
-    state.noticeCourse = b.dataset.c ? Number(b.dataset.c) : null;
-    viewAnnouncements();
-  });
 }
 
 /* ---------------- 강의 재생 ---------------- */
@@ -1223,7 +1181,7 @@ async function viewNotifications() {
         <span class="meta">${fmtDate(new Date(c.created_at))} 등록</span><span style="margin-left:auto" class="row">
         <button class="btn small" data-test="${c.id}">테스트 메시지 보내기</button>
         <button class="btn small danger" data-del="${c.id}">삭제</button></span></li>`).join("")}</ul>`
-    : `<div class="empty"><p>알림 받을 곳을 추가하면 새 공지, 마감 24시간·3시간 전, 재생 결과를 보내 드립니다.</p></div>`;
+    : `<div class="empty"><p>알림 받을 곳을 추가하면 마감 24시간·3시간 전, 재생 결과를 보내 드립니다.</p></div>`;
   $("#view").innerHTML = `
     <div class="view-head"><h1>알림</h1></div>
     <div class="panel">${list}</div>
@@ -1294,7 +1252,7 @@ function viewAccount() {
     </div></div>
     <div class="panel"><div class="panel-body">
       <h3>계정 삭제</h3>
-      <p class="muted small-text">저장된 학교 로그인 세션과 동기화한 과목·할 일·공지, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다.</p>
+      <p class="muted small-text">저장된 학교 로그인 세션과 동기화한 과목·할 일, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다.</p>
       <div><button class="btn danger" id="delete-me">계정 삭제</button></div>
     </div></div>`;
   const tokenForm = $("#personal-token-form");
@@ -1329,7 +1287,7 @@ function viewAccount() {
   $("#delete-me").addEventListener("click", async () => {
     const ok = await confirmDialog({
       title: "계정을 삭제할까요?",
-      body: ["저장된 학교 로그인 세션과 동기화한 과목·할 일·공지, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다.",
+      body: ["저장된 학교 로그인 세션과 동기화한 과목·할 일, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다.",
         "서버가 발급한 Canvas 토큰은 Canvas 설정 > 승인된 통합에서 ‘SSU LMS 자동 수강’ 항목을 직접 삭제해 주세요."],
       requireText: state.me.student_id, requireLabel: "확인을 위해 학번을 입력하세요",
       confirmLabel: "계정 삭제", danger: true,

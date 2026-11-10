@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, SecretStr
 
 
 class Orm(BaseModel):
@@ -84,18 +84,6 @@ class WeekOut(BaseModel):
     missed: list[AssignmentOut]
     later_assignments: list[AssignmentOut] = []
     late_assignments: list[AssignmentOut] = []
-
-
-class AnnouncementOut(Orm):
-    lms_id: int
-    lms_course_id: int
-    course_name: str
-    title: str
-    message: str | None
-    url: str | None
-    author: str | None
-    posted_at: datetime | None
-    attachments: list[dict[str, Any]] | None
 
 
 class PlanItemOut(BaseModel):

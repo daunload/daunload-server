@@ -21,7 +21,6 @@ from app.lms import auth
 from app.lms.auth import CANVAS_BASE_URL, LmsSession
 from app.lms.errors import LmsError, SessionExpired
 from app.lms.models import (
-    Announcement,
     AssignmentGroup,
     Course,
     LearnStatus,
@@ -194,22 +193,6 @@ class LmsClient:
         )
         return _parse_list(Submission, data)
 
-    async def get_announcements(self, course_id: int) -> list[Announcement]:
-        params = [
-            ("only_announcements", "true"),
-            ("per_page", "40"),
-            ("filter_by", "all"),
-            ("no_avatar_fallback", "1"),
-            ("include[]", "sections_user_count"),
-            ("include[]", "sections"),
-        ]
-        data = await self.get_paginated(
-            f"/api/v1/courses/{course_id}/discussion_topics",
-            params=params,
-            headers={"Referer": f"{CANVAS_BASE_URL}/courses/{course_id}/announcements"},
-        )
-        return _parse_list(Announcement, data)
-
 
 # ----------------------------------------------------------------------
 # 도우미
@@ -304,9 +287,6 @@ async def _main() -> None:
                 submissions = []
             for todo in collect_todos(course, modules, groups, submissions, now):
                 print(" - " + format_todo(todo))
-            announcements = await client.get_announcements(course.id)
-            for a in announcements[:3]:
-                print(f" * 공지: {a.title} ({(a.posted_at or '')[:10]})")
 
 
 def _mark(status: str | None) -> str:

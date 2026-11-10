@@ -19,7 +19,7 @@ REQUESTED = "2026-11-06T06:20:00+00:00"
 NORMAL = {
     "/lms/credentials": {"status": "ok", "last_synced_at": REQUESTED},
     "/courses": [], "/todos": [], "/playback/batches?limit=10": [], "/playback/batches": [],
-    "/announcements": [], "/notifications/channels": [],
+    "/notifications/channels": [],
 }
 
 

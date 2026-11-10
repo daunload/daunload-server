@@ -144,24 +144,6 @@ class AssignmentRow(Base):
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
 
-class AnnouncementRow(Base):
-    __tablename__ = "announcements"
-    __table_args__ = (UniqueConstraint("user_id", "lms_id"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    lms_course_id: Mapped[int] = mapped_column(Integer)
-    course_name: Mapped[str] = mapped_column(String(255))
-    lms_id: Mapped[int] = mapped_column(Integer)
-    title: Mapped[str] = mapped_column(String(500))
-    message: Mapped[str | None] = mapped_column(Text)
-    url: Mapped[str | None] = mapped_column(Text)
-    author: Mapped[str | None] = mapped_column(String(255))
-    posted_at: Mapped[datetime | None] = mapped_column(index=True)
-    attachments: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
-    created_at: Mapped[datetime] = mapped_column(default=utcnow)
-
-
 class PlaybackBatch(Base):
     __tablename__ = "playback_batches"
     __table_args__ = (

@@ -28,23 +28,23 @@ async def test_learningx_uses_bearer(fixture):
 
 
 @respx.mock
-async def test_api_v1_does_not_send_bearer_and_paginates(fixture):
-    page2 = f"{C}/api/v1/courses/1/discussion_topics?page=2&per_page=40"
-    first = fixture("announcements.json")
-    second = [{**first[0], "id": "205810", "title": "두번째"}]
+async def test_api_v1_does_not_send_bearer_and_paginates():
+    page2 = f"{C}/api/v1/courses/1/students/submissions?page=2&per_page=100"
+    first = [{"assignment_id": "1", "workflow_state": "submitted",
+              "attachments": [{"display_name": "a.pdf", "url": "https://canvas.ssu.ac.kr/f/1", "content-type": "application/pdf"}]}]
+    second = [{"assignment_id": "2", "workflow_state": "unsubmitted"}]
 
     def handler(request):
         if request.url.params.get("page") == "2":
             return respx.MockResponse(200, json=second)
         return respx.MockResponse(200, json=first, headers={"Link": f'<{page2}>; rel="next"'})
 
-    route = respx.get(f"{C}/api/v1/courses/1/discussion_topics").mock(side_effect=handler)
+    route = respx.get(f"{C}/api/v1/courses/1/students/submissions").mock(side_effect=handler)
     async with _client() as c:
-        items = await c.get_announcements(1)
-    assert [a.title for a in items] == ["강의계획서 필독", "두번째"]
+        items = await c.get_submissions(1)
+    assert [s.assignment_id for s in items] == [1, 2]
     assert items[0].attachments[0].content_type == "application/pdf"
     assert "Authorization" not in route.calls[0].request.headers
-    assert route.calls[0].request.headers["Referer"].endswith("/courses/1/announcements")
 
 
 @respx.mock

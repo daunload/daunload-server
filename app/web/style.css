@@ -272,7 +272,7 @@ i.done { background: var(--green); }
 
 /* ---------- 앞으로 7일 ---------- */
 
-/* ---------- 과목, 공지, 재생 ---------- */
+/* ---------- 과목, 재생 ---------- */
 .course { padding: 16px 20px; display: grid; gap: 8px; }
 .course + .course { box-shadow: inset 0 1px 0 var(--fill); }
 .course-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -291,9 +291,6 @@ i.done { background: var(--green); }
 .toggle input:checked { background: var(--blue); }
 .toggle input:checked::after { transform: translateX(16px); }
 
-details.notice + details.notice { box-shadow: inset 0 1px 0 var(--fill); }
-details.notice summary { padding: 14px 44px 14px 20px; position: relative; cursor: pointer; display: grid; gap: 2px; list-style: none; }
-.notice-body { padding: 0 20px 18px; overflow-wrap: anywhere; white-space: pre-wrap; max-width: 72ch; color: var(--ink-2); font-size: var(--text-sm); }
 
 .steps { list-style: none; margin: 0; padding: 4px 0; }
 .steps li { display: grid; grid-template-columns: 1.6em minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 12px 20px; }
@@ -448,7 +445,7 @@ progress { border: 2px solid var(--ink); border-radius: 6px; height: 12px; }
   border: 2px solid var(--ink);
 }
 .task-list { overflow: hidden; padding: 0; }
-.task + .task, .list > li + li, .course + .course, .steps li + li, details.notice + details.notice { box-shadow: inset 0 1px 0 var(--line); }
+.task + .task, .list > li + li, .course + .course, .steps li + li { box-shadow: inset 0 1px 0 var(--line); }
 .task:first-child { background: var(--pink-soft); }
 .task:first-child .task-due { color: var(--ink); font-weight: 700; }
 
@@ -552,18 +549,16 @@ body.has-task-bar .toast-stack { bottom: calc(72px + var(--ad-inset)); }
 .side .privacy-link { text-decoration: none; }
 
 /* ---------- 접는 안내의 화살표: 글자 대신 먹선 아이콘을 그려 눌렀을 때 돌아간다 ---------- */
-.chevron, .playback-help summary::after, .guide > summary::after, .notice-fold > summary::after, details.notice summary::after {
+.chevron, .playback-help summary::after, .guide > summary::after, .notice-fold > summary::after {
   content: ""; display: inline-block; flex: none; width: 18px; height: 18px;
   background: currentColor; mask: var(--chevron) center / contain no-repeat; -webkit-mask: var(--chevron) center / contain no-repeat;
   transition: rotate .2s ease;
 }
-.playback-help[open] summary::after, .guide[open] > summary::after, .notice-fold[open] > summary::after, details.notice[open] summary::after, [aria-expanded="true"] .chevron { rotate: 180deg; }
-.playback-help summary, .guide > summary, .notice-fold > summary, details.notice summary { list-style: none; }
-.playback-help summary::-webkit-details-marker, .guide > summary::-webkit-details-marker, .notice-fold > summary::-webkit-details-marker, details.notice summary::-webkit-details-marker { display: none; }
+.playback-help[open] summary::after, .guide[open] > summary::after, .notice-fold[open] > summary::after, [aria-expanded="true"] .chevron { rotate: 180deg; }
+.playback-help summary, .guide > summary, .notice-fold > summary { list-style: none; }
+.playback-help summary::-webkit-details-marker, .guide > summary::-webkit-details-marker, .notice-fold > summary::-webkit-details-marker { display: none; }
 .playback-help summary { justify-content: space-between; gap: 8px; }
 .playback-help summary:hover { color: var(--ink); }
-details.notice summary::after { position: absolute; right: 20px; top: 16px; color: var(--ink-3); }
-details.notice summary:hover { background: var(--pink-soft); }
 .mobile-menu > span:last-child { display: inline-flex; align-items: center; gap: 6px; }
 .guide > summary, .notice-fold > summary {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;

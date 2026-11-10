@@ -1,6 +1,6 @@
 # LMS 서버
 
-LMS에서 수강 과목의 강의·과제·퀴즈·공지·출석을 모아 보여주고,
+LMS에서 수강 과목의 강의·과제·퀴즈·출석을 모아 보여주고,
 기간 안의 미수강 온라인 강의를 헤드리스 Chrome으로 **실제 재생**(1배속, 끝까지)한 뒤 LMS에서 완료로 바뀌었는지 확인하는 서버.
 로그인·조회 흐름은 [chlwhdtn03/LMS-API](https://github.com/chlwhdtn03/LMS-API)(Apache-2.0)를 Python으로 옮겼다.
 
@@ -86,9 +86,9 @@ Playwright 기본 Chromium은 H.264/AAC를 재생하지 못하므로 `PLAYBACK_B
 API 서버 주소(`http://localhost:8000/`)로 접속하면 대시보드가 열린다. 별도 빌드 없이 `app/web/`의 정적 파일을 FastAPI가 함께 내보낸다. 서버는 시작할 때 JS·CSS 내용으로 버전을 계산해 `index.html`의 주소에 `?v=`로 붙이므로, 파일을 고칠 때 버전을 직접 올리지 않는다.
 
 - **학습 현황 (홈)**: 들어오자마자 재생할 수 있는 강의 전부와 아직 낼 수 있는 과제·퀴즈 전부(지각 제출 가능한 과제 포함)를 마감순 한 목록으로 보여 준다. 같은 과목 강의는 한 줄로 묶어 접어 둔다. 주요 버튼은 하나뿐이다: `강의 N개 모두 재생`(학칙 확인 창은 처음 한 번만), 강의가 없으면 가장 급한 과제의 `LMS에서 제출`. 재생할 강의도 낼 과제도 없을 때만 "누워도 됨"이라고 쓴다.
-- 할 일·미제출 과제·캘린더 화면과 요약 카드·7일 일정표는 홈과 같은 데이터를 다시 보여 줄 뿐이라 없앴다. 예전 주소(`#todos`, `#assignments`, `#calendar`)는 홈으로 연결된다. 모바일에서는 **전체 메뉴**를 펼쳐 화면을 선택하고, 화면 주소(`#courses` 등)와 브라우저 뒤로 가기를 지원한다.
+- 할 일·미제출 과제·캘린더 화면과 요약 카드·7일 일정표는 홈과 같은 데이터를 다시 보여 줄 뿐이라 없앴다. 공지 화면과 새 공지 알림도 없앴다(공지는 학교 LMS에서 확인한다). 예전 주소(`#todos`, `#assignments`, `#calendar`, `#announcements`)는 홈으로 연결된다. 모바일에서는 **전체 메뉴**를 펼쳐 화면을 선택하고, 화면 주소(`#courses` 등)와 브라우저 뒤로 가기를 지원한다.
 - **마감 없는 영상**: 공개됐고 미수강이면 마감(`due_at`, `late_at`)이 없어도 할 일에 넣고 맨 뒤에 `마감 없음`으로 보여 준다. 전체·과목·주차·자동 재생 대상이지만, 날짜가 없으므로 `이번 주` 범위와 마감 알림에는 나오지 않는다. 마감이 없어 할 일에서 저절로 빠지지 않으므로, 자동 재생 묶음에서 시도해 최근 7일 안에 3번 실패한 영상은 더 자동으로 넣지 않는다(직접 재생은 그대로 된다). 7일이 지난 실패는 다시 세지 않으므로, 일시적인 장애로 실패한 영상도 다시 자동으로 시도한다.
-- 과목(주차별 출석표, 자동 수강 켜기), 공지(과목 필터, 본문은 텍스트로만 표시),
+- 과목(주차별 출석표, 자동 수강 켜기),
   강의 재생(범위 선택 → 재생 계획 보기 → 재생 시작, 진행률 5초마다 갱신, 중지), 알림 채널, LMS 계정 등록.
 - **내려받기·텍스트 변환(강의 영상·수업자료)**: 영상 탭과 수업자료 탭(commons 파일 + 위키 페이지 첨부)을 주차별로 보여준다. 상태와 동작은 아이콘으로 보여 주고 뜻은 목록 위 범례에 한 번만 적는다. 받은 항목은 내려받기 아이콘이 초록 체크로 바뀌고 "안 받은 것만"으로 거를 수 있다. 다시 변환은 텍스트 보기 창 안에 있다.
   영상은 **크롬 확장프로그램으로 학교 CDN에서 PC에 직접 저장**하며 서버가 중계하지 않는다. 확장 설치와 배포는 [설치 가이드](docs/chrome-download-extension.md)를 따른다.
@@ -105,7 +105,7 @@ API 서버 주소(`http://localhost:8000/`)로 접속하면 대시보드가 열�
 | 단계 | 명령 | 확인할 것 |
 |---|---|---|
 | M1 로그인 | `uv run python -m app.lms.auth` | 이름·학과 출력, Bearer 토큰 확보 |
-| M2 조회 | `uv run python -m app.lms.client` | 과목·출석·할 일·공지가 LMS 화면과 일치 |
+| M2 조회 | `uv run python -m app.lms.client` | 과목·출석·할 일이 LMS 화면과 일치 |
 | M3 플레이어 관찰 | `uv run python -m app.lms.player inspect <view_url>` | 창이 뜸. 프레임·`<video>`·버튼 클래스·진도 요청 출력 → `player.py` 상단 셀렉터와 비교 |
 | M3 재생 | `uv run python -m app.lms.player play <course_id>` | 가장 짧은 미수강 영상 1개 재생 후 "완료 확인: 성공" |
 | M3.5 일괄 | `uv run python -m app.lms.batch preview --course <id> [--module <id>]` | 순서가 LMS 화면과 같은지, 마감 경고 |
@@ -127,7 +127,7 @@ API 서버 주소(`http://localhost:8000/`)로 접속하면 대시보드가 열�
 | `GET /courses` · `/courses/{id}/attendance` · `/courses/{id}/modules` (실시간) | |
 | `PUT /courses/{id}/auto-play` `{enabled}` | 자동 수강(동기화 때 새 미수강 영상을 자동으로 묶어 재생) |
 | `GET /week` | 이번 주(월~일, `TIMEZONE` 기준) 들어야 할 강의, 내야 할 과제·퀴즈, 이번 주에 놓친 과제, 다음 주 이후·마감 없는 과제(`later_assignments`), 지각 제출 가능한 과제(`late_assignments`) |
-| `GET /todos?kind=video\|assignment\|quiz` · `GET /announcements?since=` | 마감순 할 일, 공지 |
+| `GET /todos?kind=video\|assignment\|quiz` | 마감순 할 일 |
 | `GET /playback/batches/preview?scope=module\|course\|all\|week&course_id=&module_id=` | 묶일 영상, 순서, 예상 시각, 마감 경고 |
 | `POST /playback/batches` · `POST /playback/items/{module_item_id}` | 일괄 / 단일 재생 시작 (사용자당 동시에 1개) |
 | `GET /playback/batches/{id}` · `DELETE /playback/batches/{id}` | 진행 상황 / 취소(재생 중 영상도 중단) |
@@ -136,7 +136,7 @@ API 서버 주소(`http://localhost:8000/`)로 접속하면 대시보드가 열�
 | `GET /courses/{id}/materials` · `POST /courses/{id}/materials/{key}/download-link` | 수업자료 목록(commons 파일 + 위키 첨부) / 10분 링크 발급(같은 `/downloads/{token}`으로 중계) |
 | `PUT /courses/{id}/videos/{item}/transcript` · `GET /transcripts` · `GET/DELETE /transcripts/{id}` | 브라우저 텍스트 변환 결과 저장(최대 2MB, 다시 하면 덮어씀)·조회·삭제 |
 
-알림: 새 공지, 마감 24시간·3시간 전, 일괄 재생 결과, LMS 로그인 실패. 첫 동기화 때 기존 공지는 알리지 않는다.
+알림: 마감 24시간·3시간 전, 일괄 재생 결과, LMS 로그인 실패. 공지는 모으지 않는다(학교 LMS 알림을 쓴다).
 
 ## 테스트
 
@@ -206,7 +206,7 @@ DB는 `uv run alembic upgrade head`로 갱신한다(Docker Compose API는 시작
 **사용 승인:** 관리자가 승인한 사용자만 서비스를 쓸 수 있다(관리자 학번은 항상 승인으로 본다). 사용자의 권한 상태는 `none`(요청 전)·`pending`·`approved`·`rejected`·`revoked`이고, 사용자가 요청하면 `pending`이 되어 관리자에게 알림이 간다. 승인 전에는 로그인은 되지만 학교 정보를 동기화하지 않는다. 거절된 사용자는 결정 24시간 뒤에 다시 요청할 수 있다.
 - **API:** `GET /admin/access-requests`(대기 목록), `GET /admin/users?access=<상태>`(행마다 `access_status`, `is_admin`), `GET /admin/overview`의 `pending_count`, 그리고 유일한 쓰기 `POST /admin/users/{학번}/access` `{"action": "approve"|"reject"|"revoke"}`. 현재 상태에서 할 수 없는 결정이거나 동시에 다른 관리자가 먼저 처리했으면 409, 관리자 계정이 대상이면 400이다. 승인하면 전체 동기화를 큐에 넣고, 회수하면 대기·진행 중인 재생 묶음을 취소한다.
 - **화면:** 현황의 승인 대기 요청 표, 사용자 탭의 권한 상태 열·필터와 권한 관리 열과 `승인`·`거절`·`권한 회수`·`바로 승인` 버튼, 사용자 상세 머리글의 같은 버튼.
-- **동기화:** 주기 동기화는 승인된 사용자의 자동 재생 과목에 대해서만 2시간(120분)마다(`autosync:{사용자 id}`) 실행한다. 전체 동기화는 로그인, 동기화 버튼, 승인 때 실행한다. 자동 재생을 켜지 않은 과목은 이 때만 동기화되므로, 그 과목의 새 공지 알림은 이 시점에 한꺼번에 도착할 수 있다.
+- **동기화:** 주기 동기화는 승인된 사용자의 자동 재생 과목에 대해서만 2시간(120분)마다(`autosync:{사용자 id}`) 실행한다. 전체 동기화는 로그인, 동기화 버튼, 승인 때 실행한다. 자동 재생을 켜지 않은 과목은 이 때만 동기화된다.
 - **배포 직후 주의:** 기존 사용자의 권한 상태는 모두 `none`으로 시작하므로, 배포 직후에는 관리자를 뺀 모든 사용자가 승인 전까지 막힌다. 사용자 탭에서 `바로 승인`을 눌러 기존 사용자를 다시 들여보낸다. 마이그레이션은 `uv run alembic upgrade head`.
 
 **보여 주지 않는 것:** LMS 세션(SSO 토큰 포함), 알림 대상 주소와 토큰, 영상 원본 주소, 전사 본문, 과제 점수. 오류 내용은 응답할 때 주소의 경로·쿼리를 지우고 2000자로 자른다.

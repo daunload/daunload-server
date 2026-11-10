@@ -1,12 +1,10 @@
-from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from sqlalchemy import or_, select
 
 from app.api.deps import CurrentUser, Db
 from app.api.schemas import (
-    AnnouncementOut,
     AssignmentOut,
     AutoPlayIn,
     CourseOut,
@@ -14,7 +12,7 @@ from app.api.schemas import (
     WeekOut,
 )
 from app.db.base import utcnow
-from app.db.models import AnnouncementRow, AssignmentRow, CourseRow, TodoRow
+from app.db.models import AssignmentRow, CourseRow, TodoRow
 from app.lms.errors import InvalidCredentials, LmsError
 from app.lms.todo import UNSUBMITTED_STATUSES, unsubmitted_status
 from app.services.lms_access import NoCredentials, lms_client_for
@@ -172,17 +170,3 @@ def _assignment_sort_key(a: AssignmentOut) -> tuple:
     if a.status == "overdue":
         ts = -ts
     return (_STATUS_ORDER.get(a.status, 9), ts, a.title)
-
-
-@router.get("/announcements", response_model=list[AnnouncementOut], tags=["announcements"])
-async def list_announcements(
-    user: CurrentUser, db: Db, since: datetime | None = None, course_id: int | None = None,
-    limit: int = Query(default=50, ge=1, le=200),
-):
-    stmt = select(AnnouncementRow).where(AnnouncementRow.user_id == user.id)
-    if since:
-        stmt = stmt.where(AnnouncementRow.posted_at >= since)
-    if course_id:
-        stmt = stmt.where(AnnouncementRow.lms_course_id == course_id)
-    stmt = stmt.order_by(AnnouncementRow.posted_at.desc()).limit(limit)
-    return (await db.scalars(stmt)).all()

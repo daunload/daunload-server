@@ -46,7 +46,7 @@ def _data(now):
         "/lms/credentials": {"student_id": "20260001", "status": "ok", "last_error": None, "last_login_at": now.isoformat(),
                              "last_synced_at": now.isoformat(), "next_sync_at": None},
         "/courses": [{"lms_course_id": 1, "name": "피지컬미디어", "professors": "교수", "attendance": [], "auto_play": False}],
-        "/todos": videos, "/announcements": [], "/notifications/channels": [], "/playback/batches": [],
+        "/todos": videos, "/notifications/channels": [], "/playback/batches": [],
         "/week": {"start": (now - timedelta(days=2)).isoformat(), "end": (now + timedelta(days=5)).isoformat(),
                   "videos": videos, "video_seconds": 3600, "assignments": [_assignment(now, 3, "6주차 퀴즈", 48)], "missed": []},
         "/playback/batches/preview": {"items": plan, "total_seconds": 3660, "expected_end": plan[-1]["expected_end"], "warnings": []},

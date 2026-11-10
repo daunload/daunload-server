@@ -1,7 +1,7 @@
 """arq 워커. 실행: arq app.worker.main.WorkerSettings
 
 작업
-- sync_user_job: 동기화 → 새 공지·마감 알림 → 자동 수강 과목이면 일괄 재생 묶음 생성
+- sync_user_job: 동기화 → 마감 알림 → 자동 수강 과목이면 일괄 재생 묶음 생성
 - auto_sync_user_job: 자동 재생 과목만 동기화(작업 ID autosync:{uid}). 전체 동기화(sync:{uid})와 ID를 나눠 서로 버려지지 않게 한다
 - schedule_syncs (cron): 시각이 된 승인 사용자 중 자동 재생 과목이 있는 사람만 auto_sync_user_job을 넣는다
 - deadline_reminders (cron): 마감 24시간·3시간 전 알림
@@ -26,7 +26,7 @@ from app.lms.errors import InvalidCredentials, LmsError
 from app.services import playback
 from app.services.access import has_access, user_has_access
 from app.services.activity import prune_daily
-from app.services.notify import notify_announcements, notify_deadlines, notify_user
+from app.services.notify import notify_deadlines, notify_user
 from app.services.sync import sync_user
 
 log = logging.getLogger(__name__)
@@ -84,7 +84,7 @@ async def _run_sync(user_id: int, only: str | None) -> str:
             if not course_ids:
                 return "skipped"
         try:
-            result = await sync_user(db, user_id, course_ids=course_ids)
+            await sync_user(db, user_id, course_ids=course_ids)
         except InvalidCredentials:
             await notify_user(db, user_id, "🔒 학교 로그인이 만료되었습니다. 사이트에서 다시 로그인하거나 계정에서 새 개인 토큰을 등록하면 동기화와 자동 수강이 이어집니다.",
                               key=f"login-invalid:{utcnow():%Y%m%d}")
@@ -97,7 +97,6 @@ async def _run_sync(user_id: int, only: str | None) -> str:
                 cred.next_sync_at = utcnow() + timedelta(minutes=15)
                 await db.commit()
             return "error"
-        await notify_announcements(db, user_id, result.new_announcements)
         await notify_deadlines(db, user_id)
         try:
             await create_auto_batch(db, user_id)

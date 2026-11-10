@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db.base import utcnow
-from app.db.models import AnnouncementRow, AssignmentRow, CourseRow, LmsCredential, TodoRow
+from app.db.models import AssignmentRow, CourseRow, LmsCredential, TodoRow
 from app.lms.errors import LmsError
 from app.lms.models import AssignmentGroup, Course, Submission
 from app.lms.todo import (
@@ -36,7 +36,6 @@ class SyncResult:
     first_sync: bool
     course_count: int = 0
     todo_count: int = 0
-    new_announcements: list[AnnouncementRow] = field(default_factory=list)
     new_video_course_ids: set[int] = field(default_factory=set)
 
 
@@ -61,7 +60,6 @@ async def sync_user(
 
         course_rows = {r.lms_course_id: r for r in await _rows(db, CourseRow, user_id)}
         todo_rows = {(r.kind, r.lms_item_id): r for r in await _rows(db, TodoRow, user_id)}
-        known_announcements = {r.lms_id for r in await _rows(db, AnnouncementRow, user_id)}
         assignment_rows = {r.assignment_id: r for r in await _rows(db, AssignmentRow, user_id)}
         seen_courses: set[int] = set()
         seen_todos: set[tuple[str, int]] = set()
@@ -102,24 +100,6 @@ async def sync_user(
                         result.new_video_course_ids.add(course.id)
                 _apply_todo(trow, todo)
 
-            try:
-                announcements = await client.get_announcements(course.id)
-            except LmsError as e:
-                log.warning("공지 조회 실패 %s: %s", course.id, e)
-                announcements = []
-            for a in announcements:
-                if a.id in known_announcements:
-                    continue
-                known_announcements.add(a.id)
-                arow = AnnouncementRow(
-                    user_id=user_id, lms_course_id=course.id, course_name=course.name, lms_id=a.id,
-                    title=a.title, message=a.message, url=a.html_url or a.url, author=a.user_name,
-                    posted_at=_safe_dt(a.posted_at or a.created_at),
-                    attachments=[{"name": x.display_name, "url": x.url} for x in a.attachments],
-                )
-                db.add(arow)
-                result.new_announcements.append(arow)
-
         for lms_course_id, row in course_rows.items():
             if lms_course_id not in seen_courses and (not partial or lms_course_id in course_ids):
                 row.active = False
@@ -138,8 +118,7 @@ async def sync_user(
         minutes=s.auto_sync_interval_minutes + random.uniform(-s.sync_jitter_minutes, s.sync_jitter_minutes)
     )
     await db.commit()
-    if result.first_sync:  # 첫 동기화 때 기존 공지를 한꺼번에 알리지 않는다
-        result.new_announcements = []
+    if result.first_sync:  # 첫 동기화 때는 모든 영상이 처음 보는 것이므로 새 영상으로 세지 않는다
         result.new_video_course_ids = set()
     return result
 

@@ -13,7 +13,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.db import base as db_base
 from app.db.base import Base
-from app.db.models import AnnouncementRow, LmsCredential, NotificationLog
+from app.db.models import LmsCredential, NotificationLog
 from app.lms.auth import LmsSession
 from app.main import create_app
 
@@ -35,14 +35,13 @@ class FakeQueue:
 
 
 class LmsMock:
-    """학기·과목·모듈·과제·공지 응답을 만든다. completed에 넣은 module_item_id는 완료로 응답."""
+    """학기·과목·모듈·과제 응답을 만든다. completed에 넣은 module_item_id는 완료로 응답."""
 
     def __init__(self):
         now = datetime.now(UTC)
         self.completed: set[int] = set()
         self.video_deadline = now + timedelta(days=5)
         self.assignment_deadline = now + timedelta(hours=2)
-        self.announcements = [{"id": "1", "title": "첫 공지", "posted_at": iso(now - timedelta(days=3))}]
         self.assignments = [{"id": "1", "name": "과제1", "due_at": iso(self.assignment_deadline), "published": True}]
         self.submissions = [{"assignment_id": "1", "workflow_state": "unsubmitted"}]
         self.submissions_status = 200
@@ -63,8 +62,6 @@ class LmsMock:
             side_effect=lambda r: httpx.Response(200, json=[{"name": "과제", "assignments": self.assignments}]))
         respx.get(f"{C}/api/v1/courses/{COURSE_ID}/students/submissions").mock(
             side_effect=lambda r: httpx.Response(self.submissions_status, json=self.submissions))
-        respx.get(f"{C}/api/v1/courses/{COURSE_ID}/discussion_topics").mock(
-            side_effect=lambda r: httpx.Response(200, json=self.announcements))
 
     def modules(self):
         def item(mid, pos, title):
@@ -246,7 +243,7 @@ async def test_logout_revokes_all_tokens_of_user(env):
 
 @respx.mock
 async def test_full_flow_sync_batch_and_notifications(env):
-    from app.services.notify import notify_announcements, notify_deadlines
+    from app.services.notify import notify_deadlines
     from app.services.playback import run_batch
     from app.services.sync import sync_user
 
@@ -258,28 +255,24 @@ async def test_full_flow_sync_batch_and_notifications(env):
     lms = LmsMock()
     lms.install()
 
-    # 1) 첫 동기화: 기존 공지는 알리지 않는다
+    # 1) 첫 동기화
     async with db_base.sessionmaker()() as db:
         result = await sync_user(db, 1)
-    assert result.first_sync and result.new_announcements == []
+    assert result.first_sync
 
     courses = (await api.get("/courses", headers=h)).json()
     assert courses[0]["lms_course_id"] == COURSE_ID and courses[0]["attendance"][0]["statuses"] == ["attendance"]
     todos = (await api.get("/todos", headers=h)).json()
     assert [t["kind"] for t in todos] == ["assignment", "video", "video", "video"]
 
-    # 2) 새 공지 → 두 번째 동기화에서 알림
-    lms.announcements.append({"id": "2", "title": "휴강 안내", "posted_at": iso(datetime.now(UTC))})
+    # 2) 두 번째 동기화 뒤 마감 알림(중복 발송 안 됨)
     async with db_base.sessionmaker()() as db:
         result = await sync_user(db, 1)
-        assert [a.title for a in result.new_announcements] == ["휴강 안내"]
-        await notify_announcements(db, 1, result.new_announcements)
-        await notify_announcements(db, 1, result.new_announcements)  # 중복 발송 안 됨
+        assert not result.first_sync
         assert await notify_deadlines(db, 1) == 1  # 2시간 남은 과제 → 3시간 알림
         assert await notify_deadlines(db, 1) == 0
     sent = [json.loads(c.request.content)["content"] for c in discord.calls]
-    assert any("휴강 안내" in s for s in sent) and sum("휴강 안내" in s for s in sent) == 1
-    assert any("마감 3시간" in s for s in sent)
+    assert sum("마감 3시간" in s for s in sent) == 1
 
     # 3) 일괄 재생 미리보기: 과목 범위, LMS 화면 순서
     preview = (await api.get("/playback/batches/preview", headers=h, params={"scope": "course", "course_id": COURSE_ID})).json()
@@ -550,9 +543,9 @@ async def test_api_docs_are_off_unless_enabled(env, monkeypatch):
 async def test_list_limits_must_be_positive(env):
     api, _ = env
     h = await _signup(api)
-    assert (await api.get("/announcements?limit=-1", headers=h)).status_code == 422
     assert (await api.get("/playback/batches?limit=0", headers=h)).status_code == 422
-    assert (await api.get("/announcements?limit=200", headers=h)).status_code == 200
+    assert (await api.get("/playback/batches?limit=10", headers=h)).status_code == 200
+    assert (await api.get("/announcements", headers=h)).status_code == 404  # 공지 기능은 없앴다
 
 
 @respx.mock

@@ -22,8 +22,6 @@ class Term(LmsModel):
 
 
 class Activity(LmsModel):
-    total_unread_announcements: int = 0
-    total_announcements: int = 0
     total_incompleted_commons_resources: int = 0
     total_incompleted_movies: int = 0
     total_unsubmitted_assignments: int = 0
@@ -158,19 +156,6 @@ class Submission(LmsModel):
     excused: bool | None = False
     score: float | None = None
     attempt: int | None = None
-    attachments: list[Attachment] = Field(default_factory=list)
-
-
-class Announcement(LmsModel):
-    id: int
-    title: str = ""
-    message: str | None = None
-    url: str | None = None
-    html_url: str | None = None
-    posted_at: str | None = None
-    created_at: str | None = None
-    read_state: str | None = None
-    user_name: str | None = None
     attachments: list[Attachment] = Field(default_factory=list)
 
 

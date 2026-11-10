@@ -27,7 +27,7 @@ async def dashboard():
                 ("assignment", "자료구조 실습 과제", 2), ("video", "함수와 재귀 이해하기", 48), ("quiz", "지난 주차 퀴즈", -1)
             ])
         ],
-        "/playback/batches": [], "/announcements": [], "/notifications/channels": [],
+        "/playback/batches": [], "/notifications/channels": [],
         "/courses/1/videos": [],
         "/assignments": [
             {"assignment_id": i, "kind": "assignment", "lms_course_id": 1, "course_name": "컴퓨터프로그래밍", "title": title, "status": status,
@@ -136,11 +136,11 @@ async def test_login_password_visibility(dashboard, tmp_path):
 
 async def test_removed_pages_open_home_and_history_works(dashboard):
     page, _ = dashboard
-    for old in ("todos", "assignments", "calendar"):  # 예전 즐겨찾기·알림 링크도 깨지지 않는다
+    for old in ("todos", "assignments", "calendar", "announcements"):  # 예전 즐겨찾기·알림 링크도 깨지지 않는다
         await page.goto(f"http://dashboard.test/#{old}")
         await expect(page.get_by_role("heading", name="할 일이 2개 남았어요")).to_be_visible()
         await expect(page).to_have_url("http://dashboard.test/#dashboard")
-    await expect(page.locator('.side [data-view="todos"], .side [data-view="assignments"], .side [data-view="calendar"]')).to_have_count(0)
+    await expect(page.locator('.side [data-view="todos"], .side [data-view="assignments"], .side [data-view="calendar"], .side [data-view="announcements"]')).to_have_count(0)
     await page.get_by_role("button", name="과목", exact=True).click()
     await expect(page).to_have_url("http://dashboard.test/#courses")
     await page.go_back()
@@ -240,21 +240,14 @@ async def test_admin_shell_mobile_and_access(dashboard, tmp_path):
 
 async def test_lms_links_only_allow_https(dashboard):
     page, data = dashboard
-    now = datetime.now(UTC).isoformat()
-    data["/announcements"] = [{"lms_id": 1, "lms_course_id": 1, "course_name": "컴퓨터프로그래밍", "title": "공지",
-                               "message": "본문", "url": "javascript:alert(1)", "author": "교수", "posted_at": now,
-                               "attachments": [{"name": "첨부", "url": "javascript:alert(2)"}, {"name": "정상", "url": "https://canvas.ssu.ac.kr/f/1"}]}]
     data["/week"]["assignments"][0]["url"] = "javascript:alert(3)"
     data["/week"]["later_assignments"] = [{**data["/week"]["assignments"][0], "assignment_id": 9, "title": "다음 과제",
                                            "url": "data:text/html,<script>alert(4)</script>"}]
-    for view in ("announcements", "dashboard"):
-        await page.goto(f"http://dashboard.test/#{view}")
-        await page.wait_for_load_state("networkidle")
-        hrefs = await page.eval_on_selector_all("a[href]", "els => els.map((a) => a.getAttribute('href'))")
-        assert not [h for h in hrefs if h.lower().startswith(("javascript:", "data:"))], (view, hrefs)
-    await page.goto("http://dashboard.test/#announcements")
-    await page.locator("summary").first.click()
-    await expect(page.get_by_role("link", name="정상")).to_have_attribute("href", "https://canvas.ssu.ac.kr/f/1")
+    await page.goto("http://dashboard.test/")
+    await expect(page.locator(".task")).to_have_count(3)
+    hrefs = await page.eval_on_selector_all("a[href]", "els => els.map((a) => a.getAttribute('href'))")
+    assert not [h for h in hrefs if h.lower().startswith(("javascript:", "data:"))], hrefs
+    await expect(page.get_by_role("link", name="LMS에서 제출")).to_have_count(0)  # 안전하지 않은 주소에는 제출 버튼을 만들지 않는다
 
 
 async def test_playback_history_reveals_item_error_and_retries_loading(dashboard):
