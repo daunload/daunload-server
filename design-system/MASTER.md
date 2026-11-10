@@ -141,21 +141,21 @@ button.innerHTML = `${icon("external")}LMS에서 제출`;
 - **확장프로그램 없음:** 연결 확인이 시간 초과되면(`EXTENSION_MISSING`) 토스트 대신 설치 안내를 펼치고 문구를 그 안에 쓴다. 버전이 맞지 않는 경우는 오류 토스트다.
 - **광고:** `syncAdInset()`이 화면 아래에 붙은 `ins.adsbygoogle[data-anchor-status="displayed"]`의 높이를 `--ad-inset`에 넣어 진행 패널과 토스트가 광고 위로 올라온다. 이 속성은 공개 API가 아니다.
 
-## 7-1. 관리자 화면 (`app/web/src/admin.js`, `app/web/src/admin-feeds.js`)
+## 7-1. 관리자 화면 (`app/web/src/screens/admin/`)
 
 - **쓰기는 하나뿐:** 관리자 화면에서 바꾸는 동작은 사용 권한 승인·거절·회수 하나다. 나머지 버튼은 탭 이동, 필터, 페이지 이동, `다시 불러오기`뿐이고 API는 GET만 부르며, 쓰기는 `POST /admin/users/{학번}/access`만 쓴다.
 - **사용 승인:** 현황에 승인 대기 요청 표, 사용자 탭에 `권한 관리` 열·필터와 `승인`·`거절`·`권한 회수`·`바로 승인` 버튼, 사용자 상세 머리글에 같은 버튼을 둔다. 관리자 계정 줄에는 버튼을 두지 않는다. 409(이미 처리됨)는 오류로 놀라게 하지 않고 최신 상태로 다시 불러온다. 배포 직후에는 관리자를 뺀 모든 사용자가 막혀 있으므로 `바로 승인`(대기 없이 승인)이 기존 사용자를 들여보내는 길이다.
 - **넓은 폭:** 관리자 화면에서는 `.workspace`에 `.admin-workspace`를 붙여 본문 최대 폭을 1200px로 넓힌다. 다른 화면의 폭은 그대로다.
-- **표:** 표는 `adminTable(columns, rows)`로 그린다. 760px 이하에서는 머리글을 숨기고 각 줄을 카드로 바꾸며, 칸마다 `data-label`의 머리글을 앞에 붙인다. 표 밖으로 가로 스크롤을 만들지 않는다. 학번 링크는 터치 영역 44px을 유지한다(`.admin-linked`). 사용자 목록처럼 줄 전체를 누를 수 있는 표만 예외로 줄 클릭이 링크를 대신한다.
-- **상태:** 탭마다 로딩 스켈레톤, 빈 상태, 오류와 `다시 시도`를 `adminState()`로 그린다.
-- **늦은 응답:** 관리자 API는 `adminRequest(path, render, key)`로만 부른다. 그 사이 다른 탭이나 화면으로 옮겼거나 같은 key로 새 요청을 보냈으면 늦게 온 응답은 버린다(그리지도, 오류를 띄우지도 않는다).
-- **보여 주지 않는 데이터:** 비밀번호와 그 해시, LMS 세션, 알림 대상 주소와 토큰, 영상 원본 주소, 전사 본문, 과제 점수는 화면에 넣지 않는다. 영상 주소는 `주소 있음`·`주소 없음`으로만 쓴다. 서버 문자열은 모두 `esc()`를 거친다.
+- **표:** 표는 `<Table columns rows>`(`screens/admin/shared.tsx`)로 그린다. 760px 이하에서는 머리글을 숨기고 각 줄을 카드로 바꾸며, 칸마다 `data-label`의 머리글을 앞에 붙인다. 표 밖으로 가로 스크롤을 만들지 않는다. 학번 링크는 터치 영역 44px을 유지한다(`.admin-linked`). 사용자 목록처럼 줄 전체를 누를 수 있는 표만 예외로 줄 클릭이 링크를 대신한다.
+- **상태:** 탭마다 로딩 스켈레톤, 빈 상태, 오류와 `다시 시도`를 `<Loaded>`로 그린다.
+- **늦은 응답:** 관리자 API는 `useAdmin(path)`로만 부른다. 그 사이 조건(path)이 바뀌었거나 화면이 사라졌으면 늦게 온 응답은 버린다(그리지도, 오류를 띄우지도 않는다).
+- **보여 주지 않는 데이터:** 비밀번호와 그 해시, LMS 세션, 알림 대상 주소와 토큰, 영상 원본 주소, 전사 본문, 과제 점수는 화면에 넣지 않는다. 영상 주소는 `주소 있음`·`주소 없음`으로만 쓴다. 서버 문자열은 JSX로만 넣는다(HTML로 해석하지 않는다).
 - **문구:** 마감이 비어 있으면 `마감 없음`으로 쓰고 `new Date(null)`을 그리지 않는다. 동기화에서 빠진 할 일(`active=false`)은 완료로 단정하지 않고 `목록에서 사라짐(완료 또는 마감)`으로 쓴다. 시각이 저장되지 않은 문제는 `시각 기록 없음`이다. 재생 묶음 범위는 `ADMIN_BATCH_SCOPE`의 이름(`전체 재생 묶음` 등)으로 쓰고 `all` 같은 값을 그대로 보이지 않는다.
 - **숫자:** 문제 탭 이름의 `문제 N건`은 네 종류의 합이고, 현황의 `재생 실패`는 시도한 영상만 센다. 다운로드는 `완료 보고 또는 링크 발급 횟수`라고 설명을 붙인다.
 
 ## 8. 성능 (첫 화면을 막지 않는다)
 
-- **나눠 받기:** 특정 화면에서만 쓰는 큰 코드는 `import()`로 받는다(예: `renderAdminView()`가 `admin.js`를 받는다). 첫 화면 묶음에서 그 모듈을 정적으로 import하지 않는다(`tests/test_web_serving.py`가 확인한다).
+- **나눠 받기:** 특정 화면에서만 쓰는 큰 코드는 `import()`로 받는다(예: `renderAdminView()`가 `screens/admin`을 받는다). 첫 화면 묶음에서 그 모듈을 정적으로 import하지 않는다(`tests/test_web_serving.py`가 확인한다).
 - **인라인 금지:** CSP가 인라인 스크립트와 `onload=` 속성을 막는다. 늦게 붙일 자원은 `src/assets.js`에 둔다.
 - **글꼴:** 글꼴 CSS는 `preload` + `media="print" data-font`로 받고 `assets.js`가 적용한다. 렌더링을 막는 `<link rel="stylesheet">`로 되돌리지 않는다.
 - **광고:** AdSense 로더는 `load` 뒤 브라우저가 한가할 때 `loadAds()`가 붙인다. 사이트 확인은 `<meta name="google-adsense-account">`가 맡는다.
@@ -176,7 +176,8 @@ app/web/src/screens/      Preact 화면: home, playback, videos, transcript, cou
 app/web/src/ui/layout.tsx 화면 뼈대(ViewHead, Panel, PanelBody, Empty, Warning), ui/pending.tsx(처리 중 버튼)
 app/web/src/tasks.tsx     하단 진행 패널
 app/web/src/app.js        로그인·부팅·동기화·화면 전환(마크업은 index.html의 정적 HTML)
-app/web/src/*.js          access(승인 대기), downloads·transcribe(내려받기·변환 엔진), admin(관리자, 아직 HTML 문자열)
+app/web/src/screens/admin/ 관리자 화면(관리자만 import()로 받는다): index(머리·탭), overview, users, detail, feeds, shared
+app/web/src/*.js          access(승인 대기), downloads·transcribe(내려받기·변환 엔진)
 app/web/src/styles/       app.css(Tailwind 테마 = 토큰), legacy.css(기존 화면 스타일)
 ```
 

@@ -20,7 +20,7 @@ import { esc, fmtDate, state } from "./core";
 window.__ssu = {
   state, tx, bulk, ext, extensionRequest, toast, clearToasts, logout, renderTaskPanel, cancelTranscription, renderVideoList,
   esc, fmtDate, planHtml, failedPlaybackBatches, reportDownloadError,
-  loadAdmin: () => import("./admin"),
+  loadAdmin: () => import("./screens/admin"),
 };
 
 mountToasts();

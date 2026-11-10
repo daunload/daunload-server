@@ -255,20 +255,21 @@ async def test_admin_shared_pieces(dashboard):  # noqa: F811
     await page.goto(BASE + "#admin/activity")
     await expect(page.locator("#view")).to_contain_text("기간 안에 활동이 없습니다")
     result = await page.evaluate("""async () => {
-        const { adminTable, adminPager, adminState } = await __ssu.loadAdmin();
-        const esc = __ssu.esc;
+        const { Table, Pager, ErrorBox, h, render } = await __ssu.loadAdmin();
         const host = document.createElement("div");
         document.querySelector("#view").append(host);
-        host.innerHTML = adminTable([{ label: "학번", render: (r) => esc(r.id) }], [{ id: "<b>1</b>" }]);
+        render(h(Table, { columns: [{ label: "학번", render: (r) => r.id }], rows: [{ id: "<b>1</b>" }] }), host);
         const cell = host.querySelector("td");
         const pages = [];
-        const pager = adminPager(45, 20, 20, (o) => pages.push(o));
-        host.append(pager);
+        const pagerHost = document.createElement("div");
+        host.append(pagerHost);
+        render(h(Pager, { total: 45, offset: 20, limit: 20, onPage: (o) => pages.push(o) }), pagerHost);
+        const pager = pagerHost.querySelector("nav");
         pager.querySelectorAll("button")[1].click();
         pager.querySelectorAll("button")[0].click();
         const state = document.createElement("div");
         let retried = 0;
-        adminState(state, "error", { message: "<i>x</i>", retry: () => retried++ });
+        render(h(ErrorBox, { message: "<i>x</i>", retry: () => retried++ }), state);
         state.querySelector("button").click();
         return { label: cell.dataset.label, html: cell.firstElementChild.innerHTML, text: pager.textContent, pages, retried,
                  alert: state.querySelector("[role=alert]").textContent };

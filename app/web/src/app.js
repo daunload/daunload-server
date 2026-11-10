@@ -298,7 +298,7 @@ let adminModule = null;
 function renderAdminView() {
   if (adminModule) return adminModule.viewAdmin(state.adminPath);
   $("#view").innerHTML = `<div class="panel" aria-busy="true">${skeletonRows(4)}<p class="sr-only" role="status">불러오는 중입니다.</p></div>`;
-  import("./admin").then(
+  import("./screens/admin").then(
     (mod) => { adminModule = mod; if (state.view === "admin") mod.viewAdmin(state.adminPath); },
     () => { if (state.view === "admin") viewError("화면을 불러오지 못했어요. 네트워크를 확인하고 다시 시도하세요.", renderAdminView); },
   );

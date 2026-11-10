@@ -1,5 +1,4 @@
 /* 과목 화면(#courses): 과목별 출석 칸, 남은 영상 수, 자동 수강 켜고 끄기. */
-import { render } from "preact";
 import { useState } from "preact/hooks";
 import { needCred } from "../app";
 import { api, state } from "../core";
@@ -31,13 +30,6 @@ export function Attendance({ attendance, empty = "출석 기록이 아직 없습
       ))}
     </div>
   );
-}
-
-/** 출석 칸을 HTML 문자열로(아직 문자열로 그리는 관리자 상세 화면이 쓴다). */
-export function attendanceHtml(attendance: unknown, empty?: string): string {
-  const box = document.createElement("div");
-  render(<Attendance attendance={attendance} empty={empty} />, box);
-  return box.innerHTML;
 }
 
 function CourseRow({ c }: { c: Course }) {
