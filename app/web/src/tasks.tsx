@@ -1,24 +1,26 @@
-import { esc, fmtDate, fmtDuration, state, store } from "./core";
-import { stopBulkDownload } from "./downloads";
-import { cancelTranscription, enqueueTranscription, tx } from "./transcribe";
-import { navigate } from "./app";
-import { runBulkDownload } from "./screens/videos";
-import { cancelActivePlayback } from "./screens/playback";
-
-/* ---------------- 하단 진행 패널 ----------------
- * 강의 재생, 텍스트 변환, 여러 개 받기의 진행과 실패를 한곳(#task-panel)에 모은다. 상태가 바뀔 때마다 renderTaskPanel()을 부른다.
- * ui.js 다음에 불러오며, app.js의 state, store, esc, fmtDate, fmtDuration, navigate와 transcribe.js의 tx는
- * 함수를 부를 때만 읽는다.
- *
- * TaskItem: { key, kind, title, pct: number|null, note, failed, detail?, actions: [{ label, cls, run }] }
+/* 하단 진행 패널(#task-panel)
+ * 강의 재생, 텍스트 변환, 여러 개 받기의 진행과 실패를 한곳에 모은다. 상태가 바뀌면 renderTaskPanel()을 부른다.
+ * 막대(#task-bar: 요약·실패 점·펼치기)는 index.html에 있고, 펼친 시트(#task-sheet)의 목록을 Preact로 그린다.
+ * Preact는 같은 버튼을 그대로 두므로 다시 그려도 포커스가 남는다. 버튼이 사라지거나 시트를 접으면 막대로 포커스를 돌려준다.
  */
+import { render } from "preact";
+import { navigate } from "./app";
+import { fmtDate, fmtDuration, state, store } from "./core";
+import { stopBulkDownload } from "./downloads";
+import { cancelActivePlayback } from "./screens/playback";
+import { runBulkDownload } from "./screens/videos";
+import { cancelTranscription, enqueueTranscription, tx } from "./transcribe";
+import type { Batch, BatchDetail } from "./types";
+
+interface TaskAction { label: string; cls: string; run: () => unknown }
+interface TaskItem { key: string; kind: string; title: string; pct: number | null; note: string; failed: boolean; detail?: string | string[]; actions: TaskAction[] }
 
 const DISMISSED_FAILURES_KEY = "dismissed-playback-failures";
 const FAILURE_KEEP_MS = 7 * 86400000;
-const taskUi = { expanded: false, actions: new Map(), dismissed: new Set(), sheetHtml: "", pointerDown: false };
+const taskUi = { expanded: false, dismissed: new Set<number>(), pointerDown: false };
 
 /** 끝난 지 7일 안이고 실패가 있는 재생 묶음. 닫은 묶음과 실패 없이 취소한 묶음은 뺀다. */
-export function failedPlaybackBatches(batches, dismissedIds, now) {
+export function failedPlaybackBatches(batches: Batch[], dismissedIds: number[], now: number | string | Date): Batch[] {
   const dismissed = new Set(dismissedIds);
   const oldest = new Date(now).getTime() - FAILURE_KEEP_MS;
   return batches.filter((b) => !["queued", "running"].includes(b.status)
@@ -27,22 +29,22 @@ export function failedPlaybackBatches(batches, dismissedIds, now) {
     && (b.failed_count > 0 || b.status === "failed"));
 }
 
-function dismissedFailureIds() {
-  let saved = [];
+function dismissedFailureIds(): number[] {
+  let saved: number[] = [];
   try {
-    const parsed = JSON.parse(store.get(DISMISSED_FAILURES_KEY));
+    const parsed = JSON.parse(store.get(DISMISSED_FAILURES_KEY) ?? "null");
     if (Array.isArray(parsed)) saved = parsed;
   } catch { /* 깨진 값은 없는 것으로 본다 */ }
   return [...new Set([...saved, ...taskUi.dismissed])];  // 저장할 수 없는 환경에서도 이번 탭에서는 닫힌다
 }
 
-function dismissFailure(id) {
+function dismissFailure(id: number): void {
   taskUi.dismissed.add(id);
   store.set(DISMISSED_FAILURES_KEY, JSON.stringify(dismissedFailureIds()));
   renderTaskPanel();
 }
 
-function playbackTask(a) {
+function playbackTask(a: BatchDetail): TaskItem {
   const done = (a.done_count || 0) + (a.skipped_count || 0);
   const wait = a.status === "queued" ? (a.queue_position != null ? `대기 ${a.queue_position}번째` : "대기 중") : "";
   return {
@@ -57,8 +59,9 @@ function playbackTask(a) {
   };
 }
 
-function transcribeTask() {
-  const job = tx.current;
+function transcribeTask(): TaskItem {
+  // transcribe.js가 아직 JS라 작업의 타입을 여기서 적는다
+  const job = tx.current as { title: string; seconds: number; duration?: number } | null;
   const waiting = tx.queue.length;
   const pct = job?.duration ? Math.min(100, Math.round((job.seconds / job.duration) * 100)) : null;
   const device = tx.device ? ` · ${tx.device === "webgpu" ? "GPU" : "CPU"}` : "";
@@ -79,7 +82,7 @@ function transcribeTask() {
   };
 }
 
-function bulkTask(b) {
+function bulkTask(b: any): TaskItem {
   const done = b.done + b.failed;
   return {
     key: "bulk",
@@ -92,7 +95,7 @@ function bulkTask(b) {
   };
 }
 
-function failedBulkTask(b) {
+function failedBulkTask(b: any): TaskItem {
   return {
     key: "bulk-failed",
     kind: "bulk",
@@ -108,13 +111,13 @@ function failedBulkTask(b) {
   };
 }
 
-function failedBatchTask(b) {
+function failedBatchTask(b: Batch): TaskItem {
   return {
     key: `playback-failed-${b.id}`,
     kind: "playback",
     title: b.failed_count > 0 ? `강의 재생 실패 ${b.failed_count}개` : "강의 재생 실패",
     pct: null,
-    note: `${fmtDate(new Date(b.finished_at))}에 끝났어요`,
+    note: `${fmtDate(new Date(b.finished_at!))}에 끝났어요`,
     failed: true,
     detail: b.error || "",
     actions: [
@@ -124,7 +127,7 @@ function failedBatchTask(b) {
   };
 }
 
-function failedTranscribeTask(f) {
+function failedTranscribeTask(f: any): TaskItem {
   return {
     key: `transcribe-failed-${f.key}`,
     kind: "transcribe",
@@ -135,13 +138,13 @@ function failedTranscribeTask(f) {
     detail: f.error || "",
     actions: [
       { label: "다시 시도", cls: "btn small", run: () => enqueueTranscription([f]) },
-      { label: "닫기", cls: "btn small ghost", run: () => { tx.finished = tx.finished.filter((x) => x !== f); renderTaskPanel(); } },
+      { label: "닫기", cls: "btn small ghost", run: () => { tx.finished = tx.finished.filter((x: unknown) => x !== f); renderTaskPanel(); } },
     ],
   };
 }
 
 /** 진행 중인 작업을 먼저, 실패를 뒤에 둔다. */
-function taskItems() {
+function taskItems(): TaskItem[] {
   const failedBatches = failedPlaybackBatches(state.batches, dismissedFailureIds(), Date.now());
   return [
     ...(state.active ? [playbackTask(state.active)] : []),
@@ -149,39 +152,48 @@ function taskItems() {
     ...(state.bulk?.running ? [bulkTask(state.bulk)] : []),
     ...failedBatches.map(failedBatchTask),
     ...(state.bulk && !state.bulk.running && state.bulk.failedItems?.length ? [failedBulkTask(state.bulk)] : []),
-    ...tx.finished.filter((f) => f.status === "failed").map(failedTranscribeTask),
+    ...tx.finished.filter((f: { status: string }) => f.status === "failed").map(failedTranscribeTask),
   ];
 }
 
-function taskSummary(items) {
+function taskSummary(items: TaskItem[]): string {
   const failed = items.filter((i) => i.failed).length;
   const running = items.length - failed;
   return [running ? `작업 ${running}개 진행 중` : "", failed ? `실패 ${failed}개` : ""].filter(Boolean).join(" · ");
 }
 
-function taskRowHtml(item) {
+function TaskRow({ item }: { item: TaskItem }) {
   const titleId = `task-title-${item.key}`;
-  const buttons = item.actions.map((a, i) => {
-    const key = `${item.key}-${i}`;
-    return `<button type="button" class="${a.cls}" id="task-action-${esc(key)}" data-action-key="${esc(key)}" aria-describedby="${esc(titleId)}">${esc(a.label)}</button>`;
-  }).join("");
-  return `<li class="tp-row${item.failed ? " bad" : ""}">
-    <div class="tp-line"><p class="tp-title" id="${esc(titleId)}">${esc(item.title)}</p>${buttons ? `<div class="tp-actions">${buttons}</div>` : ""}</div>
-    ${item.failed ? "" : `<progress max="100" ${item.pct === null ? "" : `value="${item.pct}"`} aria-labelledby="${esc(titleId)}"></progress>`}
-    ${item.note ? `<p class="tp-note">${esc(item.note)}</p>` : ""}
-    ${[].concat(item.detail || []).map((d) => `<p class="tp-note">${esc(d)}</p>`).join("")}
-  </li>`;
+  return (
+    <li class={`tp-row${item.failed ? " bad" : ""}`}>
+      <div class="tp-line">
+        <p class="tp-title" id={titleId}>{item.title}</p>
+        {item.actions.length > 0 && (
+          <div class="tp-actions">
+            {item.actions.map((a, i) => (
+              <button key={a.label} type="button" class={a.cls} id={`task-action-${item.key}-${i}`} data-action-key={`${item.key}-${i}`}
+                aria-describedby={titleId} onClick={() => a.run()}>{a.label}</button>
+            ))}
+          </div>
+        )}
+      </div>
+      {!item.failed && <progress max={100} value={item.pct ?? undefined} aria-labelledby={titleId} />}
+      {item.note && <p class="tp-note">{item.note}</p>}
+      {([] as string[]).concat(item.detail || []).map((d, i) => <p key={i} class="tp-note">{d}</p>)}
+    </li>
+  );
 }
 
-export function renderTaskPanel() {
-  if (taskUi.pointerDown) return;  // 누르는 중에 버튼을 바꾸면 클릭이 사라진다. 손을 떼면 다시 그린다.
+const el = (id: string) => document.getElementById(id)!;
+
+export function renderTaskPanel(): void {
+  if (taskUi.pointerDown) return;  // 누르는 중에 버튼이 사라지면 클릭이 없어진다. 손을 떼면 다시 그린다.
   const panel = document.getElementById("task-panel");
   if (!panel) return;
-  const bar = document.getElementById("task-bar");
-  const sheet = document.getElementById("task-sheet");
+  const bar = el("task-bar");
+  const sheet = el("task-sheet");
   const focused = document.activeElement;
   const focusInSheet = focused !== sheet && sheet.contains(focused);  // 스크롤 영역 자체의 포커스는 그대로 둔다
-  const focusKey = focused?.dataset?.actionKey;
   const focusOnBar = focused === bar;
 
   const items = state.token ? taskItems() : [];
@@ -190,40 +202,23 @@ export function renderTaskPanel() {
   document.body.classList.toggle("has-task-bar", items.length > 0);
 
   const summary = taskSummary(items);
-  const summaryEl = document.getElementById("task-summary");
-  if (summaryEl.textContent !== summary) summaryEl.textContent = summary;
-  document.getElementById("task-dot").hidden = !items.some((i) => i.failed);
-  document.getElementById("task-toggle").textContent = taskUi.expanded ? "접기" : "펼치기";
+  if (el("task-summary").textContent !== summary) el("task-summary").textContent = summary;
+  el("task-dot").hidden = !items.some((i) => i.failed);
+  el("task-toggle").textContent = taskUi.expanded ? "접기" : "펼치기";
   bar.setAttribute("aria-expanded", String(taskUi.expanded));
   sheet.hidden = !taskUi.expanded;
-
-  taskUi.actions = new Map(items.flatMap((item) => item.actions.map((a, i) => [`${item.key}-${i}`, a.run])));
-  const html = items.length ? `<ul class="tp-list">${items.map(taskRowHtml).join("")}</ul>` : "";
-  if (html !== taskUi.sheetHtml) {
-    const scroll = sheet.scrollTop;
-    sheet.innerHTML = html;
-    sheet.scrollTop = scroll;
-    taskUi.sheetHtml = html;
-  }
+  render(items.length ? <ul class="tp-list">{items.map((item) => <TaskRow key={item.key} item={item} />)}</ul> : null, sheet);
 
   const fallback = items.length ? bar : document.getElementById("view");
-  if (focusInSheet) {
-    const same = taskUi.expanded ? [...sheet.querySelectorAll("[data-action-key]")].find((b) => b.dataset.actionKey === focusKey) : null;
-    if (same !== document.activeElement) (same || fallback)?.focus({ preventScroll: true });
-  } else if (focusOnBar && !items.length) {
-    fallback?.focus({ preventScroll: true });
-  }
+  const lost = focusInSheet && (!taskUi.expanded || !sheet.contains(document.activeElement));
+  if (lost || (focusOnBar && !items.length)) fallback?.focus({ preventScroll: true });
 }
 
-function bindTaskPanel() {
-  const panel = document.getElementById("task-panel");
-  const bar = document.getElementById("task-bar");
-  const sheet = document.getElementById("task-sheet");
+function bindTaskPanel(): void {
+  const panel = el("task-panel");
+  const bar = el("task-bar");
+  const sheet = el("task-sheet");
   bar.addEventListener("click", () => { taskUi.expanded = !taskUi.expanded; renderTaskPanel(); });
-  sheet.addEventListener("click", (e) => {
-    const key = e.target.closest("[data-action-key]")?.dataset.actionKey;
-    if (key) taskUi.actions.get(key)?.();
-  });
   panel.addEventListener("keydown", (e) => {
     if (e.key !== "Escape" || !taskUi.expanded) return;
     taskUi.expanded = false;
@@ -241,28 +236,3 @@ function bindTaskPanel() {
 }
 
 bindTaskPanel();
-
-/* ---------------- 하단 고정 광고 피하기 ----------------
- * 자동 광고가 화면 아래에 붙이는 ins[data-anchor-status="displayed"]의 높이를 --ad-inset에 넣어
- * 패널과 토스트가 광고 위로 올라오게 한다. 이 속성은 공개 API가 아니므로 광고가 바뀌면 확인해야 한다.
- */
-
-function syncAdInset() {
-  const ad = document.querySelector('ins.adsbygoogle[data-anchor-status="displayed"]');
-  const box = ad?.getBoundingClientRect();
-  const fixedAtBottom = ad && getComputedStyle(ad).position === "fixed" && box.bottom >= innerHeight - 1;
-  const inset = fixedAtBottom ? `${Math.ceil(box.height)}px` : "0px";
-  if (document.documentElement.style.getPropertyValue("--ad-inset") !== inset) {
-    document.documentElement.style.setProperty("--ad-inset", inset);
-  }
-}
-
-let adSyncFrame = 0;
-function scheduleAdInsetSync() {
-  if (!adSyncFrame) adSyncFrame = requestAnimationFrame(() => { adSyncFrame = 0; syncAdInset(); });
-}
-new MutationObserver(scheduleAdInsetSync).observe(document.body, {
-  childList: true, subtree: true, attributes: true, attributeFilter: ["data-anchor-status", "style", "class"],
-});
-window.addEventListener("resize", scheduleAdInsetSync);
-syncAdInset();
