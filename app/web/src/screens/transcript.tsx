@@ -1,5 +1,5 @@
 /* 텍스트 변환 화면 조각: 강의 줄의 변환 버튼, 주차 일괄 변환 버튼, 결과 대화상자(#transcript-dialog).
- * 변환 자체(확장 프로그램 → Whisper Worker → 서버 저장)는 transcribe.js가 한다. */
+ * 변환 자체(확장 프로그램 → Whisper Worker → 서버 저장)는 transcribe.ts가 한다. */
 import { render } from "preact";
 import { useState } from "preact/hooks";
 import { api } from "../core";

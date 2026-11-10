@@ -4,7 +4,7 @@
  * - 광고: 첫 화면이 다 그려지고 브라우저가 한가할 때 로더를 붙인다.
  */
 
-document.querySelectorAll("link[data-font]").forEach((link) => { link.media = "all"; });
+document.querySelectorAll<HTMLLinkElement>("link[data-font]").forEach((link) => { link.media = "all"; });
 
 const ADSENSE_SRC = "https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1006974862356513";
 
@@ -17,7 +17,7 @@ function loadAds() {
   document.head.append(script);
 }
 
-export function whenIdle(fn) {
+export function whenIdle(fn: () => void): void {
   if ("requestIdleCallback" in window) requestIdleCallback(fn, { timeout: 4000 });
   else setTimeout(fn, 1500);
 }
@@ -33,8 +33,8 @@ else window.addEventListener("load", () => whenIdle(loadAds), { once: true });
 function syncAdInset() {
   const ad = document.querySelector('ins.adsbygoogle[data-anchor-status="displayed"]');
   const box = ad?.getBoundingClientRect();
-  const fixedAtBottom = ad && getComputedStyle(ad).position === "fixed" && box.bottom >= innerHeight - 1;
-  const inset = fixedAtBottom ? `${Math.ceil(box.height)}px` : "0px";
+  const fixedAtBottom = !!ad && !!box && getComputedStyle(ad).position === "fixed" && box.bottom >= innerHeight - 1;
+  const inset = fixedAtBottom ? `${Math.ceil(box!.height)}px` : "0px";
   if (document.documentElement.style.getPropertyValue("--ad-inset") !== inset) {
     document.documentElement.style.setProperty("--ad-inset", inset);
   }

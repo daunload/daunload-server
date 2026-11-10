@@ -2,10 +2,10 @@
  * 들어오자마자 재생할 강의와 낼 과제를 한 화면에서 보고, 버튼 한 번으로 끝낸다.
  *  - 강의가 있으면: "강의 N개 모두 재생" → 순서대로 재생하고 학습 완료까지 확인(학칙 확인 창은 처음 한 번만)
  *  - 과제만 남았으면: 마감이 가장 빠른 과제의 제출 화면을 연다(과제는 직접 제출해야 한다)
- * 강의는 /playback/batches/preview?scope=all(app.js가 state.dashboardPlan에 둔다),
+ * 강의는 /playback/batches/preview?scope=all(app.ts가 state.dashboardPlan에 둔다),
  * 과제는 /week의 assignments + later_assignments + late_assignments에서 가져온다.
  *
- * app.js는 renderWeek()(불러와서 그리기)와 drawWeek()(지금 상태로 다시 그리기)만 부른다.
+ * app.ts는 renderWeek()(불러와서 그리기)와 drawWeek()(지금 상태로 다시 그리기)만 부른다.
  * Preact가 바뀐 부분만 고치므로 5초 폴링으로 다시 그려도 포커스와 펼친 과목이 그대로 남는다.
  */
 import { type ComponentChildren, render } from "preact";
@@ -388,7 +388,7 @@ async function startDashboardPlayback(): Promise<void> {
   }
 }
 
-// 재생 진행률을 갱신하고(app.js 폴링이 state.active를 갱신), 끝나면 목록을 새로 불러온다.
+// 재생 진행률을 갱신하고(app.ts 폴링이 state.active를 갱신), 끝나면 목록을 새로 불러온다.
 setInterval(() => {
   if (!panel()) return;
   const activeId = state.active?.id ?? null;

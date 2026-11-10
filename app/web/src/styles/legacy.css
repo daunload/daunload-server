@@ -576,7 +576,7 @@ body.has-task-bar .toast-stack { bottom: calc(72px + var(--ad-inset)); }
 .install-steps span { margin-bottom: 8px; }
 .guide-note { color: var(--ink-3); }
 
-/* ---------- 관리자 (admin.js) ---------- */
+/* ---------- 관리자 (screens/admin) ---------- */
 .admin-workspace { max-width: 1200px; }
 .admin { display: grid; gap: 12px; min-width: 0; }
 .admin-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

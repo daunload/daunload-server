@@ -13,9 +13,22 @@ import { renderVideoList, reportDownloadError } from "./screens/videos";
 const WHISPER_RATE = 16000;
 const READ_AHEAD_SECONDS = 60;  // Worker보다 이만큼만 앞서 받는다(메모리 일정)
 const MIN_AUDIO_RATIO = 0.97;   // LMS의 영상 길이와 실제 오디오 길이의 오차 허용
-export const tx = { worker: null, device: null, modelPercent: null, queue: [], current: null, finished: [], nextId: 1, epoch: 0 };
+/** 변환을 요청한 강의(screens/transcript.tsx의 TxJob과 같은 모양). */
+export interface TxRequest { courseId: number; moduleItemId: number; title: string; courseName: string; mediaPath: string | null; duration?: number | null }
+type Segment = { start: number; end: number | null; text: string };
+/** 대기열에 들어간 작업. 실행하면서 아래 값이 채워진다. */
+export interface TxJob extends TxRequest {
+  key: string; id: number; status: "queued" | "running" | "done" | "failed" | "cancelled"; seconds: number; error?: string;
+  epoch?: number; segments?: Segment[]; ctrl?: AbortController; done?: Promise<void>; resolve?: () => void; reject?: (e: Error) => void;
+  wake?: () => void; extJob?: string; totalSeconds?: number;
+}
 
-function txKey(courseId, moduleItemId) { return `${courseId}:${moduleItemId}`; }
+export const tx = {
+  worker: null as Worker | null, device: null as string | null, modelPercent: null as number | null,
+  queue: [] as TxJob[], current: null as TxJob | null, finished: [] as TxJob[], nextId: 1, epoch: 0,
+};
+
+function txKey(courseId: number, moduleItemId: number): string { return `${courseId}:${moduleItemId}`; }
 
 function ensureWorker() {
   if (tx.worker) return tx.worker;
@@ -26,7 +39,7 @@ function ensureWorker() {
   return w;
 }
 
-function onWorkerMessage({ data: m }) {
+function onWorkerMessage({ data: m }: MessageEvent) {
   if (m.type === "model-progress") { tx.modelPercent = m.percent; renderTaskPanel(); return; }
   if (m.type === "device") {
     tx.device = m.device;
@@ -41,15 +54,15 @@ function onWorkerMessage({ data: m }) {
   const job = tx.current;
   if (!job || m.jobId !== job.id) return;
   if (m.type === "progress") { job.seconds = m.seconds; job.wake?.(); renderTaskPanel(); }
-  else if (m.type === "segment") job.segments.push({ start: m.start, end: m.end, text: m.text });
-  else if (m.type === "done") job.resolve();
+  else if (m.type === "segment") job.segments!.push({ start: m.start, end: m.end, text: m.text });
+  else if (m.type === "done") job.resolve!();
   else if (m.type === "error") {
-    job.reject(new Error(m.message));
+    job.reject!(new Error(m.message));
     if (m.fatal) failAll(m.message);
   }
 }
 
-function failAll(message) {
+function failAll(message: string): void {
   tx.worker?.terminate();
   tx.worker = null;
   tx.current?.reject?.(new Error(message));
@@ -57,7 +70,7 @@ function failAll(message) {
   renderTaskPanel();
 }
 
-export function enqueueTranscription(items) {
+export function enqueueTranscription(items: TxRequest[]): void {
   for (const it of items) {
     const key = txKey(it.courseId, it.moduleItemId);
     if (tx.current?.key === key || tx.queue.some((q) => q.key === key)) continue;
@@ -72,12 +85,12 @@ export function cancelTranscription() {
   const job = tx.current;
   if (!job) return;
   job.status = "cancelled";
-  job.ctrl.abort();
+  job.ctrl?.abort();
   tx.worker?.postMessage({ type: "cancel", jobId: job.id });
-  job.reject(new Error("중지했습니다."));
+  job.reject?.(new Error("중지했습니다."));
 }
 
-async function runNext() {
+async function runNext(): Promise<void> {
   const job = tx.queue.shift() || null;
   tx.current = job;
   renderTaskPanel();
@@ -86,12 +99,12 @@ async function runNext() {
   job.epoch = tx.epoch;
   job.segments = [];
   job.ctrl = new AbortController();
-  job.done = new Promise((resolve, reject) => { job.resolve = resolve; job.reject = reject; });
+  job.done = new Promise<void>((resolve, reject) => { job.resolve = resolve; job.reject = reject; });
   job.done.catch(() => {});  // 처리하지 않은 거부 경고 방지(아래에서 await)
   try {
     try { await requireAudioExtension(); }
-    catch (err) { if (err.code === "EXTENSION_MISSING") reportDownloadError(err); throw err; }
-    const link = await api(job.mediaPath, { method: "POST" });
+    catch (err) { if ((err as { code?: string }).code === "EXTENSION_MISSING") reportDownloadError(err as Error); throw err; }
+    const link = await api<{ url: string }>(job.mediaPath!, { method: "POST" });
     job.extJob = crypto.randomUUID();
     await ext.request("audio-open", { job: job.extJob, url: link.url });
     const worker = ensureWorker();
@@ -99,7 +112,7 @@ async function runNext() {
     await pumpAudio(job, worker);
     worker.postMessage({ type: "end", jobId: job.id });
     await job.done;
-    const saved = await api(`/courses/${job.courseId}/videos/${job.moduleItemId}/transcript`, { method: "PUT", json: {
+    const saved = await api<{ id: number }>(`/courses/${job.courseId}/videos/${job.moduleItemId}/transcript`, { method: "PUT", json: {
       course_name: job.courseName, title: job.title,
       text: job.segments.map((s) => s.text).join("\n"),
       segments: job.segments, model: `whisper-small/${tx.device || "unknown"}`, duration: job.totalSeconds,
@@ -107,7 +120,8 @@ async function runNext() {
     job.status = "done";
     if (job.epoch === tx.epoch) onTranscriptSaved(job, saved.id);  // 로그아웃 전의 작업은 다음 사용자에게 알리지 않는다
   } catch (err) {
-    if (job.status !== "cancelled") { job.status = "failed"; job.error = err.message; }
+    // cancelTranscription()이 다른 곳에서 status를 바꿀 수 있다
+    if ((job.status as TxJob["status"]) !== "cancelled") { job.status = "failed"; job.error = (err as Error).message; }
   } finally {
     // 실패해도 확장 프로그램의 오디오 작업을 닫아야 다음 작업이 읽을 수 있다
     job.ctrl.abort();
@@ -122,7 +136,7 @@ async function runNext() {
   if (state.view === "videos" && state.videoTab === "videos" && state.videoList) renderVideoList();
 }
 
-function pcmFromBase64(b64) {
+function pcmFromBase64(b64: string): Float32Array {
   const bin = atob(b64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -132,23 +146,23 @@ function pcmFromBase64(b64) {
   return samples;
 }
 
-async function pumpAudio(job, worker) {
+async function pumpAudio(job: TxJob, worker: Worker): Promise<void> {
   let sent = 0;
-  let url;
+  let url: string | undefined;
   let doneDuration = 0;
   for (;;) {
     while (sent / WHISPER_RATE - job.seconds > READ_AHEAD_SECONDS) {
-      await Promise.race([new Promise((r) => { job.wake = r; }), job.done]);
+      await Promise.race([new Promise<void>((r) => { job.wake = r; }), job.done]);
     }
-    job.ctrl.signal.throwIfAborted();
+    job.ctrl!.signal.throwIfAborted();
     // 읽기가 시간 초과되면 확장이 이미 샘플을 소비했을 수 있어 이어 받지 않고 작업을 실패시킨다
     const read = ext.request("audio-read", { job: job.extJob, ...(url ? { url } : {}) });
     read.catch(() => {});
-    const result = await Promise.race([read, job.done]);  // 취소·워커 오류로 job.done이 거부되면 응답을 기다리지 않는다
-    job.ctrl.signal.throwIfAborted();
+    const result = (await Promise.race([read, job.done])) as { refresh?: boolean; done?: boolean; duration?: number; pcm: string };  // 취소·워커 오류로 job.done이 거부되면 응답을 기다리지 않는다
+    job.ctrl!.signal.throwIfAborted();
     url = undefined;
     if (result.refresh) {
-      url = (await api(job.mediaPath, { method: "POST" })).url;
+      url = (await api<{ url: string }>(job.mediaPath!, { method: "POST" })).url;
       continue;
     }
     if (result.done) { doneDuration = Number(result.duration) || 0; break; }
@@ -165,9 +179,9 @@ async function pumpAudio(job, worker) {
   }
 }
 
-export function onTranscriptSaved(job, id) {
+export function onTranscriptSaved(job: { courseId: number; moduleItemId: number; title: string }, id: number | null): void {
   for (const list of [state.videoList?.items, state.savedVideos]) {
-    const row = list?.find((v) => (v.lms_course_id ?? state.videoList?.courseId) === job.courseId && v.module_item_id === job.moduleItemId);
+    const row = list?.find((v: { lms_course_id?: number; module_item_id: number }) => (v.lms_course_id ?? state.videoList?.courseId) === job.courseId && v.module_item_id === job.moduleItemId);
     if (row) row.transcript_id = id;
   }
   if (state.view === "videos" && state.videoTab === "videos" && state.videoList?.courseId === job.courseId) renderVideoList();
@@ -177,7 +191,7 @@ export function onTranscriptSaved(job, id) {
 /* ---------- 화면이 묻는 상태 ---------- */
 
 /** 이 강의가 지금 변환 중("running")인지 대기 중("queued")인지. 버튼 모양(screens/transcript.tsx)이 쓴다. */
-export function txStatusOf(courseId, moduleItemId) {
+export function txStatusOf(courseId: number, moduleItemId: number): "running" | "queued" | null {
   const key = txKey(courseId, moduleItemId);
   if (tx.current?.key === key) return "running";
   if (tx.queue.some((q) => q.key === key)) return "queued";

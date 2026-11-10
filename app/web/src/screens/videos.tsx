@@ -10,7 +10,7 @@ import { Fragment } from "preact";
 import { useState } from "preact/hooks";
 import { needCred, viewError } from "../app";
 import { api, fmtDate, fmtDuration, fmtSize, state } from "../core";
-import { bulkDownloadSupported, downloadDirectVideo, requireDownloadExtension, startBulkDownload } from "../downloads";
+import { type BulkItem, type BulkStat, bulkDownloadSupported, downloadDirectVideo, requireDownloadExtension, startBulkDownload } from "../downloads";
 import { ext } from "../extension";
 import { renderTaskPanel } from "../tasks";
 import { Icon, IconOnly, isPhoneDevice, toast } from "../ui";
@@ -36,7 +36,6 @@ interface MaterialItem {
   key: string; module_id: number | string; module_title: string; title: string; file_name: string; size?: number | null; kind: string;
   downloaded_at?: string | null; linkPath: string;
 }
-interface BulkItem { linkPath: string; label: string; onDone: () => void }
 
 /* ---------- 불러오기 ---------- */
 
@@ -100,7 +99,7 @@ function courseOptions() {
 export async function runBulkDownload(items: BulkItem[]): Promise<void> {
   const token = state.token;
   try {
-    await startBulkDownload(items, (stat: { running: boolean; stopped?: boolean; done: number; total: number; failedItems: unknown[] }) => {
+    await startBulkDownload(items, (stat: BulkStat) => {
       if (state.token !== token) return;  // 로그아웃 뒤에 늦게 온 갱신은 버린다
       state.bulk = stat;
       try {

@@ -1,7 +1,7 @@
 /* #view에 Preact 화면을 그린다.
  * 아직 옮기지 않은 화면은 #view.innerHTML을 통째로 바꾸므로, Preact 화면은 #view 안의 전용 컨테이너에 그린다.
  * 같은 화면을 다시 그리면(5초 폴링 등) 같은 컨테이너에 그려 포커스·펼침·입력 상태를 지킨다.
- * 다른 화면으로 바꾸기 전에 app.js의 renderView()가 unmountScreen()을 불러 컴포넌트를 정리한다. */
+ * 다른 화면으로 바꾸기 전에 app.ts의 renderView()가 unmountScreen()을 불러 컴포넌트를 정리한다. */
 import { type ComponentChild, render } from "preact";
 
 let mounted: HTMLElement | null = null;

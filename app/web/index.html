@@ -25,7 +25,7 @@
   <link rel="icon" href="/mark.png" type="image/png">
   <meta name="google-adsense-account" content="ca-pub-1006974862356513">
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-  <!-- 글꼴 CSS는 렌더링을 막지 않는다. 미리 받아 두고 assets.js가 media를 all로 바꾼다(CSP가 인라인 onload를 막는다). -->
+  <!-- 글꼴 CSS는 렌더링을 막지 않는다. 미리 받아 두고 assets.ts가 media를 all로 바꾼다(CSP가 인라인 onload를 막는다). -->
   <link rel="preload" as="style" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
   <link rel="preload" as="style" href="https://cdn.jsdelivr.net/npm/@fontsource/black-han-sans@5.3.0/400.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" media="print" data-font>
@@ -125,6 +125,6 @@
   </aside>
   <dialog class="transcript-dialog" id="transcript-dialog"></dialog>
   <dialog class="confirm-dialog m-auto max-h-[calc(100vh-64px)] w-[min(440px,calc(100vw-32px))] gap-3 overflow-y-auto rounded-card border-2 border-ink bg-surface p-5 text-ink open:grid backdrop:bg-[rgb(0_0_0/.35)]" id="confirm-dialog"></dialog>
-  <script type="module" src="/src/main.js"></script>
+  <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

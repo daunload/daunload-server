@@ -2,6 +2,7 @@
  * 상태(state), 저장소(store), API 호출(api), 날짜·시간 형식, 문자열 이스케이프. */
 
 import type { Batch, BatchDetail, Course, Credentials, Me, Plan, Todo } from "./types";
+import type { BulkStat } from "./downloads";
 
 /** querySelector 줄임. 화면 모듈은 index.html에 있는 요소를 찾을 때 쓴다(없으면 null이지만 대부분 있다고 가정한다). */
 export const $ = (sel: string, root: ParentNode = document): any => root.querySelector(sel);
@@ -58,12 +59,12 @@ export interface State {
   videoTab: "videos" | "materials" | string;
   materialList: any;
   notDownloadedOnly: boolean;
-  bulk: any;
+  bulk: BulkStat | null;
   extensionReady?: boolean;
   extensionMissing?: string | null;
   guideDismissed?: boolean;
-  planForm?: any;
-  planQuery?: any;
+  planForm?: { scope: string; course: string; module: string } | null;
+  planQuery?: Record<string, string> | null;
   playbackHelpOpen?: boolean;
 }
 
@@ -108,7 +109,7 @@ export function fmtDuration(sec: number): string {
 export const dueTime = (t: { deadline?: string | null }) => t.deadline ? new Date(t.deadline).getTime() : Infinity;
 export const dueText = (iso: string | null | undefined) => iso ? `마감 ${fmtDate(new Date(iso))}` : "마감 없음";
 
-/** api()가 401·권한 없음을 만났을 때 부르는 화면 전환. 이 모듈이 화면 모듈을 import하지 않도록 app.js가 등록한다. */
+/** api()가 401·권한 없음을 만났을 때 부르는 화면 전환. 이 모듈이 화면 모듈을 import하지 않도록 app.ts가 등록한다. */
 const apiHandlers = { unauthorized() {}, accessRequired() {} };
 export function setApiHandlers(handlers: Partial<typeof apiHandlers>): void { Object.assign(apiHandlers, handlers); }
 

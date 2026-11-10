@@ -6,10 +6,10 @@
 import { render } from "preact";
 import { navigate } from "./app";
 import { fmtDate, fmtDuration, state, store } from "./core";
-import { stopBulkDownload } from "./downloads";
+import { type BulkStat, stopBulkDownload } from "./downloads";
 import { cancelActivePlayback } from "./screens/playback";
 import { runBulkDownload } from "./screens/videos";
-import { cancelTranscription, enqueueTranscription, tx } from "./transcribe";
+import { type TxJob, cancelTranscription, enqueueTranscription, tx } from "./transcribe";
 import type { Batch, BatchDetail } from "./types";
 
 interface TaskAction { label: string; cls: string; run: () => unknown }
@@ -60,8 +60,7 @@ function playbackTask(a: BatchDetail): TaskItem {
 }
 
 function transcribeTask(): TaskItem {
-  // transcribe.js가 아직 JS라 작업의 타입을 여기서 적는다
-  const job = tx.current as { title: string; seconds: number; duration?: number } | null;
+  const job = tx.current;
   const waiting = tx.queue.length;
   const pct = job?.duration ? Math.min(100, Math.round((job.seconds / job.duration) * 100)) : null;
   const device = tx.device ? ` · ${tx.device === "webgpu" ? "GPU" : "CPU"}` : "";
@@ -82,7 +81,7 @@ function transcribeTask(): TaskItem {
   };
 }
 
-function bulkTask(b: any): TaskItem {
+function bulkTask(b: BulkStat): TaskItem {
   const done = b.done + b.failed;
   return {
     key: "bulk",
@@ -95,7 +94,7 @@ function bulkTask(b: any): TaskItem {
   };
 }
 
-function failedBulkTask(b: any): TaskItem {
+function failedBulkTask(b: BulkStat): TaskItem {
   return {
     key: "bulk-failed",
     kind: "bulk",
@@ -127,7 +126,7 @@ function failedBatchTask(b: Batch): TaskItem {
   };
 }
 
-function failedTranscribeTask(f: any): TaskItem {
+function failedTranscribeTask(f: TxJob): TaskItem {
   return {
     key: `transcribe-failed-${f.key}`,
     kind: "transcribe",
@@ -138,7 +137,7 @@ function failedTranscribeTask(f: any): TaskItem {
     detail: f.error || "",
     actions: [
       { label: "다시 시도", cls: "btn small", run: () => enqueueTranscription([f]) },
-      { label: "닫기", cls: "btn small ghost", run: () => { tx.finished = tx.finished.filter((x: unknown) => x !== f); renderTaskPanel(); } },
+      { label: "닫기", cls: "btn small ghost", run: () => { tx.finished = tx.finished.filter((x) => x !== f); renderTaskPanel(); } },
     ],
   };
 }
@@ -152,7 +151,7 @@ function taskItems(): TaskItem[] {
     ...(state.bulk?.running ? [bulkTask(state.bulk)] : []),
     ...failedBatches.map(failedBatchTask),
     ...(state.bulk && !state.bulk.running && state.bulk.failedItems?.length ? [failedBulkTask(state.bulk)] : []),
-    ...tx.finished.filter((f: { status: string }) => f.status === "failed").map(failedTranscribeTask),
+    ...tx.finished.filter((f) => f.status === "failed").map(failedTranscribeTask),
   ];
 }
 

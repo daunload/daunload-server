@@ -1,4 +1,5 @@
-import { $, PRIVACY_NOTICE_KEY, VIEW_NAMES, api, esc, fmtDate, parseHash, setApiHandlers, state, store } from "./core";
+import { $, type ApiError, PRIVACY_NOTICE_KEY, VIEW_NAMES, type View, api, esc, fmtDate, parseHash, setApiHandlers, state, store } from "./core";
+import type { Batch, BatchDetail, Course, Credentials, Me, Todo } from "./types";
 import { whenIdle } from "./assets";
 import { clearToasts, closeConfirmDialog, skeletonRows, toast } from "./ui";
 import { renderTaskPanel } from "./tasks";
@@ -27,14 +28,15 @@ function showAuth() {
 }
 
 // 로그인 화면의 뚱이 표정. 실제 안내와 오류는 폼이 맡고, 여기는 분위기만 바꾼다.
-const AUTH_MOODS = {
+type Mood = "idle" | "password" | "consent" | "submitting" | "error";
+const AUTH_MOODS: Record<Mood, [string, string]> = {
   idle: ["blank", "아유… 하기 싫어…"],
   password: ["think", "비밀번호가… 뭐였더라…"],
   consent: ["think", "이건 읽어 보고 가자"],
   submitting: ["steam", "머리에서 김 나는 중…"],
   error: ["burnt", "아유… 터졌다"],
 };
-function setAuthMood(mood) {
+function setAuthMood(mood: Mood): void {
   const [image, caption] = AUTH_MOODS[mood];
   $("#auth-mood").src = `/patrick-${image}.webp`;
   $("#auth-caption").textContent = caption;
@@ -49,12 +51,13 @@ function preloadAuthMoods() {
 $("#password").addEventListener("focus", () => setAuthMood("password"));
 $("#password").addEventListener("blur", () => { if (!$("#auth-error").textContent) setAuthMood("idle"); });
 
-$("#password-toggle").addEventListener("click", (e) => {
+$("#password-toggle").addEventListener("click", (e: MouseEvent) => {
   const input = $("#password");
   const visible = input.type === "password";
   input.type = visible ? "text" : "password";
-  e.currentTarget.textContent = visible ? "숨기기" : "표시";
-  e.currentTarget.setAttribute("aria-pressed", String(visible));
+  const btn = e.currentTarget as HTMLButtonElement;
+  btn.textContent = visible ? "숨기기" : "표시";
+  btn.setAttribute("aria-pressed", String(visible));
 });
 $("#retry-boot").addEventListener("click", boot);
 $("#startup-login").addEventListener("click", logout);
@@ -67,9 +70,9 @@ $("#login-form").student_id.addEventListener("input", () => {
   setAuthMood("idle");
 });
 
-$("#login-form").addEventListener("submit", async (e) => {
+$("#login-form").addEventListener("submit", async (e: SubmitEvent) => {
   e.preventDefault();
-  const f = e.target;
+  const f = e.target as HTMLFormElement & { student_id: HTMLInputElement; password: HTMLInputElement; agree: HTMLInputElement };
   const btn = $("#auth-submit");
   const consentShown = !$("#consent-row").hidden;
   if (consentShown && !f.agree.checked) {
@@ -82,16 +85,17 @@ $("#login-form").addEventListener("submit", async (e) => {
   $("#auth-error").textContent = "";
   setAuthMood("submitting");
   try {
-    const form = { username: f.student_id.value.trim(), password: f.password.value };
+    const form: Record<string, string> = { username: f.student_id.value.trim(), password: f.password.value };
     if (consentShown) form.agree_terms = "true";
-    const res = await api("/auth/login", { method: "POST", form });
+    const res = await api<{ access_token: string }>("/auth/login", { method: "POST", form });
     state.token = res.access_token;
-    store.set("token", state.token);
+    store.set("token", res.access_token);
     f.reset();
     $("#consent-row").hidden = true;
     setAuthMood("idle");
     await boot();
-  } catch (err) {
+  } catch (error) {
+    const err = error as ApiError;
     if (err.code === "consent_required") {
       $("#consent-row").hidden = false;
       setAuthMood("consent");
@@ -106,7 +110,7 @@ $("#login-form").addEventListener("submit", async (e) => {
   }
 });
 
-export function logout() {
+export function logout(): void {
   $("#admin-menu").hidden = true;
   state.token = null;
   store.del("token");
@@ -131,7 +135,7 @@ export function logout() {
   showAuth();
 }
 /** 사용자가 직접 로그아웃할 때: 서버에서도 토큰을 폐기한다. api()는 401이면 logout()을 다시 부르므로 쓰지 않는다. */
-export function serverLogout() {
+export function serverLogout(): void {
   const token = state.token;
   if (token) fetch("/auth/logout", { method: "POST", headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
   logout();
@@ -140,23 +144,23 @@ $("#logout-btn").addEventListener("click", serverLogout);
 
 /* ---------------- 데이터 ---------------- */
 
-export async function loadCore(knownMe) {
+export async function loadCore(knownMe?: Me): Promise<void> {
   const [me, cred, todos, courses, batches] = await Promise.all([
-    knownMe ?? api("/me"),
-    api("/lms/credentials").catch((e) => (e.status === 404 ? null : Promise.reject(e))),
-    api("/todos"),
-    api("/courses"),
-    api("/playback/batches?limit=10"),
+    knownMe ?? api<Me>("/me"),
+    api<Credentials>("/lms/credentials").catch((e: ApiError) => (e.status === 404 ? null : Promise.reject(e))),
+    api<Todo[]>("/todos"),
+    api<Course[]>("/courses"),
+    api<Batch[]>("/playback/batches?limit=10"),
   ]);
   Object.assign(state, { me, cred, todos, courses, batches });
   $("#admin-menu").hidden = !me.is_admin;
   const running = batches.find((b) => b.status === "queued" || b.status === "running");
-  state.active = running ? await api(`/playback/batches/${running.id}`) : null;
+  state.active = running ? await api<BatchDetail>(`/playback/batches/${running.id}`) : null;
   if (state.active) startPolling();
   renderTaskPanel();
 }
 
-export async function boot() {
+export async function boot(): Promise<void> {
   if (!state.token) return showAuth();
   $("#auth").hidden = true;
   $("#access").hidden = true;
@@ -166,10 +170,11 @@ export async function boot() {
   $("#retry-boot").hidden = true;
   $("#startup-login").hidden = true;
   try {
-    const me = await api("/me");
+    const me = await api<Me>("/me");
     if (me.access_status !== "approved") return showAccessScreen(me);  // 승인 전에는 다른 API를 부르지 않는다
     await loadCore(me);
-  } catch (err) {
+  } catch (error) {
+    const err = error as ApiError;
     if (err.status !== 401 && err.code !== "ACCESS_REQUIRED") {
       $("#startup-message").textContent = `학습 현황을 불러오지 못했습니다. ${err.message}`;
       $("#startup-photo").src = "/patrick-burnt.webp";
@@ -218,7 +223,7 @@ $("#sync-btn").addEventListener("click", async () => {
     await api("/sync", { method: "POST" });
     for (let i = 0; i < 40; i++) {
       await new Promise((r) => setTimeout(r, 3000));
-      const cred = await api("/lms/credentials");
+      const cred = await api<Credentials>("/lms/credentials");
       if (cred.last_synced_at !== before || cred.status !== "ok") { state.cred = cred; break; }
     }
     await loadCore();
@@ -227,7 +232,7 @@ $("#sync-btn").addEventListener("click", async () => {
     toast(state.cred?.status !== "ok" ? "동기화하지 못했습니다. 계정 상태를 확인하세요."
       : updated ? "최신 학습 현황으로 업데이트했어요." : "동기화가 지연되고 있어요. 잠시 후 다시 확인해 주세요.", state.cred?.status !== "ok");
   } catch (err) {
-    toast(err.message, true);
+    toast((err as Error).message, true);
   } finally {
     btn.disabled = false;
     btn.textContent = "LMS 동기화";
@@ -241,14 +246,14 @@ function closeMenu() {
   $("#menu-toggle").setAttribute("aria-expanded", "false");
 }
 /** 지금 화면의 주소. 관리자 화면만 하위 경로(`#admin/overview`)를 붙인다. */
-export function viewHash() {
+export function viewHash(): string {
   if (state.view !== "admin") return `#${state.view}`;
   return `#admin/${state.adminPath.map(encodeURIComponent).join("/")}`;
 }
 /** target은 화면 이름이나 해시(`admin/users`). focus가 false면 포커스를 옮기지 않는다(관리자 탭 이동). */
-export function navigate(target, push = true, { focus = true } = {}) {
+export function navigate(target: string, push = true, { focus = true } = {}): void {
   const { view, path } = parseHash(target);
-  state.view = Object.hasOwn(VIEW_NAMES, view) ? view : "dashboard";  // 없어진 화면(#todos 등)은 홈으로
+  state.view = Object.hasOwn(VIEW_NAMES, view) ? view as View : "dashboard";  // 없어진 화면(#todos 등)은 홈으로
   if (state.view === "admin") state.adminPath = path.length ? path : ["overview"];
   store.set("view", state.view);
   if (state.view === "videos") state.savedVideos = null;  // 동기화로 새로 저장된 주소 반영
@@ -267,36 +272,36 @@ $("#menu-toggle").addEventListener("click", () => {
   const open = $(".navigation").classList.toggle("expanded");
   $("#menu-toggle").setAttribute("aria-expanded", String(open));
 });
-$(".navigation").addEventListener("keydown", (e) => {
+$(".navigation").addEventListener("keydown", (e: KeyboardEvent) => {
   if (e.key === "Escape" && $(".navigation").classList.contains("expanded")) { closeMenu(); $("#menu-toggle").focus(); }
 });
-document.querySelectorAll(".side button").forEach((b) => b.addEventListener("click", () => navigate(b.dataset.view)));
-$(".skip-link").addEventListener("click", (e) => {
+document.querySelectorAll<HTMLButtonElement>(".side button").forEach((b) => b.addEventListener("click", () => navigate(b.dataset.view!)));
+$(".skip-link").addEventListener("click", (e: MouseEvent) => {
   e.preventDefault();
   const target = $("#app").hidden ? $("#login-form").student_id : $("#view");
   target.focus();
   target.scrollIntoView({ block: "start" });
 });
-$(".home-link").addEventListener("click", (e) => { e.preventDefault(); navigate("dashboard"); });
-function renderView() {
+$(".home-link").addEventListener("click", (e: MouseEvent) => { e.preventDefault(); navigate("dashboard"); });
+function renderView(): void {
   unmountScreen();  // 이전 Preact 화면을 정리한다(같은 화면을 다시 그릴 때도 처음부터 그린다)
   $(".workspace").classList.toggle("dashboard-workspace", state.view === "dashboard");
   $(".workspace").classList.toggle("admin-workspace", state.view === "admin");
   $("#current-view").textContent = VIEW_NAMES[state.view] || "학습 현황";
   document.title = `${VIEW_NAMES[state.view] || "학습 현황"} · 아유 하기싫어`;
-  document.querySelectorAll(".side button").forEach((b) => {
+  document.querySelectorAll<HTMLButtonElement>(".side button").forEach((b) => {
     const selected = b.dataset.view === state.view;
     b.classList.toggle("on", selected);
     if (selected) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
   });
-  const views = { dashboard: viewDashboard, courses: viewCourses, playback: viewPlayback, videos: viewVideos, notifications: viewNotifications, account: viewAccount, admin: renderAdminView };
+  const views: Record<View, () => unknown> = { dashboard: viewDashboard, courses: viewCourses, playback: viewPlayback, videos: viewVideos, notifications: viewNotifications, account: viewAccount, admin: renderAdminView };
   (views[state.view] || viewDashboard)();
 }
 
-/** 관리자 화면(admin.js)은 관리자만 쓰므로 처음 열 때 따로 받는다(Vite가 별도 파일로 나눈다). */
-let adminModule = null;
-function renderAdminView() {
-  if (adminModule) return adminModule.viewAdmin(state.adminPath);
+/** 관리자 화면(screens/admin)은 관리자만 쓰므로 처음 열 때 따로 받는다(Vite가 별도 파일로 나눈다). */
+let adminModule: typeof import("./screens/admin") | null = null;
+function renderAdminView(): void {
+  if (adminModule) { adminModule.viewAdmin(state.adminPath); return; }
   $("#view").innerHTML = `<div class="panel" aria-busy="true">${skeletonRows(4)}<p class="sr-only" role="status">불러오는 중입니다.</p></div>`;
   import("./screens/admin").then(
     (mod) => { adminModule = mod; if (state.view === "admin") mod.viewAdmin(state.adminPath); },
@@ -304,23 +309,23 @@ function renderAdminView() {
   );
 }
 
-export function viewError(message, retry) {
+export function viewError(message: string, retry: () => unknown): void {
   $("#view").innerHTML = `<div class="panel empty" role="alert"><strong>불러오지 못했어요</strong><p>${esc(message)}</p><button class="btn" id="retry-view">다시 시도</button></div>`;
   $("#retry-view").addEventListener("click", retry);
 }
 
-export function needCred() {
+export function needCred(): boolean {
   if (state.cred) return false;
   $("#view").innerHTML = `<div class="panel empty"><p>LMS 연결 정보가 없습니다. 로그아웃한 뒤 다시 로그인하세요.</p></div>`;
   return true;
 }
 
 /* ---------------- 학습 현황(첫 화면) ----------------
- * 이번 주 할 일만 짧게 보여 주고, 버튼 하나로 끝낼 수 있게 한다. 내용은 week.js가 그린다.
+ * 이번 주 할 일만 짧게 보여 주고, 버튼 하나로 끝낼 수 있게 한다. 내용은 screens/home.tsx가 그린다.
  */
-function viewDashboard() {
+function viewDashboard(): void {
   if (needCred()) return;
-  // 이번 주 할 일과 재생 가능한 강의 전체를 한 카드에서 탭으로 나눠 보여 준다(week.js).
+  // 남은 할 일과 재생 가능한 강의 전체를 한 카드에서 보여 준다(screens/home.tsx).
   $("#view").innerHTML = `<div id="week-panel"></div>`;
   loadDashboardPlayback();
   renderWeek();
@@ -331,4 +336,4 @@ function viewDashboard() {
 
 /* ---------------- 시작 ---------------- */
 
-setInterval(() => { if (!$("#app").hidden && state.view === "dashboard" && !document.activeElement.closest("#week-panel") ) drawWeek(); }, 60000); // 오늘 날짜·마감 표시 갱신
+setInterval(() => { if (!$("#app").hidden && state.view === "dashboard" && !document.activeElement?.closest("#week-panel") ) drawWeek(); }, 60000); // 오늘 날짜·마감 표시 갱신

@@ -1,4 +1,4 @@
-/* 관리자 화면(#admin). 관리자만 쓰므로 app.js가 처음 열 때 import()로 받는다(별도 파일).
+/* 관리자 화면(#admin). 관리자만 쓰므로 app.ts가 처음 열 때 import()로 받는다(별도 파일).
  * 탭 상태는 주소에 둔다: #admin/overview, #admin/users, #admin/users/{학번}[/{상세 탭}], #admin/activity, #admin/problems
  * 서버 문자열은 JSX가 글자로 넣는다(HTML로 해석하지 않는다).
  */
