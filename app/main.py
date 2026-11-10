@@ -1,6 +1,4 @@
-import hashlib
 import os
-import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -91,24 +89,19 @@ class SecurityHeaders:
         await self.app(scope, receive, send_with_headers)
 
 
-# 원본(app/web)은 빌드 없이 그대로 동작한다. 배포 이미지는 압축한 app/web-dist를 WEB_DIR로 지정해 서빙한다
-# (scripts/build-web.mjs, Dockerfile의 web 단계).
-WEB_DIR = Path(os.environ.get("WEB_DIR") or Path(__file__).parent / "web")
-LOCAL_ASSET = re.compile(r'((?:src|href)="/[\w.-]+\.(?:js|css))"')
+# 대시보드 화면은 Vite 빌드 결과(app/web-dist, `npm run build`)를 서빙한다. 원본은 app/web(index.html, src/, public/).
+WEB_DIR = Path(os.environ.get("WEB_DIR") or Path(__file__).parent / "web-dist")
+NO_BUILD_HTML = "<!doctype html><meta charset=utf-8><title>빌드 필요</title><p>대시보드 화면이 빌드되지 않았습니다. <code>npm run build</code>를 실행하세요."
 
 
-def asset_version(web_dir: Path = WEB_DIR) -> str:
-    """JS·CSS 내용으로 만든 버전. 파일 하나만 바뀌어도 전부 새로 받아 예전 파일과 섞이지 않는다."""
-    digest = hashlib.sha256()
-    for path in sorted((*web_dir.glob("*.js"), *web_dir.glob("*.css"))):
-        digest.update(path.name.encode())
-        digest.update(path.read_bytes())
-    return digest.hexdigest()[:12]
+class HashedAssets(StaticFiles):
+    """Vite가 내용 해시를 이름에 붙인 /assets/* 파일. 내용이 바뀌면 이름도 바뀌므로 오래 캐시한다."""
 
-
-def versioned_index(web_dir: Path = WEB_DIR) -> str:
-    html = (web_dir / "index.html").read_text(encoding="utf-8")
-    return LOCAL_ASSET.sub(rf'\1?v={asset_version(web_dir)}"', html)
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            response.headers["cache-control"] = "public, max-age=31536000, immutable"
+        return response
 
 
 def create_app(lifespan_=lifespan) -> FastAPI:
@@ -137,16 +130,21 @@ def create_app(lifespan_=lifespan) -> FastAPI:
     async def health():
         return {"ok": True}
 
-    # HTML은 항상 서버에 확인해 새 버전 주소를 받게 한다. 파일은 배포 때 이미지와 함께 고정되므로 시작할 때 한 번만 읽는다.
-    index_html = versioned_index()
+    # HTML은 항상 서버에 확인해 새 해시 주소를 받게 한다. 파일은 배포 때 이미지와 함께 고정되므로 시작할 때 한 번만 읽는다.
+    # 빌드가 없으면(웹을 빌드하지 않은 API 테스트·개발 환경) API는 그대로 두고 화면 자리에 안내만 보인다.
+    built = (WEB_DIR / "index.html").is_file()
+    index_html = (WEB_DIR / "index.html").read_text(encoding="utf-8") if built else NO_BUILD_HTML
 
     @app.get("/", include_in_schema=False)
     @app.get("/index.html", include_in_schema=False)
     async def dashboard():
-        return HTMLResponse(index_html, headers={"Cache-Control": "no-cache"})
+        return HTMLResponse(index_html, status_code=200 if built else 503, headers={"Cache-Control": "no-cache"})
 
     # 대시보드(정적 파일). API 라우트가 먼저 등록되어 있으므로 우선권은 API에 있다.
-    app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
+    if built:
+        if (WEB_DIR / "assets").is_dir():
+            app.mount("/assets", HashedAssets(directory=WEB_DIR / "assets"), name="assets")
+        app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
     return app
 
 

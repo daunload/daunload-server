@@ -147,7 +147,7 @@ async def test_home_shows_no_deadline_last(dashboard):  # noqa: F811
 async def test_playback_plan_says_no_deadline(dashboard):  # noqa: F811
     page, _ = dashboard
     await page.goto("http://dashboard.test/#playback")
-    html = await page.evaluate("""planHtml({ items: [{ position: 0, title: 'a', course_name: 'c', module_title: 'm', duration: 60,
+    html = await page.evaluate("""__ssu.planHtml({ items: [{ position: 0, title: 'a', course_name: 'c', module_title: 'm', duration: 60,
       expected_end: new Date().toISOString(), deadline: null, at_risk: false }], warnings: [], total_seconds: 60,
       expected_end: new Date().toISOString() })""")
     assert "마감 없음" in html and "1970" not in html

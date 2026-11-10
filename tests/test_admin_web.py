@@ -254,7 +254,9 @@ async def test_admin_shared_pieces(dashboard):  # noqa: F811
     as_admin(data)
     await page.goto(BASE + "#admin/activity")
     await expect(page.locator("#view")).to_contain_text("기간 안에 활동이 없습니다")
-    result = await page.evaluate("""() => {
+    result = await page.evaluate("""async () => {
+        const { adminTable, adminPager, adminState } = await __ssu.loadAdmin();
+        const esc = __ssu.esc;
         const host = document.createElement("div");
         document.querySelector("#view").append(host);
         host.innerHTML = adminTable([{ label: "학번", render: (r) => esc(r.id) }], [{ id: "<b>1</b>" }]);

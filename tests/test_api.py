@@ -349,7 +349,7 @@ async def test_dashboard_is_served_and_api_still_wins(env):
     api, _ = env
     r = await api.get("/")
     assert r.status_code == 200 and "아유 하기싫어" in r.text
-    assert (await api.get("/app.js")).status_code == 200
+    assert (await api.get("/mark.png")).status_code == 200  # public/ 파일. API 경로가 정적 파일보다 먼저다(아래 /me)
     assert (await api.get("/health")).json() == {"ok": True}
     h = await _signup(api)
     assert (await api.get("/me", headers=h)).json()["student_id"] == "20201234"
@@ -517,16 +517,6 @@ async def test_security_headers_on_dashboard_and_api(env):
         assert r.headers["referrer-policy"] == "no-referrer"
         assert r.headers["strict-transport-security"].startswith("max-age=")
         assert "frame-src https://*.googlesyndication.com" in csp
-
-
-async def test_adsense_loader_and_ads_txt_are_served(env):
-    api, _ = env
-    # 광고 로더는 첫 화면을 그린 뒤 assets.js가 붙인다. HTML에는 사이트 확인용 계정 태그를 둔다.
-    assert '<meta name="google-adsense-account" content="ca-pub-1006974862356513">' in (await api.get("/")).text
-    assert "pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1006974862356513" in (await api.get("/assets.js")).text
-    r = await api.get("/ads.txt")
-    assert r.status_code == 200
-    assert r.text.strip() == "google.com, pub-1006974862356513, DIRECT, f08c47fec0942fa0"
 
 
 async def test_api_docs_are_off_unless_enabled(env, monkeypatch):

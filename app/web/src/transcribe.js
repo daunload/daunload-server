@@ -1,4 +1,9 @@
-"use strict";
+import { $, api, esc, fmtDuration, state, store } from "./core.js";
+import { confirmDialog, icon, iconOnly, toast, withPending } from "./ui.js";
+import { renderTaskPanel } from "./tasks.js";
+import { requireAudioExtension } from "./downloads.js";
+import { ext } from "./extension.js";
+import { renderVideoList, reportDownloadError } from "./app.js";
 
 /* ---------------- 브라우저 Whisper 텍스트 변환 ----------------
  * 확장 프로그램이 학교 CDN에서 읽어 오디오를 뽑아 주고, 브라우저 Whisper가 텍스트로 바꾼다. 끝나면 결과를 서버에 저장한다.
@@ -7,14 +12,13 @@
 const WHISPER_RATE = 16000;
 const READ_AHEAD_SECONDS = 60;  // Worker보다 이만큼만 앞서 받는다(메모리 일정)
 const MIN_AUDIO_RATIO = 0.97;   // LMS의 영상 길이와 실제 오디오 길이의 오차 허용
-const ASSET_QUERY = document.currentScript?.src ? new URL(document.currentScript.src).search : "";  // 서버가 붙인 버전을 워커 주소에도 쓴다
-const tx = { worker: null, device: null, modelPercent: null, queue: [], current: null, finished: [], nextId: 1, epoch: 0 };
+export const tx = { worker: null, device: null, modelPercent: null, queue: [], current: null, finished: [], nextId: 1, epoch: 0 };
 
 function txKey(courseId, moduleItemId) { return `${courseId}:${moduleItemId}`; }
 
 function ensureWorker() {
   if (tx.worker) return tx.worker;
-  const w = new Worker(`/whisper.worker.js${ASSET_QUERY}`, { type: "module" });
+  const w = new Worker(new URL("./workers/whisper.worker.js", import.meta.url), { type: "module" });
   w.addEventListener("message", onWorkerMessage);
   w.addEventListener("error", (e) => failAll(`Whisper를 불러오지 못했습니다: ${e.message || "네트워크를 확인하세요"}`));
   tx.worker = w;
@@ -52,7 +56,7 @@ function failAll(message) {
   renderTaskPanel();
 }
 
-function enqueueTranscription(items) {
+export function enqueueTranscription(items) {
   for (const it of items) {
     const key = txKey(it.courseId, it.moduleItemId);
     if (tx.current?.key === key || tx.queue.some((q) => q.key === key)) continue;
@@ -63,7 +67,7 @@ function enqueueTranscription(items) {
   if (!tx.current) runNext();
 }
 
-function cancelTranscription() {
+export function cancelTranscription() {
   const job = tx.current;
   if (!job) return;
   job.status = "cancelled";
@@ -88,7 +92,7 @@ async function runNext() {
     catch (err) { if (err.code === "EXTENSION_MISSING") reportDownloadError(err); throw err; }
     const link = await api(job.mediaPath, { method: "POST" });
     job.extJob = crypto.randomUUID();
-    await extensionRequest("audio-open", { job: job.extJob, url: link.url });
+    await ext.request("audio-open", { job: job.extJob, url: link.url });
     const worker = ensureWorker();
     worker.postMessage({ type: "start", jobId: job.id, duration: job.duration });
     await pumpAudio(job, worker);
@@ -106,7 +110,7 @@ async function runNext() {
   } finally {
     // 실패해도 확장 프로그램의 오디오 작업을 닫아야 다음 작업이 읽을 수 있다
     job.ctrl.abort();
-    if (job.extJob) await extensionRequest("audio-close", { job: job.extJob }).catch(() => {});
+    if (job.extJob) await ext.request("audio-close", { job: job.extJob }).catch(() => {});
     tx.worker?.postMessage({ type: "cancel", jobId: job.id });
   }
   // 로그아웃으로 취소된 작업은 다음 사용자에게 보이면 안 되므로 기록하지 않는다
@@ -137,7 +141,7 @@ async function pumpAudio(job, worker) {
     }
     job.ctrl.signal.throwIfAborted();
     // 읽기가 시간 초과되면 확장이 이미 샘플을 소비했을 수 있어 이어 받지 않고 작업을 실패시킨다
-    const read = extensionRequest("audio-read", { job: job.extJob, ...(url ? { url } : {}) });
+    const read = ext.request("audio-read", { job: job.extJob, ...(url ? { url } : {}) });
     read.catch(() => {});
     const result = await Promise.race([read, job.done]);  // 취소·워커 오류로 job.done이 거부되면 응답을 기다리지 않는다
     job.ctrl.signal.throwIfAborted();
@@ -178,7 +182,7 @@ function txStatusOf(courseId, moduleItemId) {
   return null;
 }
 
-function transcribeButton(v, courseId) {
+export function transcribeButton(v, courseId) {
   // 줄마다 한 칸만 쓴다. 다시 변환은 드문 일이라 텍스트 창 안에 둔다.
   const st = v.mediaPath ? txStatusOf(courseId, v.module_item_id) : null;
   if (st) {
@@ -190,14 +194,14 @@ function transcribeButton(v, courseId) {
   return `<button class="btn small ghost" data-tx="${v.module_item_id}" title="텍스트로 변환">${iconOnly("text-convert", "텍스트로 변환")}</button>`;
 }
 
-function transcribeGroupButton(items, title) {
+export function transcribeGroupButton(items, title) {
   const n = items.filter((v) => v.mediaPath && !v.transcript_id).length;
   if (n < 2) return "";  // 1개뿐이면 그 줄의 버튼과 같은 동작이다
   const label = `전체 텍스트로 변환 (${n})`;
   return `<button class="btn small link" data-tx-group="${esc(items[0].module_id)}" aria-label="${esc(title)} ${label}" title="${label}">${icon("text-convert")}전체 ${n}</button>`;
 }
 
-function wireTranscribe(box, items, courseId) {
+export function wireTranscribe(box, items, courseId) {
   const toJob = (v) => ({ courseId, moduleItemId: v.module_item_id, title: v.title, courseName: v.courseName,
                           mediaPath: v.mediaPath, duration: v.duration });
   box.querySelectorAll("[data-tx]").forEach((b) => b.addEventListener("click", () => {

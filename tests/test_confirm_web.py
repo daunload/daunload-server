@@ -86,7 +86,7 @@ async def test_logout_with_open_dialog_closes_it(page):
     await page.goto("http://dashboard.test/")
     await page.get_by_role("button", name="강의 2개 모두 재생").click()
     await expect(page.locator("#confirm-dialog")).to_be_visible()
-    await page.evaluate("logout()")
+    await page.evaluate("__ssu.logout()")
     await expect(page.locator("#confirm-dialog")).not_to_be_visible()
     await expect(page.locator("#auth")).to_be_visible()
     assert page.calls == []
@@ -151,6 +151,6 @@ async def test_logout_closes_transcript_dialog(dashboard):  # noqa: F811
     await page.goto("http://dashboard.test/#videos")
     await page.get_by_role("button", name="텍스트 보기").click()
     await expect(page.locator("#transcript-dialog")).to_be_visible()
-    await page.evaluate("logout()")
+    await page.evaluate("__ssu.logout()")
     await expect(page.locator("#auth")).to_be_visible()
     await expect(page.locator("#transcript-dialog")).not_to_be_visible()

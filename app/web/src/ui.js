@@ -1,10 +1,10 @@
-"use strict";
+import { fmtDuration, fmtTime, state } from "./core.js";
 
 /* ---------------- 공통 UI 조각 ----------------
  * 다른 스크립트보다 먼저 불러온다. 버튼 문구는 건드리지 않는 장식용 아이콘만 만든다.
  */
 
-const PLAYBACK_WARNING = "직접 시청하지 않은 수강은 학칙상 문제가 될 수 있어요.";
+export const PLAYBACK_WARNING = "직접 시청하지 않은 수강은 학칙상 문제가 될 수 있어요.";
 
 const ICONS = {
   external: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
@@ -22,14 +22,14 @@ const ICONS = {
 };
 
 /** 장식용 인라인 SVG. aria-hidden이라 버튼의 접근 가능한 이름을 바꾸지 않는다. */
-function icon(name) {
+export function icon(name) {
   const paths = ICONS[name];
   if (!paths) return "";
   return `<svg class="icon" data-icon="${name}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${paths}</svg>`;
 }
 
 /** 글자 없는 아이콘 버튼의 내용. 이름은 보조기기와 테스트가 그대로 읽는다. 눈으로 볼 뜻은 title과 목록 위 범례가 맡는다. */
-function iconOnly(name, label) {
+export function iconOnly(name, label) {
   return `${icon(name)}<span class="sr-only">${label}</span>`;
 }
 
@@ -41,7 +41,7 @@ function iconOnly(name, label) {
 const TOAST_MS = 3200;
 const TOAST_MAX = 3;
 
-function toast(msg, bad = false) {
+export function toast(msg, bad = false) {
   const box = document.getElementById("toast");
   if (!box) return;
   if (bad && [...box.children].some((n) => n.classList.contains("bad") && n.firstChild?.textContent === msg)) return;
@@ -68,14 +68,14 @@ function toast(msg, bad = false) {
   }
 }
 
-function clearToasts() {
+export function clearToasts() {
   document.getElementById("toast")?.replaceChildren();
 }
 
 /* ---------------- 처리 중 상태 · 스켈레톤 · 기기 ---------------- */
 
 /** 버튼을 잠그고 label을 보여 주는 동안 fn을 실행한다. 끝나면(실패해도) 원래 모습으로 되돌린다. */
-async function withPending(btn, label, fn) {
+export async function withPending(btn, label, fn) {
   const html = btn.innerHTML;
   btn.disabled = true;
   btn.textContent = label;
@@ -92,12 +92,12 @@ async function withPending(btn, label, fn) {
 }
 
 /** 목록이 불러와지는 동안 보여 줄 자리표시 줄 n개. 화면 낭독기에는 숨긴다. */
-function skeletonRows(n) {
+export function skeletonRows(n) {
   return `<div class="skeleton-list" aria-hidden="true">${'<div class="skeleton"></div>'.repeat(n)}</div>`;
 }
 
 /** 터치 기기인지. 다운로드 안내에만 쓰고 레이아웃 분기에는 쓰지 않는다. */
-function isPhoneDevice() {
+export function isPhoneDevice() {
   return window.matchMedia("(hover: none) and (pointer: coarse)").matches;
 }
 
@@ -109,7 +109,7 @@ function isPhoneDevice() {
 
 let openConfirm = null;
 
-function confirmDialog({ title, body = [], warnings = [], confirmLabel, danger = false, requireText, requireLabel }) {
+export function confirmDialog({ title, body = [], warnings = [], confirmLabel, danger = false, requireText, requireLabel }) {
   if (openConfirm) return Promise.resolve(false);
   const dlg = document.getElementById("confirm-dialog");
   const opener = document.activeElement;
@@ -169,12 +169,12 @@ function confirmDialog({ title, body = [], warnings = [], confirmLabel, danger =
   return state.promise;
 }
 
-function closeConfirmDialog() {
+export function closeConfirmDialog() {
   document.getElementById("confirm-dialog")?.close();
 }
 
 /** 일괄 재생 확인 창. scopeLabel은 "이번 주" 또는 "전체". */
-function confirmPlayback(plan, scopeLabel) {
+export function confirmPlayback(plan, scopeLabel) {
   const risky = plan.items.filter((i) => i.at_risk).length;
   const end = plan.expected_end ? ` · ${fmtTime(new Date(plan.expected_end))}쯤 끝나요` : "";
   return confirmDialog({

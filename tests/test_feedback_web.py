@@ -10,6 +10,7 @@ from playwright.async_api import async_playwright, expect
 from tests.test_tasks_web import _active
 from tests.test_videos_web import FAKE_EXTENSION, _video
 from tests.test_web import WEB, dashboard  # noqa: F401  (fixture)
+from tests.web_root import require_build
 from tests.test_week_web import page  # noqa: F401  (fixture)
 
 pytestmark = pytest.mark.browser
@@ -18,6 +19,7 @@ NOTICE = "PC 크롬에서 받을 수 있어요"
 
 @pytest.fixture
 async def mobile_page():
+    require_build()
     data = {
         "/me": {"student_id": "20260001", "access_status": "approved"},
         "/lms/credentials": {"status": "ok", "last_synced_at": "2026-11-05T00:00:00+00:00"},
@@ -63,7 +65,7 @@ async def test_error_toast_stays_until_closed_success_expires(page):
     await page.goto("http://dashboard.test/")
     await expect(page.get_by_role("heading", name="할 일이 3개 남았어요")).to_be_visible()
     items = page.locator("#toast > *")
-    await page.evaluate("toast('연결이 끊겼어요', true); toast('저장했어요')")
+    await page.evaluate("__ssu.toast('연결이 끊겼어요', true); __ssu.toast('저장했어요')")
     await expect(items).to_have_count(2)
     await expect(page.get_by_role("alert").filter(has_text="연결이 끊겼어요")).to_be_visible()
     await page.wait_for_timeout(3500)
@@ -73,15 +75,15 @@ async def test_error_toast_stays_until_closed_success_expires(page):
     await page.locator("#toast").get_by_role("button", name="닫기").click()
     await expect(items).to_have_count(0)
 
-    await page.evaluate("toast('같은 오류', true); toast('같은 오류', true)")
+    await page.evaluate("__ssu.toast('같은 오류', true); __ssu.toast('같은 오류', true)")
     await expect(items).to_have_count(1)
-    await page.evaluate("toast('둘째', true); toast('셋째', true); toast('넷째', true)")
+    await page.evaluate("__ssu.toast('둘째', true); __ssu.toast('셋째', true); __ssu.toast('넷째', true)")
     await expect(items).to_have_count(3)
     await expect(page.locator("#toast")).not_to_contain_text("같은 오류")
     await expect(page.locator("#toast")).to_contain_text("넷째")
 
     # 넘칠 때는 사라질 알림부터 지우고, 오류는 남긴다
-    await page.evaluate("clearToasts(); toast('오류 하나', true); toast('성공 알림'); toast('오류 둘', true); toast('오류 셋', true)")
+    await page.evaluate("__ssu.clearToasts(); __ssu.toast('오류 하나', true); __ssu.toast('성공 알림'); __ssu.toast('오류 둘', true); __ssu.toast('오류 셋', true)")
     await expect(items).to_have_count(3)
     await expect(page.locator("#toast")).not_to_contain_text("성공 알림")
     await expect(page.locator("#toast")).to_contain_text("오류 하나")
@@ -118,10 +120,10 @@ async def test_missing_extension_toasts_when_guide_is_not_on_the_page(dashboard)
     await expect(page.get_by_role("button", name="내려받기", exact=True)).to_be_visible()
     # 받은 것만 남은 목록: 안내 상자가 그려지지 않으므로 오류를 토스트로 알려야 한다
     await page.evaluate("""() => {
-      state.notDownloadedOnly = true;
-      state.videoList.items.forEach((v) => { v.downloaded_at = new Date().toISOString(); });
-      renderVideoList();
-      reportDownloadError(Object.assign(new Error("확장프로그램에 연결하지 못했습니다."), { code: "EXTENSION_MISSING" }));
+      __ssu.state.notDownloadedOnly = true;
+      __ssu.state.videoList.items.forEach((v) => { v.downloaded_at = new Date().toISOString(); });
+      __ssu.renderVideoList();
+      __ssu.reportDownloadError(Object.assign(new Error("확장프로그램에 연결하지 못했습니다."), { code: "EXTENSION_MISSING" }));
     }""")
     await expect(page.locator("#video-list details")).to_have_count(0)
     await expect(page.locator("#toast")).to_contain_text("확장프로그램에 연결하지 못했습니다")

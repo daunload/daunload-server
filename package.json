@@ -2,11 +2,21 @@
   "name": "ssu-lms-web",
   "private": true,
   "type": "module",
-  "description": "배포용 웹 파일 빌드(app/web → app/web-dist). 런타임 의존성은 없다.",
+  "description": "대시보드 프런트엔드(app/web, Vite + Preact + Tailwind). 결과물은 app/web-dist.",
   "scripts": {
-    "build:web": "node scripts/build-web.mjs"
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@preact/signals": "2.2.1",
+    "preact": "10.26.9"
   },
   "devDependencies": {
-    "esbuild": "0.24.0"
+    "@preact/preset-vite": "2.10.1",
+    "@tailwindcss/vite": "4.1.11",
+    "tailwindcss": "4.1.11",
+    "typescript": "5.8.3",
+    "vite": "6.3.5"
   }
 }

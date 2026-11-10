@@ -1,4 +1,4 @@
-"""Whisper 창 나누기 규칙(app/web/whisper-window.mjs)을 node로 확인한다."""
+"""Whisper 창 나누기 규칙(app/web/src/workers/whisper-window.mjs)을 node로 확인한다."""
 
 import json
 import shutil
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-MODULE = Path(__file__).resolve().parents[1] / "app" / "web" / "whisper-window.mjs"
+MODULE = Path(__file__).resolve().parents[1] / "app" / "web" / "src" / "workers" / "whisper-window.mjs"
 pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node 없음")
 
 

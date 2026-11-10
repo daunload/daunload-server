@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 import pytest
 from playwright.async_api import async_playwright, expect
 
-from tests.web_root import WEB
+from tests.web_root import WEB, require_build
 
 pytestmark = pytest.mark.browser
 MIME = {".html": "text/html", ".js": "application/javascript", ".css": "text/css"}
@@ -57,6 +57,7 @@ def _data(now):
 
 @pytest.fixture
 async def page():
+    require_build()
     now = datetime.now(UTC)
     data = _data(now)
     calls = []

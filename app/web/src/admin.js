@@ -1,4 +1,7 @@
-"use strict";
+import { $, KIND, api, esc, fmtDate, fmtDuration, fmtSize, pad, state } from "./core.js";
+import { confirmDialog, icon, skeletonRows, toast, withPending } from "./ui.js";
+import { attendanceHtml, navigate, viewHash } from "./app.js";
+import { adminActivity, adminProblems } from "./admin-feeds.js";
 
 /* ---------------- 관리자 ----------------
  * app.js 다음에 불러온다(state, api, esc, fmtDate, navigate, viewHash를 쓴다).
@@ -14,7 +17,7 @@ const ADMIN_TABS = [
 ];
 const ADMIN_PERIODS = [7, 30, 90];
 const ADMIN_METRICS = { playback_done: "재생 완료", logins: "로그인", downloads: "다운로드" };
-const ADMIN_PROBLEM_KIND = {
+export const ADMIN_PROBLEM_KIND = {
   playback: { label: "재생 실패", tone: "bad" },
   batch: { label: "재생 묶음 오류", tone: "bad" },
   lms: { label: "LMS 문제", tone: "warn" },
@@ -46,21 +49,23 @@ const ADMIN_DETAIL_TABS = [
  * nav: 화면을 그릴 때마다 오른다. seq: 같은 자리(key)의 요청 번호. 둘 중 하나라도 바뀌면 늦은 응답을 버린다.
  * users: 사용자 목록 조건(상세에 다녀와도 남는다). detail: 지금 보는 사용자 한 명의 요약과 탭별 조건(viewer가 다르면 버린다).
  */
-const adminUi = {
+export const adminUi = {
   nav: 0, seq: {}, days: 7, metric: "playback_done", problemCount: null, problemCountFor: null,
   users: { q: "", lms_status: "", has_problem: false, access: "", sort: "activity", offset: 0 },
   detail: null,
+  activity: { kind: "all", student_id: "", offset: 0 },
+  problems: { kind: "all", student_id: "", course: "", offset: 0 },
 };
 
-const adminNumber = (n) => Number(n || 0).toLocaleString("ko-KR");
-const adminUserLink = (id) => `<a href="#admin/users/${encodeURIComponent(id)}">${esc(id)}</a>`;
-const adminTime = (iso) => iso ? `<time datetime="${esc(iso)}">${esc(fmtDate(new Date(iso)))}</time>` : "시각 기록 없음";
+export const adminNumber = (n) => Number(n || 0).toLocaleString("ko-KR");
+export const adminUserLink = (id) => `<a href="#admin/users/${encodeURIComponent(id)}">${esc(id)}</a>`;
+export const adminTime = (iso) => iso ? `<time datetime="${esc(iso)}">${esc(fmtDate(new Date(iso)))}</time>` : "시각 기록 없음";
 
 /**
  * 관리자 API를 부른다. 그 사이 화면이 바뀌었거나 같은 key로 새 요청을 보냈으면 응답을 버린다(render를 부르지 않고 오류도 던지지 않는다).
  * 아직 유효한 요청이 실패하면 오류를 던지므로 호출한 쪽이 adminState(el, "error")로 보여 준다.
  */
-async function adminRequest(path, render, key = "main") {
+export async function adminRequest(path, render, key = "main") {
   const nav = adminUi.nav;
   const seq = (adminUi.seq[key] = (adminUi.seq[key] || 0) + 1);
   const current = () => nav === adminUi.nav && adminUi.seq[key] === seq && state.view === "admin" && !!state.me?.is_admin;
@@ -75,7 +80,7 @@ async function adminRequest(path, render, key = "main") {
 }
 
 /** 로딩(스켈레톤), 빈 상태, 오류+재시도를 el 안에 그린다. */
-function adminState(el, kind, { message = "", retry, rows = 3 } = {}) {
+export function adminState(el, kind, { message = "", retry, rows = 3 } = {}) {
   el.removeAttribute("aria-busy");
   if (kind === "loading") {
     el.setAttribute("aria-busy", "true");
@@ -93,7 +98,7 @@ function adminState(el, kind, { message = "", retry, rows = 3 } = {}) {
  * 표 HTML. columns: [{ label, render(row) → 이미 이스케이프한 HTML, cls? }]. cls는 감싸는 div에 붙는다.
  * 760px 이하에서는 각 칸이 data-label을 머리글로 단 카드가 된다.
  */
-function adminTable(columns, rows, { caption = "", cls = "" } = {}) {
+export function adminTable(columns, rows, { caption = "", cls = "" } = {}) {
   const head = columns.map((c) => `<th scope="col"${c.cls ? ` class="${c.cls}"` : ""}>${esc(c.label)}</th>`).join("");
   const body = rows.map((row) => `<tr>${columns.map((c) =>
     `<td data-label="${esc(c.label)}"${c.cls ? ` class="${c.cls}"` : ""}><div>${c.render(row)}</div></td>`).join("")}</tr>`).join("");
@@ -102,7 +107,7 @@ function adminTable(columns, rows, { caption = "", cls = "" } = {}) {
 }
 
 /** 이전·다음 페이지 버튼. onPage(새 offset)를 부른다. DOM 요소를 돌려준다. */
-function adminPager(total, offset, limit, onPage) {
+export function adminPager(total, offset, limit, onPage) {
   const nav = document.createElement("nav");
   nav.className = "admin-pager";
   nav.setAttribute("aria-label", "페이지 이동");
@@ -117,7 +122,7 @@ function adminPager(total, offset, limit, onPage) {
 }
 
 /** 문제 탭 이름의 건수를 바꾼다. 조건 없이 센 네 종류의 합만 넣는다(현황의 재생 실패 카드와 다르다). */
-function adminSetProblemCount(n) {
+export function adminSetProblemCount(n) {
   adminUi.problemCount = n;
   adminUi.problemCountFor = state.me.student_id;
   const tab = $('#view .admin-tabs [data-admin-tab="problems"]');
@@ -125,7 +130,7 @@ function adminSetProblemCount(n) {
 }
 
 /** 머리의 기간 고르기와 다시 불러오기. 기간은 현황, 활동, 문제 탭이 함께 쓴다. */
-function adminPeriodActions(onPeriod, onReload) {
+export function adminPeriodActions(onPeriod, onReload) {
   $("#admin-actions").innerHTML = `<label class="admin-period">기간
       <select id="admin-days">${ADMIN_PERIODS.map((d) => `<option value="${d}"${d === adminUi.days ? " selected" : ""}>최근 ${d}일</option>`).join("")}</select></label>
     <button class="btn small" type="button" id="admin-reload">${icon("refresh")}다시 불러오기</button>`;
@@ -140,7 +145,7 @@ function adminTabLabel(tab) {
 }
 
 /** 관리자 화면 뼈대. path는 state.adminPath(`["users", "20201234"]` 등). */
-function viewAdmin(path = state.adminPath) {
+export function viewAdmin(path = state.adminPath) {
   adminUi.nav++;
   if (!state.me?.is_admin) {
     $("#view").innerHTML = `<div class="panel empty" role="alert">관리자 권한이 필요합니다.</div>`;
@@ -262,7 +267,7 @@ const ADMIN_PLAYBACK_STATUS = {
   skipped: "이미 완료", locked: "재생 잠김", cancelled: "재생 취소",
 };
 
-function adminActivityLabel(item) {
+export function adminActivityLabel(item) {
   if (item.kind === "playback") return ADMIN_PLAYBACK_STATUS[item.status] || item.status;
   if (item.kind === "download") return `다운로드 누적 ${adminNumber(item.count)}회`;  // count는 기간 합계가 아니라 그 항목의 전체 누적이다
   if (item.kind === "transcript") return "전사 저장";
@@ -270,14 +275,14 @@ function adminActivityLabel(item) {
 }
 
 /** 문제 한 줄의 과목·영상. 묶음 줄의 제목은 범위 값이라 이름(전체 재생 묶음 등)으로 바꾼다. */
-function adminProblemTitle(p) {
+export function adminProblemTitle(p) {
   return adminCourseTitle(p.course_name, p.kind === "batch" ? `${ADMIN_BATCH_SCOPE[p.title] || p.title} 재생 묶음` : p.title);
 }
-const adminProblemTag = (p) => {
+export const adminProblemTag = (p) => {
   const kind = ADMIN_PROBLEM_KIND[p.kind] || { label: p.kind, tone: "warn" };
   return adminTag(kind.label, kind.tone);
 };
-const adminProblemError = (p) => `${esc(p.error || "오류 내용 없음")}${p.not_run ? ` · 미실행 ${adminNumber(p.not_run)}개` : ""}`;
+export const adminProblemError = (p) => `${esc(p.error || "오류 내용 없음")}${p.not_run ? ` · 미실행 ${adminNumber(p.not_run)}개` : ""}`;
 
 function drawOverview(body, d) {
   body.removeAttribute("aria-busy");
@@ -363,7 +368,7 @@ const ADMIN_PLAYBACK_FILTER = ["failed", "locked", "done", "queued", "playing", 
 const ADMIN_SUBMISSION = { unsubmitted: "미제출", submitted: "제출함", excused: "면제", unknown: "확인 불가" };
 const ADMIN_DOWNLOAD_KIND = { video: "영상", commons_file: "강의 자료", canvas_file: "첨부 파일" };
 
-const adminTag = (label, tone = "") => `<span class="admin-tag${tone ? ` ${tone}` : ""}">${esc(label)}</span>`;
+export const adminTag = (label, tone = "") => `<span class="admin-tag${tone ? ` ${tone}` : ""}">${esc(label)}</span>`;
 const adminWhen = (iso, none = "-") => iso ? adminTime(iso) : esc(none);
 /** 날짜만(2026/03/04). 가입일·동의일처럼 해가 중요한 곳에 쓴다. */
 function adminDay(iso) {
@@ -377,14 +382,14 @@ function adminLmsTag(status, prefix = "") {
   return adminTag(prefix + s.label, s.tone);
 }
 /** 재생 job 상태. 실패했지만 시작한 적이 없으면(앞 영상 실패로 멈춘 묶음 등) "미실행"이다. */
-function adminJobTag(job) {
+export function adminJobTag(job) {
   if (job.status === "failed" && !job.started_at) return adminTag("미실행");
   const tone = ["failed", "locked"].includes(job.status) ? "bad" : job.status === "done" ? "ok" : "";
   return adminTag(ADMIN_PLAYBACK_STATUS[job.status] || job.status, tone);
 }
-const adminUserPath = (id) => `/admin/users/${encodeURIComponent(id)}`;
+export const adminUserPath = (id) => `/admin/users/${encodeURIComponent(id)}`;
 const adminSubtabHref = (id, key) => `#admin/users/${encodeURIComponent(id)}/${key}`;
-const adminCourseTitle = (course, title) => esc(course ? `${course} · ${title}` : title);
+export const adminCourseTitle = (course, title) => esc(course ? `${course} · ${title}` : title);
 
 function adminUsers(body) {
   adminUi.detail = null;

@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 from playwright.async_api import async_playwright
 
+from tests.web_root import EXTENSION_CLIENT
+
 ROOT = Path(__file__).resolve().parents[1]
 MEDIA = {f'/{name}': (ROOT / 'tests' / 'fixtures' / 'media' / name).read_bytes()
          for name in ['tone-opus.mp4', 'tone-opus-12s.mp4']}
@@ -127,7 +129,7 @@ async def test_extension_bridge_download_and_validation(tmp_path, school_cdn):
             await context.route('https://daunload.cloud/**', lambda route: route.fulfill(
                 body='<html><body>dashboard</body></html>', content_type='text/html'))
             await page.goto('https://daunload.cloud/')
-            await page.add_script_tag(path=str(ROOT / 'app/web/downloads.js'))
+            await page.add_script_tag(content=EXTENSION_CLIENT)
             assert await page.evaluate('extensionRequest("ping")') == {'version': 1, 'sessions': True, 'queue': True, 'audio': True}
             # Production bridge must not be injected into localhost or a lookalike domain.
             for origin in ['http://localhost:8000', 'https://daunload.cloud.example.org']:
@@ -135,7 +137,7 @@ async def test_extension_bridge_download_and_validation(tmp_path, school_cdn):
                     body='<html><body>untrusted</body></html>', content_type='text/html'))
                 untrusted = await context.new_page()
                 await untrusted.goto(origin + '/')
-                await untrusted.add_script_tag(path=str(ROOT / 'app/web/downloads.js'))
+                await untrusted.add_script_tag(content=EXTENSION_CLIENT)
                 connected = await untrusted.evaluate("""async () => {
                   try { await extensionRequest('ping'); return true; } catch { return false; }
                 }""")
@@ -211,7 +213,7 @@ async def test_extension_bridge_download_and_validation(tmp_path, school_cdn):
             }})''', key) == {'started': True}
             other = await context.new_page()
             await other.goto('https://daunload.cloud/')
-            await other.add_script_tag(path=str(ROOT / 'app/web/downloads.js'))
+            await other.add_script_tag(content=EXTENSION_CLIENT)
             denied = await other.evaluate('''async job => {
               try { await extensionRequest('cancel', {job}); } catch (e) { return e.message; }
             }''', key)
@@ -321,7 +323,7 @@ async def dashboard(tmp_path, port):
                 body='<html><body>dashboard</body></html>', content_type='text/html'))
             page = await context.new_page()
             await page.goto('https://daunload.cloud/')
-            await page.add_script_tag(path=str(ROOT / 'app/web/downloads.js'))
+            await page.add_script_tag(content=EXTENSION_CLIENT)
             yield context, page
         finally:
             await context.close()

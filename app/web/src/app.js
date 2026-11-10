@@ -1,109 +1,17 @@
-"use strict";
-
-/* ---------------- 공통 ---------------- */
-
-const $ = (sel, root = document) => root.querySelector(sel);
-const DAY = 86400000;
-const KIND = { video: "영상", assignment: "과제", quiz: "퀴즈" };
-const JOB_STATUS = {
-  queued: "대기", playing: "재생 중", done: "완료", failed: "실패",
-  skipped: "이미 완료", locked: "잠김", cancelled: "취소",
-};
-const BATCH_STATUS = {
-  queued: "대기 중", running: "재생 중", done: "완료", partial: "일부 완료",
-  failed: "실패", cancelled: "취소됨",
-};
-const GAP_SECONDS = 20; // 서버 기본 간격(10~30초)의 평균. 예상 시각 계산용
-
-const store = {
-  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
-  set(k, v) { try { localStorage.setItem(k, v); } catch { /* 저장 불가 환경 */ } },
-  del(k) { try { localStorage.removeItem(k); } catch { /* 저장 불가 환경 */ } },
-};
-
-const PRIVACY_NOTICE_KEY = "privacy-notice-2026-11-access";
-const VIEW_NAMES = { dashboard: "학습 현황", courses: "과목", playback: "강의 재생", videos: "내려받기·텍스트 변환", notifications: "알림", account: "계정", admin: "사용자 관리" };
-/** 주소의 해시를 화면 이름과 하위 경로로 나눈다. `#admin/users/2020%201234` → { view: "admin", path: ["users", "2020 1234"] } */
-function parseHash(hash) {
-  const parts = String(hash || "").replace(/^#/, "").split("/").filter(Boolean).map((part) => {
-    try { return decodeURIComponent(part); } catch { return part; }
-  });
-  return { view: parts[0] || "", path: parts.slice(1) };
-}
-const initialView = parseHash(location.hash);
-
-const state = {
-  token: store.get("token"),
-  dashboardPlan: null, dashboardError: null, dashboardLoading: false, playbackStarting: false,
-  view: Object.hasOwn(VIEW_NAMES, initialView.view) ? initialView.view : "dashboard",
-  adminPath: initialView.view === "admin" && initialView.path.length ? initialView.path : ["overview"],
-  me: null, cred: null, todos: [], courses: [],
-  batches: [], active: null, plan: null,
-  videoCourse: null, videoList: null, savedVideos: null,
-  videoTab: "videos", materialList: null, notDownloadedOnly: false, bulk: null,
-};
-
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
-
-const pad = (n) => String(n).padStart(2, "0");
-const fmtTime = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-const fmtDate = (d) => `${d.getMonth() + 1}/${d.getDate()} ${fmtTime(d)}`;
-const WEEKDAY = ["일", "월", "화", "수", "목", "금", "토"];
-const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
-
-function dayName(d) {
-  const diff = Math.round((startOfDay(d) - startOfDay(new Date())) / DAY);
-  if (diff === 0) return "오늘";
-  if (diff === 1) return "내일";
-  return `${d.getMonth() + 1}월 ${d.getDate()}일 (${WEEKDAY[d.getDay()]})`;
-}
-
-function fmtDuration(sec) {
-  const m = Math.round(sec / 60);
-  if (m < 60) return `${m}분`;
-  const h = Math.floor(m / 60);
-  return m % 60 ? `${h}시간 ${m % 60}분` : `${h}시간`;
-}
-
-/** 마감 없는 할 일(영상)은 어떤 시각보다 뒤로 보낸다. new Date(null)은 1970년이 되므로 직접 쓰지 않는다. */
-const dueTime = (t) => t.deadline ? new Date(t.deadline).getTime() : Infinity;
-const dueText = (iso) => iso ? `마감 ${fmtDate(new Date(iso))}` : "마감 없음";
-
-class ApiError extends Error {
-  constructor(status, message, code) { super(message); this.status = status; this.code = code; }
-}
-
-async function api(path, { method = "GET", json, form } = {}) {
-  const headers = {};
-  if (state.token) headers.Authorization = `Bearer ${state.token}`;
-  let body;
-  if (json !== undefined) { headers["Content-Type"] = "application/json"; body = JSON.stringify(json); }
-  if (form) body = new URLSearchParams(form);
-  const sentToken = state.token;
-  const res = await fetch(path, { method, headers, body, ...(path.startsWith("/playback/") ? { cache: "no-store" } : {}) });
-  const renewed = res.headers.get("X-Access-Token");
-  if (renewed && sentToken && state.token === sentToken) {  // 그 사이 로그아웃·계정 전환했으면 버린다
-    state.token = renewed;
-    store.set("token", renewed);
-  }
-  if (res.status === 401 && state.token) { logout(); throw new ApiError(401, "다시 로그인하세요."); }
-  if (res.status === 204) return null;
-  const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    const detail = data?.detail;
-    const msg = typeof detail === "string" ? detail
-      : detail?.message ? detail.message
-      : Array.isArray(detail) ? detail.map((d) => d.msg).join(", ")
-      : `요청 실패 (${res.status})`;
-    if (res.status === 403 && detail?.code === "ACCESS_REQUIRED") showAccessScreen();  // 열어 둔 탭에서 권한이 회수된 경우
-    throw new ApiError(res.status, msg, detail?.code);
-  }
-  return data;
-}
+import { $, BATCH_STATUS, GAP_SECONDS, JOB_STATUS, PRIVACY_NOTICE_KEY, VIEW_NAMES, api, dueText, dueTime, esc, fmtDate, fmtDuration, fmtSize, parseHash, setApiHandlers, state, store } from "./core.js";
+import { whenIdle } from "./assets.js";
+import { PLAYBACK_WARNING, clearToasts, closeConfirmDialog, confirmDialog, confirmPlayback, icon, iconOnly, isPhoneDevice, skeletonRows, toast, withPending } from "./ui.js";
+import { renderTaskPanel } from "./tasks.js";
+import { bulkDownloadSupported, downloadDirectVideo, requireDownloadExtension, startBulkDownload, stopBulkDownload } from "./downloads.js";
+import { ext } from "./extension.js";
+import { cancelTranscription, transcribeButton, transcribeGroupButton, tx, wireTranscribe } from "./transcribe.js";
+import { showAccessScreen } from "./access.js";
+import { drawWeek, renderWeek } from "./week.js";
 
 /* ---------------- 로그인 ---------------- */
+
+// api()가 401이면 로그아웃, 권한이 회수됐으면 승인 대기 화면으로 보낸다
+setApiHandlers({ unauthorized: logout, accessRequired: () => showAccessScreen() });
 
 function showAuth() {
   $("#startup").hidden = true;
@@ -193,7 +101,7 @@ $("#login-form").addEventListener("submit", async (e) => {
   }
 });
 
-function logout() {
+export function logout() {
   $("#admin-menu").hidden = true;
   state.token = null;
   store.del("token");
@@ -218,7 +126,7 @@ function logout() {
   showAuth();
 }
 /** 사용자가 직접 로그아웃할 때: 서버에서도 토큰을 폐기한다. api()는 401이면 logout()을 다시 부르므로 쓰지 않는다. */
-function serverLogout() {
+export function serverLogout() {
   const token = state.token;
   if (token) fetch("/auth/logout", { method: "POST", headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
   logout();
@@ -243,7 +151,7 @@ async function loadCore(knownMe) {
   renderTaskPanel();
 }
 
-async function boot() {
+export async function boot() {
   if (!state.token) return showAuth();
   $("#auth").hidden = true;
   $("#access").hidden = true;
@@ -328,12 +236,12 @@ function closeMenu() {
   $("#menu-toggle").setAttribute("aria-expanded", "false");
 }
 /** 지금 화면의 주소. 관리자 화면만 하위 경로(`#admin/overview`)를 붙인다. */
-function viewHash() {
+export function viewHash() {
   if (state.view !== "admin") return `#${state.view}`;
   return `#admin/${state.adminPath.map(encodeURIComponent).join("/")}`;
 }
 /** target은 화면 이름이나 해시(`admin/users`). focus가 false면 포커스를 옮기지 않는다(관리자 탭 이동). */
-function navigate(target, push = true, { focus = true } = {}) {
+export function navigate(target, push = true, { focus = true } = {}) {
   const { view, path } = parseHash(target);
   state.view = Object.hasOwn(VIEW_NAMES, view) ? view : "dashboard";  // 없어진 화면(#todos 등)은 홈으로
   if (state.view === "admin") state.adminPath = path.length ? path : ["overview"];
@@ -379,13 +287,14 @@ function renderView() {
   (views[state.view] || viewDashboard)();
 }
 
-/** viewAdmin은 admin.js에 있다. 관리자만 쓰므로 처음 열 때 불러온다. */
+/** 관리자 화면(admin.js)은 관리자만 쓰므로 처음 열 때 따로 받는다(Vite가 별도 파일로 나눈다). */
+let adminModule = null;
 function renderAdminView() {
-  if (typeof viewAdmin === "function") return viewAdmin(state.adminPath);
+  if (adminModule) return adminModule.viewAdmin(state.adminPath);
   $("#view").innerHTML = `<div class="panel" aria-busy="true">${skeletonRows(4)}<p class="sr-only" role="status">불러오는 중입니다.</p></div>`;
-  loadScripts("admin").then(
-    () => { if (state.view === "admin") viewAdmin(state.adminPath); },
-    (err) => { if (state.view === "admin") viewError(err.message, renderAdminView); },
+  import("./admin.js").then(
+    (mod) => { adminModule = mod; if (state.view === "admin") mod.viewAdmin(state.adminPath); },
+    () => { if (state.view === "admin") viewError("화면을 불러오지 못했어요. 네트워크를 확인하고 다시 시도하세요.", renderAdminView); },
   );
 }
 
@@ -408,10 +317,10 @@ function viewDashboard() {
   // 이번 주 할 일과 재생 가능한 강의 전체를 한 카드에서 탭으로 나눠 보여 준다(week.js).
   $("#view").innerHTML = `<div id="week-panel"></div>`;
   loadDashboardPlayback();
-  if (typeof renderWeek === "function") renderWeek();
+  renderWeek();
 }
 
-async function loadDashboardPlayback() {
+export async function loadDashboardPlayback() {
   const root = $("#week-panel");
   if (!root) return;
   const token = state.token;
@@ -461,14 +370,14 @@ function playbackOverallPercent(jobs) {
 
 /** 재생 가능한 강의 목록은 첫 화면 카드(week.js)가 함께 그린다. */
 function drawDashboardPlayback() {
-  if (typeof drawWeek === "function") drawWeek();
+  drawWeek();
 }
 
 /* 학칙 확인 창은 처음 한 번만 띄운다. 동의한 뒤에는 버튼 한 번으로 바로 재생하고, 경고는 버튼 아래 글로 계속 보인다. */
 const PLAYBACK_CONSENT_KEY = "playback-consent-v1";
-const playbackConsented = () => store.get(PLAYBACK_CONSENT_KEY) === "1";
+export const playbackConsented = () => store.get(PLAYBACK_CONSENT_KEY) === "1";
 
-async function confirmDashboardPlayback() {
+export async function confirmDashboardPlayback() {
   if (state.playbackStarting || state.active || !state.dashboardPlan?.items.length) return;
   if (!playbackConsented()) {
     if (!(await confirmPlayback(state.dashboardPlan, "전체"))) return;
@@ -508,14 +417,11 @@ async function startDashboardPlayback() {
   }
 }
 
-function safeUrl(value) {
-  try { const url = new URL(value); return ["http:", "https:"].includes(url.protocol) ? url.href : null; } catch { return null; }
-}
 
 /* ---------------- 과목 ---------------- */
 
 /** 주차별 출석 칸. 과목 화면과 관리자 상세가 같이 쓴다. 기록이 없으면 empty 문구를 쓴다. */
-function attendanceHtml(attendance, empty = "출석 기록이 아직 없습니다.") {
+export function attendanceHtml(attendance, empty = "출석 기록이 아직 없습니다.") {
   const weeks = (attendance || []).filter((w) => w.statuses?.length);
   if (!weeks.length) return `<p class="muted small-text">${esc(empty)}</p>`;
   return `<div class="attend" aria-label="주차별 출석">${weeks.map((w) => `<div class="week"><div class="cells">${w.statuses
@@ -629,7 +535,7 @@ function bindPlanForm() {
   $("#clear-plan")?.addEventListener("click", () => { state.plan = null; viewPlayback(); });
 }
 
-function planHtml(plan) {
+export function planHtml(plan) {
   if (!plan.items.length) return `<div class="panel empty"><p>이 범위에는 재생할 영상이 없습니다.</p></div>`;
   const steps = plan.items.map((i) => `<li class="${i.at_risk ? "risk" : ""}">
       <span class="num">${i.position + 1}</span>
@@ -746,7 +652,7 @@ function activeBatchHtml(b) {
 }
 
 /** 확인 창을 거쳐 진행 중인 묶음을 멈춘다. 창이 열린 동안 묶음이 끝나거나 바뀌었으면 아무것도 보내지 않는다. */
-async function cancelActivePlayback() {
+export async function cancelActivePlayback() {
   const id = state.active?.id;
   if (id == null) return;
   const ok = await confirmDialog({
@@ -816,7 +722,7 @@ async function loadPlaybackFailure(details) {
 let pollTimer = null;
 function redrawPlayback() {
   if (state.view === "playback") viewPlayback();
-  if (state.view === "dashboard" && typeof drawWeek === "function") drawWeek();
+  if (state.view === "dashboard" ) drawWeek();
   renderTaskPanel();
 }
 function startPolling() {
@@ -831,7 +737,7 @@ function startPolling() {
     } catch { /* 일시적 오류는 다음 주기에 다시 시도 */ }
   }, 5000);
 }
-function stopPolling() { clearInterval(pollTimer); pollTimer = null; }
+export function stopPolling() { clearInterval(pollTimer); pollTimer = null; }
 
 async function finishActive() {
   const b = state.active;
@@ -843,13 +749,12 @@ async function finishActive() {
   renderTaskPanel();
   if (state.view === "dashboard") {
     loadDashboardPlayback();
-    if (typeof renderWeek === "function") renderWeek();
+    renderWeek();
   }
 }
 
 /* ---------------- 강의 영상 내려받기 ---------------- */
 
-const fmtSize = (n) => (!n ? "" : n >= 1e9 ? `${(n / 1e9).toFixed(1)}GB` : `${Math.round(n / 1e6)}MB`);
 
 async function viewVideos() {
   if (needCred()) return;
@@ -933,7 +838,7 @@ function bulkButton(items, title, index) {
 }
 
 /** 여러 개 받기를 시작한다. 진행은 하단 패널에 나오고, 실패한 항목만 다시 시도할 수 있다. */
-async function runBulkDownload(items) {
+export async function runBulkDownload(items) {
   const token = state.token;
   try {
     await startBulkDownload(items, (stat) => {
@@ -957,7 +862,7 @@ async function runBulkDownload(items) {
 }
 
 /** 확장프로그램이 없으면 설치 안내를 펼쳐 문구를 그 안에 보이고, 그 밖의 오류는 토스트로 알린다. */
-function reportDownloadError(err) {
+export function reportDownloadError(err) {
   if (err.code !== "EXTENSION_MISSING") { toast(err.message, true); return; }
   state.extensionMissing = err.message;
   if (state.view !== "videos" || !state.videoList) { state.extensionMissing = null; toast(err.message, true); return; }
@@ -1015,7 +920,7 @@ function wireInstallGuide(box) {
 /** 확장프로그램이 있으면 응답이 바로 오므로 목록보다 먼저 결과를 안다. 없으면 안내를 그대로 둘 뿐 기다리게 하지 않는다. */
 function detectExtension() {
   if (state.extensionReady || isPhoneDevice()) return;
-  extensionRequest("ping").then(() => {
+  ext.request("ping").then(() => {
     state.extensionReady = true;
     const guide = document.querySelector("#video-list .guide");
     if (!guide || state.extensionMissing) return;
@@ -1046,7 +951,7 @@ function iconLegend(items, phone) {
   return `<ul class="icon-legend" aria-label="아이콘 설명">${rows.map(([name, label]) => `<li>${icon(name)}${label}</li>`).join("")}</ul>`;
 }
 
-function renderVideoList() {
+export function renderVideoList() {
   const courseId = state.videoList.courseId;
   const course = state.courses.find((c) => c.lms_course_id === courseId);
   const saved = new Map(state.savedVideos.filter((v) => v.lms_course_id === courseId).map((v) => [v.module_item_id, v]));
@@ -1090,13 +995,13 @@ function renderVideoList() {
     linkPath: v.linkPath, label: v.title, onDone: () => { v.downloaded_at = new Date().toISOString(); markDownloaded(v); } })));
   const guide = phone ? "" : installGuide();
   box.innerHTML = guide + iconLegend(items, phone) + groups.map((g, i) => `<div class="group-label row"><span class="group-title">${esc(g.title)}</span>
-      <span class="group-actions">${bulkButton(bulkGroups[i], g.title, i)}${typeof transcribeGroupButton === "function" ? transcribeGroupButton(g.items, g.title) : ""}</span></div>
+      <span class="group-actions">${bulkButton(bulkGroups[i], g.title, i)}${transcribeGroupButton(g.items, g.title)}</span></div>
     <ul class="list">${g.items.map((v) => `
     <li class="video-row">
       ${status(v)}${thumb(v)}
       <span class="video-info"><span class="title">${esc(v.title)}</span><br>
         <span class="meta row"><span>${v.duration ? fmtDuration(v.duration) : ""}</span><span>${fmtSize(v.size)}</span>${doneBadge(v.downloaded_at)}</span>${reason(v)}</span>
-      <span class="row-actions">${typeof transcribeButton === "function" ? transcribeButton(v, courseId) : ""}${button(v)}</span>
+      <span class="row-actions">${transcribeButton(v, courseId)}${button(v)}</span>
     </li>`).join("")}</ul>`).join("");
   box.querySelectorAll("[data-link]").forEach((b) => b.addEventListener("click", async () => {
     if (await downloadVideo(b, b.dataset.link)) {
@@ -1107,7 +1012,7 @@ function renderVideoList() {
   }));
   wireInstallGuide(box);
   wireBulk(box, bulkGroups);
-  if (typeof wireTranscribe === "function") wireTranscribe(box, items, courseId);
+  wireTranscribe(box, items, courseId);
 }
 
 function markDownloaded(v) {
@@ -1320,7 +1225,4 @@ function viewAccount() {
 
 /* ---------------- 시작 ---------------- */
 
-setInterval(() => { if (!$("#app").hidden && state.view === "dashboard" && !document.activeElement.closest("#week-panel") && typeof drawWeek === "function") drawWeek(); }, 60000); // 오늘 날짜·마감 표시 갱신
-// 모든 스크립트가 올라온 뒤에 시작한다: /me가 빨리 답해도 access.js 같은 뒤쪽 스크립트의 함수가 있어야 한다
-if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
-else boot();
+setInterval(() => { if (!$("#app").hidden && state.view === "dashboard" && !document.activeElement.closest("#week-panel") ) drawWeek(); }, 60000); // 오늘 날짜·마감 표시 갱신

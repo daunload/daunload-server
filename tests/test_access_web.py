@@ -2,12 +2,13 @@
 
 import asyncio
 import json
+import re
 from urllib.parse import urlparse
 
 import pytest
 from playwright.async_api import async_playwright, expect
 
-from tests.web_root import BUILT, WEB
+from tests.web_root import WEB, require_build
 
 MIME = {".html": "text/html", ".js": "application/javascript", ".css": "text/css"}
 pytestmark = pytest.mark.browser
@@ -29,6 +30,7 @@ def me_of(status="none", requested=None, retry=None):
 
 @pytest.fixture
 async def stage():
+    require_build()
     """pg.me: 지금 /me가 돌려줄 값. pg.handlers: 경로별 (상태, 본문) 덮어쓰기. pg.calls: 받은 요청 전부."""
     errors = []
     async with async_playwright() as p:
@@ -108,7 +110,7 @@ async def test_rejected_retry_button_disabled_until_retry_at(stage):
     await stage.goto("http://dashboard.test/")
     await expect(stage.get_by_role("button", name="다시 요청하기")).to_be_disabled()
     await expect(stage.locator("#access-message")).to_have_text((await stage.evaluate(
-        "fmtDate(new Date('2099-11-07T06:20:00+00:00'))")) + "부터 다시 요청할 수 있어요.")
+        "__ssu.fmtDate(new Date('2099-11-07T06:20:00+00:00'))")) + "부터 다시 요청할 수 있어요.")
     stage.me = me_of("rejected", retry=PAST)
     await stage.reload()
     await expect(stage.get_by_role("button", name="다시 요청하기")).to_be_enabled()
@@ -245,7 +247,8 @@ async def test_boot_waits_for_every_script_before_reading_me(stage):
     """/me가 뒤에 오는 스크립트보다 먼저 답해도 showAccessScreen이 있어야 한다."""
     stage.me = me_of("none")
 
-    script = "main.min.js" if BUILT else "access.js"  # 빌드 결과는 한 파일로 묶여 있다
+    # 진입 번들(index.html의 module script)을 늦게 보낸다. boot()는 모든 모듈이 평가된 뒤 main.js 끝에서 시작한다.
+    script = re.search(r'<script type="module"[^>]* src="/([^"]+)"', (WEB / "index.html").read_text()).group(1)
 
     async def slow(r):
         await asyncio.sleep(0.4)
@@ -289,7 +292,7 @@ async def test_transcribe_direct_download_403_switches_to_access_screen(stage):
     stage.handlers[("GET", "/courses/1/videos")] = (200, [video])
     stage.handlers[("POST", "/courses/1/videos/12/direct-download")] = REQUIRED
     await stage.goto("http://dashboard.test/#videos")
-    await stage.evaluate("""window.extensionRequest = async (action) => action === "ping"
+    await stage.evaluate("""__ssu.ext.request = async (action) => action === "ping"
       ? { version: 1, sessions: true, queue: true, audio: true } : { opened: true, closed: true };""")
     stage.me = me_of("revoked")
     await stage.get_by_role("button", name="텍스트로 변환", exact=True).click()

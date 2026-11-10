@@ -1,12 +1,12 @@
 """브라우저 텍스트 변환 흐름. 실제 Whisper 대신 가짜 Worker로 확장 프로그램 PCM → Worker → 서버 저장 경로를 확인한다."""
 
 import json
-from pathlib import Path
 
 import pytest
 from playwright.async_api import expect
 
 from tests.test_web import dashboard  # noqa: F401  (fixture)
+from tests.web_root import EXTENSION_CLIENT
 
 pytestmark = pytest.mark.browser
 
@@ -58,7 +58,7 @@ window.__read = async (n) => {
   if (n === 1 && window.__hang) return new Promise(() => {});
   return n < 3 ? { pcm: window.__sine(1), seconds: 1 } : { done: true, duration: 3 };
 };
-window.extensionRequest = async (action, data = {}) => {
+__ssu.ext.request = async (action, data = {}) => {
   window.__ext.push({ action, ...data });
   if (action === "ping") return window.__ping;
   if (action === "audio-open") return { opened: true };
@@ -119,7 +119,7 @@ async def test_transcribe_pulls_pcm_from_extension_and_saves(dashboard):
 async def test_transcribe_without_extension_shows_install_guide(dashboard):
     page, data = dashboard
     await _setup(page, data, fake_ext=False)
-    await page.evaluate("""() => { window.extensionRequest = async () => {
+    await page.evaluate("""() => { __ssu.ext.request = async () => {
       throw Object.assign(new Error("아유 하기싫어 확장프로그램에 연결하지 못했습니다."), { code: "EXTENSION_MISSING" }); }; }""")
     await page.get_by_role("button", name="텍스트로 변환", exact=True).click()
     await expect(page.locator("#video-list details")).to_have_attribute("open", "")
@@ -154,9 +154,9 @@ async def test_cancel_closes_extension_job(dashboard):
     await page.evaluate("window.__hang = true")
     await page.locator("[data-tx-group]").click()
     await page.wait_for_function("window.__reads === 2")
-    first = await page.evaluate("tx.current.extJob")
-    await page.evaluate("window.__hang = false; window.__reads = 0; cancelTranscription()")
-    await page.wait_for_function("tx.current?.moduleItemId === 13")
+    first = await page.evaluate("__ssu.tx.current.extJob")
+    await page.evaluate("window.__hang = false; window.__reads = 0; __ssu.cancelTranscription()")
+    await page.wait_for_function("__ssu.tx.current?.moduleItemId === 13")
     ext = await page.evaluate("window.__ext")
     idx = next(i for i, c in enumerate(ext) if c["action"] == "audio-close" and c["job"] == first)
     assert not [c for c in ext[idx + 1:] if c["action"] == "audio-read" and c["job"] == first]
@@ -242,11 +242,12 @@ async def test_redo_lives_in_the_transcript_dialog(dashboard):
     await expect(row.get_by_role("button", name="텍스트 보기")).to_be_visible()
     await expect(row.get_by_role("button", name="다시 변환")).to_have_count(0)
     await expect(row.get_by_role("button")).to_have_count(2)
-    await page.evaluate("enqueueTranscription = (jobs) => { window.__redo = jobs; }")
     await row.get_by_role("button", name="텍스트 보기").click()
     await page.locator("#transcript-dialog").get_by_role("button", name="다시 변환").click()
     await expect(page.locator("#transcript-dialog")).not_to_be_visible()
-    assert await page.evaluate("window.__redo.map((j) => j.moduleItemId)") == [12]
+    # 다시 변환은 이 강의(과목 1, 항목 12) 하나만 변환 대기열에 넣는다
+    await page.wait_for_function("""() => { const t = __ssu.tx;
+      return [t.current, ...t.queue, ...t.finished].filter(Boolean).map((j) => j.key).join() === "1:12"; }""")
 
 
 FAILING_WORKER = """
@@ -278,7 +279,7 @@ async def _start_one(page, data, worker, audio_seconds=3, duration=3):
 
 async def test_audio_requests_wait_60s_and_blame_the_school_server(dashboard):
     page, _ = dashboard
-    await page.add_script_tag(path=str(Path(__file__).parent.parent / "app/web/downloads.js"))
+    await page.add_script_tag(content=EXTENSION_CLIENT)
     await page.clock.install()
     # No extension answers here, so every request ends by timeout.
     await page.evaluate("""() => {

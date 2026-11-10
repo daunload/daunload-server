@@ -30,7 +30,6 @@
   <link rel="preload" as="style" href="https://cdn.jsdelivr.net/npm/@fontsource/black-han-sans@5.3.0/400.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" media="print" data-font>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/black-han-sans@5.3.0/400.css" media="print" data-font>
-  <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <a class="skip-link" href="#view">본문으로 건너뛰기</a>
@@ -126,18 +125,6 @@
   </aside>
   <dialog class="transcript-dialog" id="transcript-dialog"></dialog>
   <dialog class="confirm-dialog" id="confirm-dialog"></dialog>
-  <script src="/assets.js"></script>
-  <script src="/ui.js"></script>
-  <script src="/tasks.js"></script>
-  <script src="/downloads.js"></script>
-  <script src="/transcribe.js"></script>
-  <script src="/app.js"></script>
-  <script src="/access.js"></script>
-  <script src="/week.js"></script>
-  <!-- 관리자 화면은 관리자만 연다. 처음 열 때 loadScripts("admin")가 이 스크립트를 순서대로 붙인다. -->
-  <template id="scripts-admin">
-    <script src="/admin.js"></script>
-    <script src="/admin-feeds.js"></script>
-  </template>
+  <script type="module" src="/src/main.js"></script>
 </body>
 </html>

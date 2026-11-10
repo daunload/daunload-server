@@ -1,4 +1,5 @@
-"use strict";
+import { $, esc, state } from "./core.js";
+import { ADMIN_PROBLEM_KIND, adminActivityLabel, adminCourseTitle, adminJobTag, adminNumber, adminPager, adminPeriodActions, adminProblemError, adminProblemTag, adminProblemTitle, adminRequest, adminSetProblemCount, adminState, adminTable, adminTag, adminTime, adminUi, adminUserLink, adminUserPath } from "./admin.js";
 
 /* ---------------- 관리자: 활동과 문제 탭 ----------------
  * admin.js 다음에 불러온다(adminUi, adminRequest, adminState, adminTable, adminPager, adminPeriodActions 등을 쓴다).
@@ -7,8 +8,6 @@
 
 const ADMIN_FEED_LIMIT = 20;
 const ADMIN_ACTIVITY_KINDS = { all: "전체", playback: "재생", download: "다운로드", transcript: "전사" };
-adminUi.activity = { kind: "all", student_id: "", offset: 0 };
-adminUi.problems = { kind: "all", student_id: "", course: "", offset: 0 };
 
 /**
  * 활동·문제 탭의 공통 틀: 학번 검색(+ extra 조건), 종류 버튼(건수), 표, 페이지 이동.
@@ -87,7 +86,7 @@ function adminFeed(body, cfg) {
 
 /* ---------- 활동 ---------- */
 
-function adminActivity(body) {
+export function adminActivity(body) {
   adminUi.detail = null;
   adminFeed(body, {
     f: adminUi.activity, key: "activity", title: "활동", path: "/admin/activities", items: "activities",
@@ -103,7 +102,7 @@ function adminActivity(body) {
 
 /* ---------- 문제 ---------- */
 
-function adminProblems(body) {
+export function adminProblems(body) {
   adminUi.detail = null;
   const f = adminUi.problems;
   const kinds = { all: "전체", ...Object.fromEntries(Object.entries(ADMIN_PROBLEM_KIND).map(([k, v]) => [k, v.label])) };

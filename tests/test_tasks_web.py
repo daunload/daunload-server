@@ -115,15 +115,15 @@ async def test_transcribe_failure_stays_until_retry_or_close(dashboard):
     await expect(sheet).not_to_contain_text(RUNNING_NOTE)
 
     # 다시 시도: 작업을 다시 넣는다 (가짜 Worker라 다시 실패한다)
-    assert await page.evaluate("tx.nextId") == 2
+    assert await page.evaluate("__ssu.tx.nextId") == 2
     await sheet.get_by_role("button", name="다시 시도").click()
-    await page.wait_for_function("tx.nextId === 3 && tx.finished.length === 1 && !tx.current")
+    await page.wait_for_function("__ssu.tx.nextId === 3 && __ssu.tx.finished.length === 1 && !__ssu.tx.current")
     await expect(bar).to_contain_text("실패 1개")
 
     # 닫기: 그 항목만 없앤다
     await page.evaluate('''() => {
-      tx.finished.push({ key: "1:99", status: "failed", title: "다른 강의", error: "다른 오류" });
-      renderTaskPanel();
+      __ssu.tx.finished.push({ key: "1:99", status: "failed", title: "다른 강의", error: "다른 오류" });
+      __ssu.renderTaskPanel();
     }''')
     await expect(bar).to_contain_text("실패 2개")
     row = sheet.locator("li", has_text="2강 재귀")
@@ -140,10 +140,10 @@ async def test_running_transcription_row(dashboard):
     await page.goto("http://dashboard.test/#videos")
     await page.evaluate('''() => {
       window.__job = { key: "1:1", title: "돌아가는 강의", seconds: 30, duration: 60, ctrl: new AbortController(), reject() {} };
-      tx.current = window.__job;
-      tx.queue.push({ key: "1:2", title: "다음 강의" });
-      tx.modelPercent = 40;
-      renderTaskPanel();
+      __ssu.tx.current = window.__job;
+      __ssu.tx.queue.push({ key: "1:2", title: "다음 강의" });
+      __ssu.tx.modelPercent = 40;
+      __ssu.renderTaskPanel();
     }''')
     bar = page.locator("#task-bar")
     await expect(bar).to_contain_text("작업 1개 진행 중")
@@ -157,11 +157,11 @@ async def test_running_transcription_row(dashboard):
     # 변환 중지는 확인 창 없는 일반 버튼
     stop = sheet.get_by_role("button", name="변환 중지")
     await expect(stop).not_to_have_class(re.compile(r"\bdanger\b"))
-    await page.evaluate("tx.worker = null")
+    await page.evaluate("__ssu.tx.worker = null")
     await stop.click()
     await expect(page.locator("#confirm-dialog")).not_to_be_visible()
     assert await page.evaluate("window.__job.ctrl.signal.aborted") is True
-    await page.evaluate("() => { tx.current = null; tx.queue.length = 0; tx.modelPercent = null; renderTaskPanel(); }")
+    await page.evaluate("() => { __ssu.tx.current = null; __ssu.tx.queue.length = 0; __ssu.tx.modelPercent = null; __ssu.renderTaskPanel(); }")
     await expect(page.locator("#task-panel")).to_be_hidden()
 
 
@@ -170,18 +170,18 @@ async def test_redraw_while_pressing_does_not_lose_click(dashboard):
     await page.goto("http://dashboard.test/#videos")
     await page.evaluate('''() => {
       window.__job = { key: "1:1", title: "돌아가는 강의", seconds: 10, duration: 60, ctrl: new AbortController(), reject() {} };
-      tx.current = window.__job;
-      renderTaskPanel();
+      __ssu.tx.current = window.__job;
+      __ssu.renderTaskPanel();
     }''')
     await _open(page)
     sheet = page.locator("#task-sheet")
     await sheet.get_by_role("button", name="변환 중지").hover()
     await page.mouse.down()
-    await page.evaluate("() => { window.__job.seconds = 30; renderTaskPanel(); }")  # 누르는 중에 진행률이 바뀐다
+    await page.evaluate("() => { window.__job.seconds = 30; __ssu.renderTaskPanel(); }")  # 누르는 중에 진행률이 바뀐다
     await page.mouse.up()
     assert await page.evaluate("window.__job.ctrl.signal.aborted") is True
     await expect(sheet).to_contain_text("50%")  # 손을 떼면 밀린 내용을 그린다
-    await page.evaluate("() => { tx.current = null; renderTaskPanel(); }")
+    await page.evaluate("() => { __ssu.tx.current = null; __ssu.renderTaskPanel(); }")
 
 
 async def test_failed_batch_within_7_days_links_to_reason(page):
@@ -217,7 +217,7 @@ async def test_failed_playback_batches_rule(page):
     result = await page.evaluate('''() => {
       const now = Date.parse("2026-11-05T00:00:00Z");
       const at = (days) => new Date(now - days * 86400000).toISOString();
-      const ids = (list, dismissed = []) => failedPlaybackBatches(list, dismissed, now).map((b) => b.id);
+      const ids = (list, dismissed = []) => __ssu.failedPlaybackBatches(list, dismissed, now).map((b) => b.id);
       return {
         kept: ids([
           { id: 1, status: "partial", failed_count: 1, finished_at: at(1) },
@@ -268,7 +268,7 @@ async def test_batch_finishing_during_stop_dialog_sends_nothing(page):
     dialog = page.locator("#confirm-dialog")
     await expect(dialog).to_be_visible()
     batch.update(status="done", done_count=2, finished_at=datetime.now(UTC).isoformat())
-    await page.wait_for_function("state.active === null", timeout=POLL)
+    await page.wait_for_function("__ssu.state.active === null", timeout=POLL)
     await dialog.get_by_role("button", name="재생 중지").click()
     await expect(dialog).not_to_be_visible()
     await expect(page.locator("#task-panel")).to_be_hidden()
@@ -282,7 +282,7 @@ async def test_stop_dialog_does_not_stop_a_newer_batch(page):
     await page.locator("#task-sheet").get_by_role("button", name="재생 중지").click()
     dialog = page.locator("#confirm-dialog")
     await expect(dialog).to_be_visible()
-    await page.evaluate("state.active = { ...state.active, id: 8 }")
+    await page.evaluate("__ssu.state.active = { ...__ssu.state.active, id: 8 }")
     await dialog.get_by_role("button", name="재생 중지").click()
     await expect(dialog).not_to_be_visible()
     assert page.calls == []
@@ -324,7 +324,7 @@ async def test_panel_is_right_corner_on_desktop_and_toast_sits_above(page):
     assert panel["width"] == 320
     assert panel["x"] + panel["width"] > 1250
     assert panel["y"] + panel["height"] <= 900 - 8
-    await page.evaluate('toast("알림")')
+    await page.evaluate('__ssu.toast("알림")')
     await page.wait_for_timeout(300)  # 토스트 전환이 끝난 위치를 잰다
     toast = await page.locator("#toast").bounding_box()
     assert toast["y"] + toast["height"] <= panel["y"]
@@ -336,8 +336,8 @@ async def test_long_title_in_sheet_wraps(dashboard):
     await page.goto("http://dashboard.test/")
     title = "가" * 80
     await page.evaluate('''(title) => {
-      tx.finished.push({ key: "1:1", status: "failed", title, error: "오류" });
-      renderTaskPanel();
+      __ssu.tx.finished.push({ key: "1:1", status: "failed", title, error: "오류" });
+      __ssu.renderTaskPanel();
     }''', title)
     await _open(page)
     await expect(page.locator("#task-sheet")).to_contain_text(title)
@@ -350,8 +350,8 @@ async def test_task_strings_are_escaped(dashboard):
     page, _ = dashboard
     await page.goto("http://dashboard.test/")
     await page.evaluate('''() => {
-      tx.finished.push({ key: "1:1", status: "failed", title: "<img src=x onerror=window.__xss=1>", error: "<b>오류</b>" });
-      renderTaskPanel();
+      __ssu.tx.finished.push({ key: "1:1", status: "failed", title: "<img src=x onerror=window.__xss=1>", error: "<b>오류</b>" });
+      __ssu.renderTaskPanel();
     }''')
     await expect(page.locator("#task-sheet img")).to_have_count(0)
     await expect(page.locator("#task-sheet b")).to_have_count(0)
@@ -393,17 +393,17 @@ async def test_logout_clears_bulk_and_transcribe_tasks(dashboard):
     page, data = dashboard
     await _start_one(page, data, HANGING_WORKER, audio_seconds=2, duration=2)
     await expect(page.locator("#task-panel")).to_be_visible()
-    await page.wait_for_function("tx.current && tx.current.status === 'running'")
+    await page.wait_for_function("__ssu.tx.current && __ssu.tx.current.status === 'running'")
     await page.evaluate("""() => {
-      bulk.ctrl = new AbortController();
-      state.bulk = { done: 0, failed: 0, total: 2, running: true, errors: [], failedItems: [] };
-      tx.queue.push({ key: "1:98", title: "대기", status: "queued" });
-      renderTaskPanel();
+      __ssu.bulk.ctrl = new AbortController();
+      __ssu.state.bulk = { done: 0, failed: 0, total: 2, running: true, errors: [], failedItems: [] };
+      __ssu.tx.queue.push({ key: "1:98", title: "대기", status: "queued" });
+      __ssu.renderTaskPanel();
     }""")
     await page.locator("#logout-btn").click()
     await expect(page.locator("#auth")).to_be_visible()
-    assert await page.evaluate("bulk.ctrl.signal.aborted") is True
-    await page.wait_for_function("!tx.current")
-    assert await page.evaluate("[tx.queue.length, tx.finished.length, state.bulk]") == [0, 0, None]
-    await page.evaluate("state.token = 'again'; renderTaskPanel()")
+    assert await page.evaluate("__ssu.bulk.ctrl.signal.aborted") is True
+    await page.wait_for_function("!__ssu.tx.current")
+    assert await page.evaluate("[__ssu.tx.queue.length, __ssu.tx.finished.length, __ssu.state.bulk]") == [0, 0, None]
+    await page.evaluate("__ssu.state.token = 'again'; __ssu.renderTaskPanel()")
     await expect(page.locator("#task-panel")).to_be_hidden()

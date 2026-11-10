@@ -1,4 +1,7 @@
-"use strict";
+import { esc, fmtDate, fmtDuration, state, store } from "./core.js";
+import { stopBulkDownload } from "./downloads.js";
+import { cancelTranscription, enqueueTranscription, tx } from "./transcribe.js";
+import { cancelActivePlayback, navigate, runBulkDownload } from "./app.js";
 
 /* ---------------- 하단 진행 패널 ----------------
  * 강의 재생, 텍스트 변환, 여러 개 받기의 진행과 실패를 한곳(#task-panel)에 모은다. 상태가 바뀔 때마다 renderTaskPanel()을 부른다.
@@ -13,7 +16,7 @@ const FAILURE_KEEP_MS = 7 * 86400000;
 const taskUi = { expanded: false, actions: new Map(), dismissed: new Set(), sheetHtml: "", pointerDown: false };
 
 /** 끝난 지 7일 안이고 실패가 있는 재생 묶음. 닫은 묶음과 실패 없이 취소한 묶음은 뺀다. */
-function failedPlaybackBatches(batches, dismissedIds, now) {
+export function failedPlaybackBatches(batches, dismissedIds, now) {
   const dismissed = new Set(dismissedIds);
   const oldest = new Date(now).getTime() - FAILURE_KEEP_MS;
   return batches.filter((b) => !["queued", "running"].includes(b.status)
@@ -168,7 +171,7 @@ function taskRowHtml(item) {
   </li>`;
 }
 
-function renderTaskPanel() {
+export function renderTaskPanel() {
   if (taskUi.pointerDown) return;  // 누르는 중에 버튼을 바꾸면 클릭이 사라진다. 손을 떼면 다시 그린다.
   const panel = document.getElementById("task-panel");
   if (!panel) return;

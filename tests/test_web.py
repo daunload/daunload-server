@@ -7,13 +7,14 @@ from urllib.parse import urlparse
 import pytest
 from playwright.async_api import async_playwright, expect
 
-from tests.web_root import WEB
+from tests.web_root import WEB, require_build
 
 pytestmark = pytest.mark.browser
 
 
 @pytest.fixture
 async def dashboard():
+    require_build()
     now = datetime.now(UTC)
     data = {
         "/me": {"student_id": "20260001", "access_status": "approved"},

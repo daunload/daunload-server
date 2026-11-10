@@ -1,0 +1,58 @@
+/* 스타일 진입점.
+ * - 디자인 토큰은 legacy.css의 :root에 있다(색, 글자 크기, 반경, 터치 영역, z-index). Tailwind 테마는 그 변수를 그대로 가리킨다.
+ * - Tailwind의 기본 색·글자 크기는 끄고 토큰만 쓴다: 새 컴포넌트는 bg-pink, text-ink, text-sm, rounded-card, min-h-touch 같은 유틸리티를 쓴다.
+ * - Preflight(기본 스타일 초기화)는 아직 넣지 않는다. legacy.css로 그린 화면이 남아 있는 동안 모양이 바뀌지 않게 한다.
+ * - 화면을 Preact 컴포넌트로 옮길 때 그 화면의 legacy.css 규칙을 지운다. legacy.css는 레이어 밖이라 같은 요소에서는 유틸리티보다 우선한다.
+ */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "./legacy.css";
+
+@theme inline {
+  --color-*: initial;
+  --color-white: #fff;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-fill: var(--fill);
+  --color-fill-hover: var(--fill-hover);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-line: var(--line);
+  --color-blue: var(--blue);
+  --color-blue-press: var(--blue-press);
+  --color-blue-soft: var(--blue-soft);
+  --color-red: var(--red);
+  --color-red-soft: var(--red-soft);
+  --color-amber: var(--amber);
+  --color-amber-soft: var(--amber-soft);
+  --color-green: var(--green);
+  --color-green-soft: var(--green-soft);
+  --color-video: var(--video);
+  --color-assignment: var(--assignment);
+  --color-quiz: var(--quiz);
+  --color-pink: var(--pink);
+  --color-pink-press: var(--pink-press);
+  --color-pink-soft: var(--pink-soft);
+  --color-caption: var(--caption);
+
+  --text-*: initial;
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+
+  --radius-card: var(--r-card);
+  --radius-btn: var(--r-btn);
+  --radius-chip: var(--r-chip);
+
+  --font-sans: var(--font);
+  --font-display: var(--display);
+
+  --spacing-touch: var(--touch);
+  --spacing-gutter: var(--gutter);
+}

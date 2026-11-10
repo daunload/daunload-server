@@ -199,7 +199,7 @@ async def test_bulk_stops_on_closed_manager_and_can_restart(dashboard):
     await expect(sheet).to_contain_text('다운로드 창을 닫았습니다')
     assert await page.evaluate("window.__extensionCalls.filter(x => x === 'start').length") == 4
     assert await page.evaluate("window.__extensionCalls.filter(x => x === 'prepare').length") == 1
-    assert await page.evaluate('bulk.ctrl') is None
+    assert await page.evaluate('__ssu.bulk.ctrl') is None
     await page.evaluate("""() => {
       window.__extensionState = 'complete';
       window.__extensionCode = undefined;
@@ -225,7 +225,7 @@ async def test_bulk_progress_note_and_stop_in_panel(dashboard):
     await expect(page.locator('#confirm-dialog')).not_to_be_visible()
     await expect(page.locator('#toast')).to_contain_text('0/4개 받고 중지했어요')
     await expect(page.locator('#task-panel')).to_be_hidden()
-    assert await page.evaluate('bulk.ctrl') is None
+    assert await page.evaluate('__ssu.bulk.ctrl') is None
 
 
 async def test_bulk_material_note(dashboard):
@@ -340,7 +340,7 @@ async def test_panel_clears_when_bulk_ends_while_list_is_reloading(dashboard):
     await page.get_by_role('button', name='1주차 전체 내려받기 (2)').click()
     await page.wait_for_function("window.__extensionCalls.filter(x => x === 'start').length === 2")
     await expect(page.locator('#task-panel')).to_be_visible()
-    await page.evaluate("state.videoList = null")  # 과목을 바꿔 목록을 다시 불러오는 중
+    await page.evaluate("__ssu.state.videoList = null")  # 과목을 바꿔 목록을 다시 불러오는 중
     await page.evaluate("window.__extensionState = 'complete'")
     await expect(page.locator('#toast')).to_contain_text('2개를 모두 받았어요')
     await expect(page.locator('#task-panel')).to_be_hidden()
@@ -444,8 +444,8 @@ async def test_guide_leads_to_the_web_store_when_extension_is_missing(dashboard)
     await expect(guide).not_to_contain_text('ZIP')
     await expect(guide).not_to_contain_text('개발자 모드')
     await guide.locator('summary').click()  # 접으면 목록을 다시 그려도 다시 펼치지 않는다
-    await page.wait_for_function('state.guideDismissed === true')  # toggle 이벤트는 다음 작업에서 온다
-    await page.evaluate('renderVideoList()')
+    await page.wait_for_function('__ssu.state.guideDismissed === true')  # toggle 이벤트는 다음 작업에서 온다
+    await page.evaluate('__ssu.renderVideoList()')
     await expect(guide).not_to_have_attribute('open', '')
 
 

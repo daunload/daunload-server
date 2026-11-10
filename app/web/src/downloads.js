@@ -1,4 +1,7 @@
-"use strict";
+import { ApiError, api, state } from "./core.js";
+import { toast } from "./ui.js";
+import { showAccessScreen } from "./access.js";
+import { ext } from "./extension.js";
 
 /* ---------------- 여러 개 받기 ----------------
  * 영상: 확장 다운로드 창에서 CDN → 선택 폴더로 직접 저장한다.
@@ -9,17 +12,17 @@
 const BULK_CONCURRENCY = 2;
 const BULK_RETRY_MS = 3000;
 const LINK_REUSE_MS = 8 * 60 * 1000;  // 링크는 10분짜리다. 만료 전까지는 같은 링크로 다시 시도한다
-const bulk = { ctrl: null };
+export const bulk = { ctrl: null };
 
-function bulkDownloadSupported() {
+export function bulkDownloadSupported() {
   return typeof window.showDirectoryPicker === "function";
 }
 
-function stopBulkDownload() {
+export function stopBulkDownload() {
   bulk.ctrl?.abort();
 }
 
-async function startBulkDownload(items, onUpdate) {
+export async function startBulkDownload(items, onUpdate) {
   if (bulk.ctrl) throw new Error("이미 여러 개 받기를 진행하고 있습니다.");
   const direct = items.every((item) => item.linkPath.endsWith("/direct-download"));
   const controller = new AbortController();
@@ -31,7 +34,7 @@ async function startBulkDownload(items, onUpdate) {
     if (direct) {
       await requireDownloadExtension();
       signal.throwIfAborted();
-      session = (await extensionRequest("prepare")).session;
+      session = (await ext.request("prepare")).session;
     } else {
       dir = await window.showDirectoryPicker({ mode: "readwrite" });
     }
@@ -131,55 +134,29 @@ async function saveToFolder(dir, item, signal) {
 }
 
 
-// The bridge is injected only on the configured dashboard origin by the extension.
-const AUDIO_REQUEST_TIMEOUT_MS = 60000;  // 학교 CDN이 느릴 수 있어 오디오 요청은 더 기다린다
-function extensionRequest(action, data = {}) {
-  const isAudio = action.startsWith("audio-");
-  return new Promise((resolve, reject) => {
-    const id = crypto.randomUUID();
-    const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); };
-    const receive = (event) => {
-      if (event.source !== window || event.origin !== location.origin ||
-          event.data?.channel !== "ssu-download-response" || event.data.id !== id) return;
-      cleanup();
-      if (event.data.error) reject(new Error(event.data.error));
-      else resolve(event.data.result);
-    };
-    const timer = setTimeout(() => {
-      cleanup();
-      if (isAudio) return reject(new Error("학교 서버 응답이 늦어 텍스트 변환을 멈췄습니다. 다시 시도해 주세요."));
-      const error = new Error("아유 하기싫어 확장프로그램에 연결하지 못했습니다. 설치·사용 설정 후 페이지를 새로고침해 주세요.");
-      if (action === "ping") error.code = "EXTENSION_MISSING";
-      reject(error);
-    }, action === "ping" ? 1500 : isAudio ? AUDIO_REQUEST_TIMEOUT_MS : 15000);
-    window.addEventListener("message", receive);
-    window.postMessage({ channel: "ssu-download-request", id, action, ...data }, location.origin);
-  });
-}
-
-async function requireDownloadExtension() {
-  const result = await extensionRequest("ping");
+export async function requireDownloadExtension() {
+  const result = await ext.request("ping");
   state.extensionReady = true;
   if (result?.version !== 1 || !result.sessions || !result.queue) throw new Error("아유 하기싫어 확장프로그램을 업데이트해 주세요.");
   state.extensionMissing = null;
 }
 
-async function requireAudioExtension() {
+export async function requireAudioExtension() {
   await requireDownloadExtension();
-  const result = await extensionRequest("ping");
+  const result = await ext.request("ping");
   if (!result?.audio) throw new Error("아유 하기싫어 확장프로그램을 업데이트해 주세요.");
 }
 
 async function enqueueDirectVideo(item, signal, session = null) {
   signal.throwIfAborted();
-  if (!session) session = (await extensionRequest("prepare")).session;
+  if (!session) session = (await ext.request("prepare")).session;
   signal.throwIfAborted();
   const job = crypto.randomUUID();
   const link = await api(item.linkPath, { method: "POST" });
   try {
     for (;;) {
       signal.throwIfAborted();
-      const result = await extensionRequest("start", { job, session, data: { url: link.url, file_name: link.file_name } });
+      const result = await ext.request("start", { job, session, data: { url: link.url, file_name: link.file_name } });
       if (result.closed) throw Object.assign(new Error(result.error || "다운로드 창을 닫았습니다."), { code: "MANAGER_CLOSED" });
       if (result.started) return { job, link };
       if (!result.busy) throw new Error("다운로드를 시작하지 못했습니다.");
@@ -187,7 +164,7 @@ async function enqueueDirectVideo(item, signal, session = null) {
     }
   } catch (error) {
     // Cancel even if the start response was lost after registering the task.
-    await extensionRequest("cancel", { job }).catch(() => {});
+    await ext.request("cancel", { job }).catch(() => {});
     throw error;
   }
 }
@@ -196,13 +173,13 @@ async function waitDirectVideo({ job, link }, signal) {
   try {
     for (;;) {
       signal.throwIfAborted();
-      const result = await extensionRequest("status", { job });
+      const result = await ext.request("status", { job });
       if (result.state === "complete") break;
       if (result.state === "interrupted") throw Object.assign(new Error(`다운로드가 중단되었습니다 (${result.error || "알 수 없는 오류"}). 확장프로그램 다운로드 창을 확인해 주세요.`), { code: result.code });
       await sleep(1000, signal);
     }
   } catch (error) {
-    if (signal.aborted) await extensionRequest("cancel", { job }).catch(() => {});
+    if (signal.aborted) await ext.request("cancel", { job }).catch(() => {});
     throw error;
   }
   try {
@@ -213,6 +190,6 @@ async function waitDirectVideo({ job, link }, signal) {
 }
 
 
-async function downloadDirectVideo(item, signal, session = null) {
+export async function downloadDirectVideo(item, signal, session = null) {
   await waitDirectVideo(await enqueueDirectVideo(item, signal, session), signal);
 }

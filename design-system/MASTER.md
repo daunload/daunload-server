@@ -1,10 +1,10 @@
 # 아유 하기싫어 웹 디자인 규칙
 
-대상: `app/web` (순수 HTML, CSS, JS). 색상, Pretendard·Black Han Sans 글꼴, 뚱이 콘셉트는 바꾸지 않는다. UI 프레임워크와 런타임 의존성은 쓰지 않는다. 원본은 빌드 없이 그대로 동작해야 하고, 배포 때만 `scripts/build-web.mjs`(esbuild)가 묶고 압축한다(9장). 기준은 하나다. **버튼을 본 순간 어떤 동작인지 예측할 수 있어야 한다.**
+대상: `app/web` (Vite + Preact + Tailwind CSS, 9장). 색상, Pretendard·Black Han Sans 글꼴, 뚱이 콘셉트는 바꾸지 않는다. 런타임 의존성은 Preact와 @preact/signals만 쓴다. 기준은 하나다. **버튼을 본 순간 어떤 동작인지 예측할 수 있어야 한다.**
 
 설계 배경: `docs/superpowers/specs/2026-11-05-web-design-system-design.md`
 
-## 1. 토큰 (`app/web/style.css`의 `:root`)
+## 1. 토큰 (`app/web/src/styles/legacy.css`의 `:root`, Tailwind 테마는 `app.css`)
 
 | 토큰 | 값 | 용도 |
 |---|---|---|
@@ -57,7 +57,7 @@ PC와 휴대폰 모두 같은 가운데 창(`<dialog>` + `showModal()`)을 쓴�
 
 확인 버튼에는 결과를 적는다(`8개 재생 시작`, `알림 채널 삭제`). 일괄 재생 경고 문구는 범위와 관계없이 항상 "직접 시청하지 않은 수강은 학칙상 문제가 될 수 있어요."로 한다. 내려받기처럼 자주 쓰는 동작에는 확인 창을 끼우지 않는다.
 
-공통 함수는 `app/web/ui.js`에 있다. 새 화면은 직접 만들지 말고 이 함수를 쓴다. 아래는 사용 모습이다.
+공통 함수는 `app/web/src/ui.js`에 있다. 새 화면은 직접 만들지 말고 이 함수를 쓴다. 아래는 사용 모습이다.
 
 ```js
 // ui.js: confirmDialog({ title, body?: string[], warnings?: string[], confirmLabel, danger?, requireText?, requireLabel? }), closeConfirmDialog(), icon
@@ -99,7 +99,7 @@ button.innerHTML = `${icon("external")}LMS에서 제출`;
 
 스킵 링크, `:focus-visible`, `prefers-reduced-motion`, `aria-*`를 유지한다. 가로 스크롤이 생기면 안 된다. 긴 강의명과 주차명은 `overflow-wrap`으로 줄바꿈한다.
 
-## 6. 진행 패널 (`app/web/tasks.js`)
+## 6. 진행 패널 (`app/web/src/tasks.js`)
 
 강의 재생과 텍스트 변환의 진행과 실패는 `<aside id="task-panel">` 한곳에 모은다. 작업과 실패가 없거나 로그아웃 상태면 숨긴다. 상태를 바꾼 코드는 `renderTaskPanel()`을 부른다. 새 작업 종류는 `taskItems()`에 줄을 더한다.
 
@@ -120,7 +120,7 @@ button.innerHTML = `${icon("external")}LMS에서 제출`;
 - **설명 문구:** `창을 닫아도 서버에서 계속돼요` 한 줄만 보이고, 나머지는 `재생 방식 안내`에 접어 둔다. 5초 폴링으로 다시 그려도 펼침 상태와 포커스를 유지한다.
 - **지난 재생:** 별도 카드에 두고 상태는 줄 오른쪽에 색으로 표시한다.
 
-## 6-2. 홈 (`app/web/week.js`)
+## 6-2. 홈 (`app/web/src/week.js`)
 
 들어오자마자 **재생할 강의와 낼 과제를 전부** 한 카드에서 보고, **버튼 한 번**으로 끝낸다. 순서는 `제목 → 주요 버튼 → 목록`이고 탭, 요약 카드, 일정표는 두지 않는다. 강의가 많아도 주요 버튼은 스크롤 없이 보여야 한다.
 
@@ -130,7 +130,7 @@ button.innerHTML = `${icon("external")}LMS에서 제출`;
 - **묶기:** 같은 과목의 강의가 2개 이상이면 `과목 · 강의 N개 · 분량 · 가장 빠른 마감` 한 줄로 묶고 `<details>`로 접는다. 과제·퀴즈는 제출 버튼이 있어 한 줄씩 둔다. 펼침 상태는 5초 폴링으로 다시 그려도 유지한다.
 - **없앤 화면:** 할 일, 미제출 과제, 캘린더 화면과 위쪽 요약 카드·7일 일정표는 홈과 같은 데이터를 다시 보여 줄 뿐이라 없앴다. 공지 화면과 새 공지 알림도 없앴다(학교 LMS에서 확인). 예전 주소(`#todos`, `#announcements` 등)는 홈(`#dashboard`)으로 보낸다. 같은 데이터를 보여 주는 화면을 다시 만들지 않는다.
 
-## 7. 피드백 규칙 (`app/web/ui.js`)
+## 7. 피드백 규칙 (`app/web/src/ui.js`)
 
 - **토스트:** `toast(msg, bad?)`는 `#toast` 묶음에 항목을 더한다. 성공은 3200ms 뒤 사라지고, 오류는 `role="alert"`와 `닫기` 버튼이 있어 사용자가 닫을 때까지 남는다. 같은 오류가 이미 떠 있으면 늘리지 않고, 최대 3개까지 두며 넘치면 가장 오래된 것부터 지운다. 로그아웃하면 `clearToasts()`로 비운다.
 - **처리 중:** 서버를 기다리는 버튼은 `withPending(btn, "처리 중", fn)`으로 감싼다. 기다리는 동안 `disabled`와 `처리 중` 문구를 보이고, 끝나면 원래 모습으로 되돌린다.
@@ -141,7 +141,7 @@ button.innerHTML = `${icon("external")}LMS에서 제출`;
 - **확장프로그램 없음:** 연결 확인이 시간 초과되면(`EXTENSION_MISSING`) 토스트 대신 설치 안내를 펼치고 문구를 그 안에 쓴다. 버전이 맞지 않는 경우는 오류 토스트다.
 - **광고:** `syncAdInset()`이 화면 아래에 붙은 `ins.adsbygoogle[data-anchor-status="displayed"]`의 높이를 `--ad-inset`에 넣어 진행 패널과 토스트가 광고 위로 올라온다. 이 속성은 공개 API가 아니다.
 
-## 7-1. 관리자 화면 (`app/web/admin.js`, `app/web/admin-feeds.js`)
+## 7-1. 관리자 화면 (`app/web/src/admin.js`, `app/web/src/admin-feeds.js`)
 
 - **쓰기는 하나뿐:** 관리자 화면에서 바꾸는 동작은 사용 권한 승인·거절·회수 하나다. 나머지 버튼은 탭 이동, 필터, 페이지 이동, `다시 불러오기`뿐이고 API는 GET만 부르며, 쓰기는 `POST /admin/users/{학번}/access`만 쓴다.
 - **사용 승인:** 현황에 승인 대기 요청 표, 사용자 탭에 `권한 관리` 열·필터와 `승인`·`거절`·`권한 회수`·`바로 승인` 버튼, 사용자 상세 머리글에 같은 버튼을 둔다. 관리자 계정 줄에는 버튼을 두지 않는다. 409(이미 처리됨)는 오류로 놀라게 하지 않고 최신 상태로 다시 불러온다. 배포 직후에는 관리자를 뺀 모든 사용자가 막혀 있으므로 `바로 승인`(대기 없이 승인)이 기존 사용자를 들여보내는 길이다.
@@ -155,18 +155,30 @@ button.innerHTML = `${icon("external")}LMS에서 제출`;
 
 ## 8. 성능 (첫 화면을 막지 않는다)
 
-2026-11-10 측정 기준: 일반 사용자가 첫 화면에 받는 자체 JS는 gzip 약 31KB(관리자 묶음 12KB는 관리자 화면을 열 때만).
-
-- **스크립트:** 모두 일반 `<script>`이며 전역을 공유한다. 새 파일은 `index.html`의 순서에 맞춰 넣는다. 특정 화면에서만 쓰는 큰 코드는 `<template id="scripts-NAME">`에 넣고, 그 화면을 열 때 `loadScripts("NAME")`로 받는다(예: `renderAdminView()`). 첫 화면에서 실행되는 최상위 코드는 템플릿에 넣지 않는다.
-- **인라인 금지:** CSP가 인라인 스크립트와 `onload=` 속성을 막는다. 늦게 붙일 자원은 `assets.js`에 둔다.
+- **나눠 받기:** 특정 화면에서만 쓰는 큰 코드는 `import()`로 받는다(예: `renderAdminView()`가 `admin.js`를 받는다). 첫 화면 묶음에서 그 모듈을 정적으로 import하지 않는다(`tests/test_web_serving.py`가 확인한다).
+- **인라인 금지:** CSP가 인라인 스크립트와 `onload=` 속성을 막는다. 늦게 붙일 자원은 `src/assets.js`에 둔다.
 - **글꼴:** 글꼴 CSS는 `preload` + `media="print" data-font`로 받고 `assets.js`가 적용한다. 렌더링을 막는 `<link rel="stylesheet">`로 되돌리지 않는다.
 - **광고:** AdSense 로더는 `load` 뒤 브라우저가 한가할 때 `loadAds()`가 붙인다. 사이트 확인은 `<meta name="google-adsense-account">`가 맡는다.
-- **이미지:** 사진은 WebP(640px, 품질 78)로 두고 `width`·`height`를 적는다. 첫 화면의 큰 사진(로그인 화면 뚱이)에만 `fetchpriority="high"`를 쓴다. 지금 화면에 없는 사진은 미리 받지 않는다(표정 사진은 로그인 화면이 뜬 뒤 `preloadAuthMoods()`).
+- **이미지:** 사진은 `public/`의 WebP(640px, 품질 78)로 두고 `width`·`height`를 적는다. 첫 화면의 큰 사진(로그인 화면 뚱이)에만 `fetchpriority="high"`를 쓴다. 지금 화면에 없는 사진은 미리 받지 않는다(표정 사진은 로그인 화면이 뜬 뒤 `preloadAuthMoods()`).
+- **캐시:** `/assets/*`는 이름에 내용 해시가 붙어 1년 캐시(`immutable`), `index.html`은 `no-cache`다(`app/main.py`).
 
-## 9. 빌드와 테스트
+## 9. 구조와 빌드 (`app/web`)
 
-- `npm install && npm run build:web` → `app/web-dist/`. 배포 이미지는 Dockerfile의 `web` 단계에서 같은 명령을 돌리고 `WEB_DIR=/app/app/web-dist`로 서빙한다. 최종 이미지에는 Node가 없다.
-- 브라우저 테스트는 기본으로 원본을 쓴다. `WEB_ROOT=app/web-dist uv run pytest -m browser`는 빌드 결과로 같은 테스트를 돌린다. 스크립트 순서나 `<template>`을 바꾸면 두 방식 모두 돌린다.
+```
+app/web/index.html        정적 마크업(로그인, 메뉴, 대화상자 틀). 진입점 <script type="module" src="/src/main.js">
+app/web/public/           이름이 고정된 파일(이미지, privacy.html, ads.txt)
+app/web/src/main.js       모듈을 불러오고 boot(). window.__ssu(테스트·디버깅 손잡이)
+app/web/src/core.js       state, store, api, 날짜·시간 형식, esc. 다른 모듈을 import하지 않는다
+app/web/src/extension.js  확장 프로그램 창구 ext.request. 다른 모듈을 import하지 않는다
+app/web/src/*.js          화면 모듈(app, week, tasks, downloads, transcribe, access, admin…)
+app/web/src/styles/       app.css(Tailwind 테마 = 토큰), legacy.css(기존 화면 스타일)
+```
+
+- **import 규칙:** 전역 변수를 쓰지 않는다. 필요한 이름은 import한다. `core.js`와 `extension.js`는 아무것도 import하지 않는다. 최상위에서 바로 실행되는 코드는 `core`·`ui`처럼 먼저 평가되는 모듈의 값만 쓴다(순환 import에서 초기화 전 값을 읽으면 TDZ 오류가 난다). 화면 모듈끼리의 호출은 함수 안에서만 한다.
+- **새 화면·컴포넌트:** Preact(TSX) + Tailwind 유틸리티로 만든다. 색·글자 크기·반경·간격은 토큰 이름만 쓴다(`bg-pink`, `text-ink-2`, `text-sm`, `rounded-card`, `min-h-touch`). Tailwind 기본 색 팔레트는 꺼 두었다. 기존 화면을 옮기면 그 화면의 `legacy.css` 규칙을 지운다.
+- **테스트 손잡이:** 테스트는 모듈 안 값을 `window.__ssu`로만 본다. 확장 프로그램 응답은 `__ssu.ext.request`를 바꿔 끼운다. 새 값을 테스트에서 봐야 하면 `main.js`의 `__ssu`에 더한다.
+- **명령:** `npm run dev`(5173, API는 8000으로 넘긴다) · `npm run build`(→ `app/web-dist`) · `npm run typecheck`. FastAPI는 `app/web-dist`를 서빙하고, 없으면 화면 자리에 빌드 안내(503)만 보인다. 배포 이미지는 Dockerfile의 `web` 단계에서 빌드하며 최종 이미지에는 Node가 없다.
+- **브라우저 테스트:** 빌드 결과(`app/web-dist`)를 쓴다. 먼저 `npm run build`를 돌린다.
 
 ## 10. 완료 체크
 

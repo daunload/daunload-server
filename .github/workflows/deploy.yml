@@ -25,6 +25,12 @@ jobs:
           python-version: '3.13'
           enable-cache: true
       - run: uv sync --frozen
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Build the dashboard (Vite) and type-check it
+        run: npm ci --no-audit --no-fund && npm run typecheck && npm run build
       - name: Run tests without a browser or external services
         run: uv run pytest -m 'not browser' -q
 
