@@ -1,9 +1,9 @@
-import { $, api, esc, fmtDuration, state, store } from "./core.js";
-import { confirmDialog, icon, iconOnly, toast, withPending } from "./ui.js";
-import { renderTaskPanel } from "./tasks.js";
-import { requireAudioExtension } from "./downloads.js";
-import { ext } from "./extension.js";
-import { renderVideoList, reportDownloadError } from "./app.js";
+import { $, api, esc, fmtDuration, state, store } from "./core";
+import { confirmDialog, icon, iconOnly, toast, withPending } from "./ui";
+import { renderTaskPanel } from "./tasks";
+import { requireAudioExtension } from "./downloads";
+import { ext } from "./extension";
+import { renderVideoList, reportDownloadError } from "./app";
 
 /* ---------------- 브라우저 Whisper 텍스트 변환 ----------------
  * 확장 프로그램이 학교 CDN에서 읽어 오디오를 뽑아 주고, 브라우저 Whisper가 텍스트로 바꾼다. 끝나면 결과를 서버에 저장한다.

@@ -1,7 +1,7 @@
-import { ApiError, api, state } from "./core.js";
-import { toast } from "./ui.js";
-import { showAccessScreen } from "./access.js";
-import { ext } from "./extension.js";
+import { ApiError, api, state } from "./core";
+import { toast } from "./ui";
+import { showAccessScreen } from "./access";
+import { ext } from "./extension";
 
 /* ---------------- 여러 개 받기 ----------------
  * 영상: 확장 다운로드 창에서 CDN → 선택 폴더로 직접 저장한다.

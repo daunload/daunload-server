@@ -9,6 +9,10 @@
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "./legacy.css";
 
+/* Tailwind가 클래스 이름을 찾을 파일(Vite 루트 기준). */
+@source "../../index.html";
+@source "../";
+
 @theme inline {
   --color-*: initial;
   --color-white: #fff;
@@ -55,4 +59,7 @@
 
   --spacing-touch: var(--touch);
   --spacing-gutter: var(--gutter);
+
+  --animate-toast-in: toast-in .2s ease-out;
+  @keyframes toast-in { from { opacity: 0; transform: translateY(12px); } }
 }

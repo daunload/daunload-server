@@ -1,8 +1,8 @@
-import { $, api, fmtDate, state } from "./core.js";
-import { clearToasts, closeConfirmDialog, confirmDialog, toast, withPending } from "./ui.js";
-import { stopBulkDownload } from "./downloads.js";
-import { cancelTranscription, tx } from "./transcribe.js";
-import { boot, logout, serverLogout, stopPolling } from "./app.js";
+import { $, api, fmtDate, state } from "./core";
+import { clearToasts, closeConfirmDialog, confirmDialog, toast, withPending } from "./ui";
+import { stopBulkDownload } from "./downloads";
+import { cancelTranscription, tx } from "./transcribe";
+import { boot, logout, serverLogout, stopPolling } from "./app";
 
 /* 승인 전 사용자 화면: 로그인은 했지만 관리자 승인을 받지 못한 사용자가 보는 유일한 화면. */
 

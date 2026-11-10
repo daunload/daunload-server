@@ -1,6 +1,6 @@
-import { WEEKDAY, api, dayName, dueTime, esc, fmtDuration, fmtTime, safeUrl, state } from "./core.js";
-import { PLAYBACK_WARNING, icon, skeletonRows } from "./ui.js";
-import { confirmDashboardPlayback, loadDashboardPlayback, navigate, playbackConsented } from "./app.js";
+import { WEEKDAY, api, dayName, dueTime, esc, fmtDuration, fmtTime, safeUrl, state } from "./core";
+import { PLAYBACK_WARNING, icon, skeletonRows } from "./ui";
+import { confirmDashboardPlayback, loadDashboardPlayback, navigate, playbackConsented } from "./app";
 
 /* ---------------- 홈: 남은 할 일 전부 ----------------
  * 들어오자마자 재생할 강의와 낼 과제를 한 화면에서 보고, 버튼 한 번으로 끝낸다.

@@ -1,12 +1,12 @@
-import { $, BATCH_STATUS, GAP_SECONDS, JOB_STATUS, PRIVACY_NOTICE_KEY, VIEW_NAMES, api, dueText, dueTime, esc, fmtDate, fmtDuration, fmtSize, parseHash, setApiHandlers, state, store } from "./core.js";
-import { whenIdle } from "./assets.js";
-import { PLAYBACK_WARNING, clearToasts, closeConfirmDialog, confirmDialog, confirmPlayback, icon, iconOnly, isPhoneDevice, skeletonRows, toast, withPending } from "./ui.js";
-import { renderTaskPanel } from "./tasks.js";
-import { bulkDownloadSupported, downloadDirectVideo, requireDownloadExtension, startBulkDownload, stopBulkDownload } from "./downloads.js";
-import { ext } from "./extension.js";
-import { cancelTranscription, transcribeButton, transcribeGroupButton, tx, wireTranscribe } from "./transcribe.js";
-import { showAccessScreen } from "./access.js";
-import { drawWeek, renderWeek } from "./week.js";
+import { $, BATCH_STATUS, GAP_SECONDS, JOB_STATUS, PRIVACY_NOTICE_KEY, VIEW_NAMES, api, dueText, dueTime, esc, fmtDate, fmtDuration, fmtSize, parseHash, setApiHandlers, state, store } from "./core";
+import { whenIdle } from "./assets";
+import { PLAYBACK_WARNING, clearToasts, closeConfirmDialog, confirmDialog, confirmPlayback, icon, iconOnly, isPhoneDevice, skeletonRows, toast, withPending } from "./ui";
+import { renderTaskPanel } from "./tasks";
+import { bulkDownloadSupported, downloadDirectVideo, requireDownloadExtension, startBulkDownload, stopBulkDownload } from "./downloads";
+import { ext } from "./extension";
+import { cancelTranscription, transcribeButton, transcribeGroupButton, tx, wireTranscribe } from "./transcribe";
+import { showAccessScreen } from "./access";
+import { drawWeek, renderWeek } from "./week";
 
 /* ---------------- 로그인 ---------------- */
 
@@ -292,7 +292,7 @@ let adminModule = null;
 function renderAdminView() {
   if (adminModule) return adminModule.viewAdmin(state.adminPath);
   $("#view").innerHTML = `<div class="panel" aria-busy="true">${skeletonRows(4)}<p class="sr-only" role="status">불러오는 중입니다.</p></div>`;
-  import("./admin.js").then(
+  import("./admin").then(
     (mod) => { adminModule = mod; if (state.view === "admin") mod.viewAdmin(state.adminPath); },
     () => { if (state.view === "admin") viewError("화면을 불러오지 못했어요. 네트워크를 확인하고 다시 시도하세요.", renderAdminView); },
   );

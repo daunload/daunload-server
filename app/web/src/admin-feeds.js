@@ -1,5 +1,5 @@
-import { $, esc, state } from "./core.js";
-import { ADMIN_PROBLEM_KIND, adminActivityLabel, adminCourseTitle, adminJobTag, adminNumber, adminPager, adminPeriodActions, adminProblemError, adminProblemTag, adminProblemTitle, adminRequest, adminSetProblemCount, adminState, adminTable, adminTag, adminTime, adminUi, adminUserLink, adminUserPath } from "./admin.js";
+import { $, esc, state } from "./core";
+import { ADMIN_PROBLEM_KIND, adminActivityLabel, adminCourseTitle, adminJobTag, adminNumber, adminPager, adminPeriodActions, adminProblemError, adminProblemTag, adminProblemTitle, adminRequest, adminSetProblemCount, adminState, adminTable, adminTag, adminTime, adminUi, adminUserLink, adminUserPath } from "./admin";
 
 /* ---------------- 관리자: 활동과 문제 탭 ----------------
  * admin.js 다음에 불러온다(adminUi, adminRequest, adminState, adminTable, adminPager, adminPeriodActions 등을 쓴다).

@@ -1,7 +1,7 @@
-import { $, KIND, api, esc, fmtDate, fmtDuration, fmtSize, pad, state } from "./core.js";
-import { confirmDialog, icon, skeletonRows, toast, withPending } from "./ui.js";
-import { attendanceHtml, navigate, viewHash } from "./app.js";
-import { adminActivity, adminProblems } from "./admin-feeds.js";
+import { $, KIND, api, esc, fmtDate, fmtDuration, fmtSize, pad, state } from "./core";
+import { confirmDialog, icon, skeletonRows, toast, withPending } from "./ui";
+import { attendanceHtml, navigate, viewHash } from "./app";
+import { adminActivity, adminProblems } from "./admin-feeds";
 
 /* ---------------- 관리자 ----------------
  * app.js 다음에 불러온다(state, api, esc, fmtDate, navigate, viewHash를 쓴다).

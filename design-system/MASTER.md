@@ -57,10 +57,10 @@ PC와 휴대폰 모두 같은 가운데 창(`<dialog>` + `showModal()`)을 쓴�
 
 확인 버튼에는 결과를 적는다(`8개 재생 시작`, `알림 채널 삭제`). 일괄 재생 경고 문구는 범위와 관계없이 항상 "직접 시청하지 않은 수강은 학칙상 문제가 될 수 있어요."로 한다. 내려받기처럼 자주 쓰는 동작에는 확인 창을 끼우지 않는다.
 
-공통 함수는 `app/web/src/ui.js`에 있다. 새 화면은 직접 만들지 말고 이 함수를 쓴다. 아래는 사용 모습이다.
+공통 함수는 `app/web/src/ui.ts`(컴포넌트는 `ui/`)에 있다. 새 화면은 직접 만들지 말고 이 함수를 쓴다. 아래는 사용 모습이다.
 
 ```js
-// ui.js: confirmDialog({ title, body?: string[], warnings?: string[], confirmLabel, danger?, requireText?, requireLabel? }), closeConfirmDialog(), icon
+// ui.ts: confirmDialog({ title, body?: string[], warnings?: string[], confirmLabel, danger?, requireText?, requireLabel? }), closeConfirmDialog(), icon
 const ok = await confirmDialog({
   title: "알림 채널을 삭제할까요?",
   body: ["이 채널로 더 이상 알림을 보내지 않아요."],  // 문자열은 textContent로 들어가므로 esc() 불필요
@@ -130,7 +130,7 @@ button.innerHTML = `${icon("external")}LMS에서 제출`;
 - **묶기:** 같은 과목의 강의가 2개 이상이면 `과목 · 강의 N개 · 분량 · 가장 빠른 마감` 한 줄로 묶고 `<details>`로 접는다. 과제·퀴즈는 제출 버튼이 있어 한 줄씩 둔다. 펼침 상태는 5초 폴링으로 다시 그려도 유지한다.
 - **없앤 화면:** 할 일, 미제출 과제, 캘린더 화면과 위쪽 요약 카드·7일 일정표는 홈과 같은 데이터를 다시 보여 줄 뿐이라 없앴다. 공지 화면과 새 공지 알림도 없앴다(학교 LMS에서 확인). 예전 주소(`#todos`, `#announcements` 등)는 홈(`#dashboard`)으로 보낸다. 같은 데이터를 보여 주는 화면을 다시 만들지 않는다.
 
-## 7. 피드백 규칙 (`app/web/src/ui.js`)
+## 7. 피드백 규칙 (`app/web/src/ui.ts`(컴포넌트는 `ui/`))
 
 - **토스트:** `toast(msg, bad?)`는 `#toast` 묶음에 항목을 더한다. 성공은 3200ms 뒤 사라지고, 오류는 `role="alert"`와 `닫기` 버튼이 있어 사용자가 닫을 때까지 남는다. 같은 오류가 이미 떠 있으면 늘리지 않고, 최대 3개까지 두며 넘치면 가장 오래된 것부터 지운다. 로그아웃하면 `clearToasts()`로 비운다.
 - **처리 중:** 서버를 기다리는 버튼은 `withPending(btn, "처리 중", fn)`으로 감싼다. 기다리는 동안 `disabled`와 `처리 중` 문구를 보이고, 끝나면 원래 모습으로 되돌린다.
@@ -168,7 +168,9 @@ button.innerHTML = `${icon("external")}LMS에서 제출`;
 app/web/index.html        정적 마크업(로그인, 메뉴, 대화상자 틀). 진입점 <script type="module" src="/src/main.js">
 app/web/public/           이름이 고정된 파일(이미지, privacy.html, ads.txt)
 app/web/src/main.js       모듈을 불러오고 boot(). window.__ssu(테스트·디버깅 손잡이)
-app/web/src/core.js       state, store, api, 날짜·시간 형식, esc. 다른 모듈을 import하지 않는다
+app/web/src/core.ts       state, store, api, 날짜·시간 형식, esc. 다른 모듈을 import하지 않는다(types.ts만 예외)
+app/web/src/types.ts      서버 API 응답 타입(app/api/schemas.py와 맞춘다)
+app/web/src/ui.ts, ui/    아이콘·토스트·확인 창(Preact)과 작은 공통 도구
 app/web/src/extension.js  확장 프로그램 창구 ext.request. 다른 모듈을 import하지 않는다
 app/web/src/*.js          화면 모듈(app, week, tasks, downloads, transcribe, access, admin…)
 app/web/src/styles/       app.css(Tailwind 테마 = 토큰), legacy.css(기존 화면 스타일)

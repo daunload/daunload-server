@@ -1,7 +1,7 @@
-import { esc, fmtDate, fmtDuration, state, store } from "./core.js";
-import { stopBulkDownload } from "./downloads.js";
-import { cancelTranscription, enqueueTranscription, tx } from "./transcribe.js";
-import { cancelActivePlayback, navigate, runBulkDownload } from "./app.js";
+import { esc, fmtDate, fmtDuration, state, store } from "./core";
+import { stopBulkDownload } from "./downloads";
+import { cancelTranscription, enqueueTranscription, tx } from "./transcribe";
+import { cancelActivePlayback, navigate, runBulkDownload } from "./app";
 
 /* ---------------- 하단 진행 패널 ----------------
  * 강의 재생, 텍스트 변환, 여러 개 받기의 진행과 실패를 한곳(#task-panel)에 모은다. 상태가 바뀔 때마다 renderTaskPanel()을 부른다.
