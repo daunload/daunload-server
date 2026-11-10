@@ -1,6 +1,6 @@
 # 아유 하기싫어 웹 디자인 규칙
 
-대상: `app/web` (Vite + Preact + Tailwind CSS, 9장). 색상, Pretendard·Black Han Sans 글꼴, 뚱이 콘셉트는 바꾸지 않는다. 런타임 의존성은 Preact와 @preact/signals만 쓴다. 기준은 하나다. **버튼을 본 순간 어떤 동작인지 예측할 수 있어야 한다.**
+대상: `app/web` (Vite + Preact + Tailwind CSS, 9장). 색상, Pretendard·Black Han Sans 글꼴, 뚱이 콘셉트는 바꾸지 않는다. 런타임 의존성은 Preact 하나만 쓴다. 기준은 하나다. **버튼을 본 순간 어떤 동작인지 예측할 수 있어야 한다.**
 
 설계 배경: `docs/superpowers/specs/2026-11-05-web-design-system-design.md`
 
@@ -172,11 +172,17 @@ app/web/src/core.ts       state, store, api, 날짜·시간 형식, esc. 다른 
 app/web/src/types.ts      서버 API 응답 타입(app/api/schemas.py와 맞춘다)
 app/web/src/ui.ts, ui/    아이콘·토스트·확인 창(Preact)과 작은 공통 도구
 app/web/src/extension.js  확장 프로그램 창구 ext.request. 다른 모듈을 import하지 않는다
-app/web/src/*.js          화면 모듈(app, week, tasks, downloads, transcribe, access, admin…)
+app/web/src/screens/      Preact 화면: home, playback, videos, transcript, courses, notifications, account, mount(#view에 붙이기)
+app/web/src/ui/layout.tsx 화면 뼈대(ViewHead, Panel, PanelBody, Empty, Warning), ui/pending.tsx(처리 중 버튼)
+app/web/src/tasks.tsx     하단 진행 패널
+app/web/src/app.js        로그인·부팅·동기화·화면 전환(마크업은 index.html의 정적 HTML)
+app/web/src/*.js          access(승인 대기), downloads·transcribe(내려받기·변환 엔진), admin(관리자, 아직 HTML 문자열)
 app/web/src/styles/       app.css(Tailwind 테마 = 토큰), legacy.css(기존 화면 스타일)
 ```
 
 - **import 규칙:** 전역 변수를 쓰지 않는다. 필요한 이름은 import한다. `core.js`와 `extension.js`는 아무것도 import하지 않는다. 최상위에서 바로 실행되는 코드는 `core`·`ui`처럼 먼저 평가되는 모듈의 값만 쓴다(순환 import에서 초기화 전 값을 읽으면 TDZ 오류가 난다). 화면 모듈끼리의 호출은 함수 안에서만 한다.
+- **화면 추가:** `screens/이름.tsx`에 `viewX()`를 두고 `mountScreen("이름", <X />)`로 그린다. 다시 그리기는 같은 함수를 다시 부르면 된다(같은 컨테이너에 diff로 그려 포커스·펼침이 남는다). `app.js`의 `renderView()` 표에 넣는다.
+- **정적 UI는 HTML에:** 첫 화면(시작·로그인·승인 대기)과 앱 뼈대(상단 바·메뉴)는 `index.html`의 정적 HTML이다. JS가 오기 전에 그려지므로 Preact로 옮기지 않는다.
 - **새 화면·컴포넌트:** Preact(TSX) + Tailwind 유틸리티로 만든다. 색·글자 크기·반경·간격은 토큰 이름만 쓴다(`bg-pink`, `text-ink-2`, `text-sm`, `rounded-card`, `min-h-touch`). Tailwind 기본 색 팔레트는 꺼 두었다. 기존 화면을 옮기면 그 화면의 `legacy.css` 규칙을 지운다.
 - **테스트 손잡이:** 테스트는 모듈 안 값을 `window.__ssu`로만 본다. 확장 프로그램 응답은 `__ssu.ext.request`를 바꿔 끼운다. 새 값을 테스트에서 봐야 하면 `main.js`의 `__ssu`에 더한다.
 - **명령:** `npm run dev`(5173, API는 8000으로 넘긴다) · `npm run build`(→ `app/web-dist`) · `npm run typecheck`. FastAPI는 `app/web-dist`를 서빙하고, 없으면 화면 자리에 빌드 안내(503)만 보인다. 배포 이미지는 Dockerfile의 `web` 단계에서 빌드하며 최종 이미지에는 Node가 없다.
