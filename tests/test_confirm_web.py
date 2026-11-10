@@ -6,7 +6,7 @@ import pytest
 from playwright.async_api import expect
 
 from tests.test_web import dashboard  # noqa: F401  (fixture)
-from tests.test_week_web import page  # noqa: F401  (fixture)
+from tests.test_week_web import _later, page  # noqa: F401  (fixture)
 
 pytestmark = pytest.mark.browser
 WARNING = "직접 시청하지 않은 수강은 학칙상 문제가 될 수 있어요."
@@ -28,7 +28,9 @@ async def test_week_play_confirms_with_warning_then_starts(page):
 
 
 async def test_all_play_confirms_with_warning(page):
+    _later(page)
     await page.goto("http://dashboard.test/")
+    await page.get_by_role("tab", name="남은 할 일 전체 3").click()
     await page.get_by_role("button", name="전체 강의 2개 재생").click()
     dialog = page.locator("#confirm-dialog")
     await expect(dialog).to_contain_text("전체 강의 2개를 순서대로 재생할까요?")

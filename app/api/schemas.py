@@ -82,6 +82,7 @@ class WeekOut(BaseModel):
     video_seconds: float
     assignments: list[AssignmentOut]
     missed: list[AssignmentOut]
+    later_assignments: list[AssignmentOut] = []
 
 
 class AnnouncementOut(Orm):

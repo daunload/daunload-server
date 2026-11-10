@@ -307,7 +307,7 @@ async def test_bar_does_not_cover_last_row(page):
     await page.set_viewport_size({"width": 375, "height": 812})
     _active(page)
     await page.goto("http://dashboard.test/")
-    last = page.locator(".dashboard-lecture-list li").last
+    last = page.locator("#week-panel .today-links")
     await expect(last).to_be_visible()
     await page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
     await page.wait_for_function("scrollY > 0")
@@ -377,7 +377,6 @@ async def test_first_screen_shows_summary_without_stop(page):
     week = page.locator("#week-panel")
     await expect(week).to_contain_text("강의 재생 중 0/2개")
     await expect(week.get_by_role("button", name="재생 중지")).to_have_count(0)
-    await expect(page.locator("#dashboard-playback .dashboard-playback-progress")).to_have_count(0)
     await week.get_by_role("button", name="재생 현황 보기").click()
     await expect(page).to_have_url("http://dashboard.test/#playback")
 

@@ -48,13 +48,6 @@
   --display: "Black Han Sans", var(--font);
 }
 
-.dashboard-playback-note { color: var(--ink-2); font-size: var(--text-sm); overflow-wrap: anywhere; }
-.dashboard-lecture-list { list-style: none; padding: 0; margin: 0; }
-.dashboard-lecture-list li { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding: 16px 0; border-bottom: 1px solid var(--line); }
-.dashboard-lecture-list li > div { min-width: 0; overflow-wrap: anywhere; }
-.dashboard-lecture-list h3 { font-size: var(--text-md); }
-.dashboard-lecture-list p { color: var(--ink-2); font-size: var(--text-sm); margin-top: 4px; }
-.dashboard-lecture-list .status { flex-shrink: 0; }
 .playback-hero { overflow-wrap: anywhere; }
 .playback-state { font-size: var(--text-sm); font-weight: 700; color: var(--blue); }
 .playback-percent strong { font-size: var(--text-xl); font-weight: 700; }
@@ -589,6 +582,33 @@ progress { border: 2px solid var(--ink); border-radius: 6px; height: 12px; }
 .task + .task, .list > li + li, .course + .course, .steps li + li, .cal-item + .cal-item, details.notice + details.notice { box-shadow: inset 0 1px 0 var(--line); }
 .task:first-child { background: var(--pink-soft); }
 .task:first-child .task-due { color: var(--ink); font-weight: 700; }
+
+/* 첫 화면: 같은 과목의 강의는 한 줄로 묶고 눌러야 펼친다. 강의가 많아도 화면 한 장 안에 들어오게 한다. */
+.task-group { display: block; padding: 0; }
+.task-group:first-child { background: none; }
+.task-group > details > summary {
+  display: flex; align-items: center; gap: 12px; min-height: var(--touch); padding: 14px 20px;
+  list-style: none; cursor: pointer; transition: background-color .15s;
+}
+.task-group:first-child > details > summary { background: var(--pink-soft); }
+.task-group > details > summary::-webkit-details-marker { display: none; }
+.task-group > details > summary:hover { background: var(--fill-hover); }
+.task-group > details > summary:focus-visible { outline-offset: -4px; }
+.task-group > details[open] > summary .chevron { rotate: 180deg; }
+.task-sublist { list-style: none; margin: 0; padding: 0 20px 6px 36px; }
+.task-sublist li { display: flex; align-items: center; gap: 12px; padding: 10px 0; box-shadow: inset 0 1px 0 var(--line); }
+.task-sublist .task-title { font-weight: 500; white-space: normal; overflow-wrap: anywhere; }
+.task-sublist .task-sub { white-space: normal; }
+.week-tabs { margin-top: 18px; }
+.week-tabs button b { margin-left: 2px; font-weight: 700; }
+.week-tabs + #week-tabpanel .task-list { margin-top: 10px; }
+#week-tabpanel:empty { display: none; }
+@media (max-width: 760px) {
+  .task-group > details > summary { padding: 14px 16px; }
+  .task-sublist { padding: 0 16px 6px 24px; }
+  .week-tabs button { flex: 1; }
+}
+@media (prefers-reduced-motion: reduce) { .task-group > details > summary { transition: none; } }
 .tabs [role="tab"] { border: 2px solid var(--ink); background: var(--surface); color: var(--ink); }
 .tabs [role="tab"][aria-selected="true"] { background: var(--ink); color: #fff; }
 .filters button { border: 2px solid var(--ink); color: var(--ink); }

@@ -51,6 +51,8 @@ async def _seed():
             _assignment(1, 23, end + timedelta(days=1)),                              # 다음 주 → 제외
             _assignment(1, 24, now + timedelta(hours=1), state="submitted"),          # 제출함 → 제외
             _assignment(1, 25, now - timedelta(minutes=1)),                           # 방금 마감 지남(이번 주에 놓침)
+            _assignment(1, 26, None),                                                 # 마감 없음 → 나중에 낼 과제
+            _assignment(1, 27, end + timedelta(days=2), state="submitted"),           # 다음 주지만 제출함 → 제외
         ])
         await db.commit()
     return now, start, end
@@ -68,6 +70,8 @@ async def test_week_endpoint(env):
     # 월요일 00:00 직후 1분 안에 테스트가 돌면 그 마감은 지난주라 '이번 주에 놓친 과제'가 아니다
     expected_missed = [25] if now - timedelta(minutes=1) >= start else []
     assert [a["assignment_id"] for a in week["missed"]] == expected_missed
+    # 다음 주 이후 마감이거나 마감이 없어도 아직 낼 과제가 있으면 '누워도 됨'이라고 하지 않도록 따로 내려 준다
+    assert sorted(a["assignment_id"] for a in week["later_assignments"]) == [23, 26]
 
 
 async def test_week_batch_plays_only_this_weeks_videos(env):

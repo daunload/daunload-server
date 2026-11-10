@@ -138,6 +138,7 @@ async def this_week(user: CurrentUser, db: Db):
     - videos: 지금 볼 수 있고 이번 주 안에 마감되는 미수강 영상(마감순). '이번 주 강의 전체 재생'의 대상과 같다.
     - assignments: 이번 주 안에 마감되는 미제출 과제(제출 가능·잠김·열리기 전)
     - missed: 이번 주에 이미 마감이 지난 미제출 과제
+    - later_assignments: 다음 주 이후에 마감되거나 마감이 없는, 아직 낼 수 있는 미제출 과제
     """
     now = utcnow()
     start, end = week_bounds(now)
@@ -156,6 +157,8 @@ async def this_week(user: CurrentUser, db: Db):
         video_seconds=sum(v.duration or 0 for v in videos),
         assignments=[a for a in in_week if a.status in ("open", "locked", "upcoming")],
         missed=[a for a in in_week if a.status == "overdue"],
+        later_assignments=[a for a in items if a.status in ("open", "locked", "upcoming", "no_due")
+                           and (a.deadline is None or a.deadline >= end)],
     )
 
 

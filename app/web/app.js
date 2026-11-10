@@ -532,13 +532,14 @@ function needCred() {
  */
 function viewDashboard() {
   if (needCred()) return;
-  $("#view").innerHTML = `<div id="week-panel"></div><section id="dashboard-playback" class="panel" aria-label="재생 가능한 강의"></section>`;
+  // 이번 주 할 일과 재생 가능한 강의 전체를 한 카드에서 탭으로 나눠 보여 준다(week.js).
+  $("#view").innerHTML = `<div id="week-panel"></div>`;
   loadDashboardPlayback();
   if (typeof renderWeek === "function") renderWeek();
 }
 
 async function loadDashboardPlayback() {
-  const root = $("#dashboard-playback");
+  const root = $("#week-panel");
   if (!root) return;
   const token = state.token;
   const valid = () => root.isConnected && state.token === token && state.view === "dashboard";
@@ -585,32 +586,9 @@ function playbackOverallPercent(jobs) {
   return duration > 0 ? Math.floor(played / duration * 100) : 0;
 }
 
+/** 재생 가능한 강의 목록은 첫 화면 카드(week.js)가 함께 그린다. */
 function drawDashboardPlayback() {
-  const root = $("#dashboard-playback");
-  if (!root) return;
-  const plan = state.dashboardPlan;
-  const items = plan?.items || [];
-  const batch = state.active;
-  const jobs = batch?.jobs || [];
-  const list = items.length ? `<ol class="dashboard-lecture-list">${items.map((item) => {
-    const job = jobs.find((j) => j.module_item_id === item.module_item_id && j.lms_course_id === item.lms_course_id);
-    return `<li><div><h3>${esc(item.title)}</h3><p>${esc(item.course_name)} · ${esc(item.module_title)} · ${fmtDuration(item.duration)}</p>
-      <p>${dueText(item.deadline)}${item.at_risk ? " · 마감 전 완료가 어려울 수 있습니다" : ""}</p></div>
-      ${job ? `<span class="status ${esc(job.status)}">${esc(JOB_STATUS[job.status] || job.status)}</span>` : ""}</li>`;
-  }).join("")}</ol>` : `<p class="dashboard-playback-note">현재 재생 가능한 미수강 강의가 없습니다.</p>`;
-  root.innerHTML = `<div class="panel-body">
-    <div class="view-head"><h2>재생 가능한 강의${plan && !state.dashboardLoading ? ` ${items.length}개` : ""}</h2>
-      <button class="btn" id="dashboard-playback-refresh" ${state.dashboardLoading || state.playbackStarting ? "disabled" : ""}>목록 다시 불러오기</button></div>
-    <p class="dashboard-playback-note">전체 과목에서 지금 열려 있고 마감이 지나지 않은 미수강 강의입니다. 마지막 동기화 기준이며, 재생 직전에 완료 여부를 다시 확인합니다.</p>
-    ${state.dashboardLoading ? `<p role="status">강의 목록을 불러오는 중입니다.</p>${skeletonRows(3)}`
-      : state.dashboardError ? `<div role="alert"><p>${esc(state.dashboardError)}</p><button class="btn" id="dashboard-playback-retry">다시 시도</button></div>`
-      : `${list}${!batch ? `<button class="btn block" id="dashboard-play-all" ${!items.length || state.playbackStarting ? "disabled" : ""}>
-          ${state.playbackStarting ? "재생 요청 중…" : `전체 강의 ${items.length}개 재생`}</button>
-        ${items.length ? `<p class="dashboard-playback-note">총 ${fmtDuration(items.reduce((sum, item) => sum + item.duration, 0))} 분량 · 1배속으로 순서대로 재생하고 LMS 완료 여부를 확인합니다.</p>` : ""}` : ""}`}
-  </div>`;
-  $("#dashboard-playback-refresh")?.addEventListener("click", loadDashboardPlayback);
-  $("#dashboard-playback-retry")?.addEventListener("click", loadDashboardPlayback);
-  $("#dashboard-play-all")?.addEventListener("click", confirmDashboardPlayback);
+  if (typeof drawWeek === "function") drawWeek();
 }
 
 async function confirmDashboardPlayback() {
@@ -623,7 +601,6 @@ async function startDashboardPlayback() {
   const token = state.token;
   state.playbackStarting = true;
   drawDashboardPlayback();
-  if (typeof drawWeek === "function") drawWeek();
   try {
     const batch = await api("/playback/batches", { method: "POST", json: { scope: "all" } });
     if (state.token !== token) return;
@@ -646,7 +623,6 @@ async function startDashboardPlayback() {
     if (state.token === token) {
       state.playbackStarting = false;
       drawDashboardPlayback();
-      if (typeof drawWeek === "function") drawWeek();
     }
   }
 }
