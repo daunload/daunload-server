@@ -139,6 +139,7 @@ async def this_week(user: CurrentUser, db: Db):
     - assignments: 이번 주 안에 마감되는 미제출 과제(제출 가능·잠김·열리기 전)
     - missed: 이번 주에 이미 마감이 지난 미제출 과제
     - later_assignments: 다음 주 이후에 마감되거나 마감이 없는, 아직 낼 수 있는 미제출 과제
+    - late_assignments: 마감은 지났지만 LMS가 아직 잠그지 않아 지각 제출할 수 있는 과제(주와 상관없이)
     """
     now = utcnow()
     start, end = week_bounds(now)
@@ -159,6 +160,7 @@ async def this_week(user: CurrentUser, db: Db):
         missed=[a for a in in_week if a.status == "overdue"],
         later_assignments=[a for a in items if a.status in ("open", "locked", "upcoming", "no_due")
                            and (a.deadline is None or a.deadline >= end)],
+        late_assignments=[a for a in items if a.status == "overdue" and a.lock_at is not None and a.lock_at > now],
     )
 
 

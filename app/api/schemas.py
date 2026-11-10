@@ -83,6 +83,7 @@ class WeekOut(BaseModel):
     assignments: list[AssignmentOut]
     missed: list[AssignmentOut]
     later_assignments: list[AssignmentOut] = []
+    late_assignments: list[AssignmentOut] = []
 
 
 class AnnouncementOut(Orm):

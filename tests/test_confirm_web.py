@@ -1,49 +1,33 @@
 """공통 확인 창: 위험한 동작은 한 곳에서 확인하고, 확인 전에는 서버를 건드리지 않는다."""
 
-import asyncio
-
 import pytest
 from playwright.async_api import expect
 
 from tests.test_web import dashboard  # noqa: F401  (fixture)
-from tests.test_week_web import _later, page  # noqa: F401  (fixture)
+from tests.test_week_web import page  # noqa: F401  (fixture)
 
 pytestmark = pytest.mark.browser
 WARNING = "직접 시청하지 않은 수강은 학칙상 문제가 될 수 있어요."
 
 
-async def test_week_play_confirms_with_warning_then_starts(page):
+async def test_play_all_confirms_with_warning_then_starts(page):
     await page.goto("http://dashboard.test/")
-    await page.get_by_role("button", name="이번 주 강의 2개 재생").click()
+    await page.get_by_role("button", name="강의 2개 모두 재생").click()
     dialog = page.locator("#confirm-dialog")
     await expect(dialog).to_be_visible()
-    await expect(dialog).to_contain_text("이번 주 강의 2개를 순서대로 재생할까요?")
+    await expect(dialog).to_contain_text("전체 강의 2개를 순서대로 재생할까요?")
     await expect(dialog).to_contain_text("1배속 · 약")
     await expect(dialog).to_contain_text(WARNING)
     assert page.calls == []
     await dialog.get_by_role("button", name="2개 재생 시작").click()
     await expect(page.locator(".cta-progress")).to_contain_text("강의 재생 중 0/2개")
-    assert page.calls == [("POST", "/playback/batches", {"scope": "week"})]
-    await expect(dialog).not_to_be_visible()
-
-
-async def test_all_play_confirms_with_warning(page):
-    _later(page)
-    await page.goto("http://dashboard.test/")
-    await page.get_by_role("tab", name="남은 할 일 전체 3").click()
-    await page.get_by_role("button", name="전체 강의 2개 재생").click()
-    dialog = page.locator("#confirm-dialog")
-    await expect(dialog).to_contain_text("전체 강의 2개를 순서대로 재생할까요?")
-    await expect(dialog).to_contain_text("학칙")
-    assert page.calls == []
-    await dialog.get_by_role("button", name="2개 재생 시작").click()
-    await expect(page.locator(".cta-progress")).to_contain_text("강의 재생 중 0/2개")
     assert page.calls == [("POST", "/playback/batches", {"scope": "all"})]
+    await expect(dialog).not_to_be_visible()
 
 
 async def test_dialog_focus_escape_and_return(page):
     await page.goto("http://dashboard.test/")
-    button = page.get_by_role("button", name="이번 주 강의 2개 재생")
+    button = page.get_by_role("button", name="강의 2개 모두 재생")
     await button.click()
     await expect(page.get_by_role("button", name="취소")).to_be_focused()
     await page.keyboard.press("Escape")
@@ -54,9 +38,9 @@ async def test_dialog_focus_escape_and_return(page):
 
 async def test_double_open_shows_one_dialog(page):
     await page.goto("http://dashboard.test/")
-    await expect(page.locator("#week-play")).to_be_visible()
+    await expect(page.locator("#dashboard-play-all")).to_be_visible()
     await page.evaluate('''() => {
-      const b = document.getElementById("week-play");
+      const b = document.getElementById("dashboard-play-all");
       b.click(); b.click();
     }''')
     dialog = page.locator("#confirm-dialog")
@@ -64,7 +48,7 @@ async def test_double_open_shows_one_dialog(page):
     assert await page.locator("dialog[open]").count() == 1
     await dialog.get_by_role("button", name="2개 재생 시작").click()
     await expect(page.locator(".cta-progress")).to_contain_text("강의 재생 중 0/2개")
-    assert page.calls == [("POST", "/playback/batches", {"scope": "week"})]
+    assert page.calls == [("POST", "/playback/batches", {"scope": "all"})]
 
 
 async def test_notification_channel_delete_confirms(page):
@@ -100,7 +84,7 @@ async def test_account_delete_requires_student_id(page):
 
 async def test_logout_with_open_dialog_closes_it(page):
     await page.goto("http://dashboard.test/")
-    await page.get_by_role("button", name="이번 주 강의 2개 재생").click()
+    await page.get_by_role("button", name="강의 2개 모두 재생").click()
     await expect(page.locator("#confirm-dialog")).to_be_visible()
     await page.evaluate("logout()")
     await expect(page.locator("#confirm-dialog")).not_to_be_visible()
@@ -152,30 +136,6 @@ async def test_transcript_delete_confirms_over_transcript_dialog(dashboard):  # 
     await dialog.get_by_role("button", name="텍스트 삭제").click()
     await expect(transcript).not_to_be_visible()
     assert len(calls) == 1
-
-
-async def test_second_dialog_while_preview_is_slow_does_not_start_playback(page):
-    release = asyncio.Event()
-
-    async def slow_preview(route):
-        await release.wait()
-        await route.fulfill(json=page.data["/playback/batches/preview"])
-
-    await page.route("**/playback/batches/preview*", slow_preview)
-    page.data["/notifications/channels"] = [{"id": 5, "kind": "discord", "enabled": True, "created_at": page.now.isoformat()}]
-    await page.goto("http://dashboard.test/")
-    await page.get_by_role("button", name="이번 주 강의 2개 재생").click()
-    await page.evaluate("location.hash = '#notifications'")
-    await page.get_by_role("button", name="삭제", exact=True).click()
-    dialog = page.locator("#confirm-dialog")
-    await expect(dialog).to_contain_text("이 알림 채널을 삭제할까요?")
-    release.set()
-    await page.wait_for_timeout(300)  # 늦게 도착한 미리보기가 열린 창을 가로채지 않는다
-    await expect(dialog).to_contain_text("이 알림 채널을 삭제할까요?")
-    await dialog.get_by_role("button", name="알림 채널 삭제").click()
-    await expect(dialog).not_to_be_visible()
-    await page.wait_for_timeout(300)
-    assert page.calls == [("DELETE", "/notifications/channels/5", None)]
 
 
 async def test_logout_closes_transcript_dialog(dashboard):  # noqa: F811

@@ -131,29 +131,16 @@ NO_DEADLINE = {"kind": "video", "lms_course_id": 1, "lms_item_id": 90, "course_n
 
 
 @pytest.mark.browser
-async def test_todo_screen_shows_no_deadline_last(dashboard):  # noqa: F811
+async def test_home_shows_no_deadline_last(dashboard):  # noqa: F811
     page, data = dashboard
-    data["/todos"].append(NO_DEADLINE)
-    await page.goto("http://dashboard.test/#todos")
-    await expect(page.locator("#todo-count")).to_have_text("4개")
-    labels = page.locator("#todo-results .group-label")
-    await expect(labels.last).to_have_text("마감 없음 · 1개")
-    row = page.locator("#todo-results li").filter(has_text="마감 없는 강의")
+    item = {**data["/playback/batches/preview"]["items"][0], "lms_course_id": 2, "course_name": "다른 과목",
+            "module_item_id": 90, "title": "마감 없는 강의", "deadline": None}
+    data["/playback/batches/preview"]["items"].append(item)
+    await page.goto("http://dashboard.test/")
+    row = page.locator(".task").last
+    await expect(row).to_contain_text("마감 없는 강의")
     await expect(row).to_contain_text("마감 없음")
-    await expect(row).not_to_contain_text("마감 지남")
     await expect(page.locator("#view")).not_to_contain_text("1970")
-    await page.get_by_label("24시간 내 마감만 보기").check()
-    await expect(row).to_have_count(0)
-
-
-@pytest.mark.browser
-async def test_calendar_and_rail_ignore_no_deadline(dashboard):  # noqa: F811
-    page, data = dashboard
-    data["/todos"] = [NO_DEADLINE]
-    await page.goto("http://dashboard.test/#calendar")
-    await expect(page.locator("#view")).not_to_be_empty()
-    await expect(page.locator("#view")).not_to_contain_text("1970")
-    assert await page.evaluate("calendarItems().every((i) => i.date.getFullYear() > 2000)")
 
 
 @pytest.mark.browser
@@ -164,18 +151,3 @@ async def test_playback_plan_says_no_deadline(dashboard):  # noqa: F811
       expected_end: new Date().toISOString(), deadline: null, at_risk: false }], warnings: [], total_seconds: 60,
       expected_end: new Date().toISOString() })""")
     assert "마감 없음" in html and "1970" not in html
-
-
-@pytest.mark.browser
-async def test_rail_and_stats_skip_no_deadline(dashboard):  # noqa: F811
-    page, data = dashboard
-    data["/todos"] = [NO_DEADLINE]
-    await page.goto("http://dashboard.test/#todos")
-    await expect(page.locator("#todo-count")).to_have_text("1개")
-    # 7일 칸은 비고, 빈 칸 문구는 할 일의 '마감 없음' 표시와 겹치지 않는다
-    await expect(page.locator("#rail .day-empty")).to_have_count(7)
-    await expect(page.locator("#rail .day-empty").first).to_have_text("마감 일정 없음")
-    await expect(page.locator("#rail .chip")).to_have_count(0)
-    await expect(page.locator(".band-note")).to_have_text("앞으로 7일 안에 마감되는 할 일이 없습니다.")
-    await expect(page.locator('#stats [data-shortcut="soon"] strong')).to_have_text("0")
-    await expect(page.locator('#stats [data-shortcut="all"] strong')).to_have_text("1")

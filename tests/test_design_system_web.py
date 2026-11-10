@@ -10,7 +10,7 @@ pytestmark = pytest.mark.browser
 
 LONG_TITLE = "가" * 80
 LONG_WEEK = "주" * 40
-VIEWS = ("todos", "playback", "videos", "notifications", "account", "calendar")
+VIEWS = ("dashboard", "playback", "videos", "notifications", "account")
 
 
 def _video(mid, title, week="1주차", transcript=None):
@@ -75,8 +75,9 @@ async def test_long_titles_never_scroll_sideways(dashboard, width):
     _seed(data, [_video(11, LONG_TITLE, week=LONG_WEEK), _video(12, LONG_TITLE, week=LONG_WEEK, transcript=9)])
     data["/todos"][0]["title"] = LONG_TITLE
     data["/todos"][0]["module_title"] = LONG_WEEK
+    data["/playback/batches/preview"]["items"][0].update(title=LONG_TITLE, module_title=LONG_WEEK, course_name=LONG_TITLE)
     await page.set_viewport_size({"width": width, "height": 900})
-    for view in ("todos", "videos", "calendar", "playback"):
+    for view in ("dashboard", "videos", "playback"):
         await page.goto(f"http://dashboard.test/#{view}")
         await expect(page.locator("#view")).not_to_be_empty()
         await page.wait_for_timeout(150)

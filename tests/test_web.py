@@ -37,6 +37,16 @@ async def dashboard():
             ])
         ],
     }
+    # 홈: 재생할 강의(전체 미리보기)와 낼 과제(/week)
+    video = data["/todos"][1]
+    data["/week"] = {"start": now.isoformat(), "end": (now + timedelta(days=7)).isoformat(), "videos": [video], "video_seconds": 1800,
+                     "assignments": [{**data["/assignments"][0], "unlock_at": None, "lock_at": None}], "missed": [],
+                     "later_assignments": [], "late_assignments": []}
+    data["/playback/batches/preview"] = {"items": [{
+        "position": 0, "lms_course_id": 1, "course_name": "컴퓨터프로그래밍", "module_id": 6, "module_title": "6주차",
+        "module_item_id": video["lms_item_id"], "title": video["title"], "duration": 1800, "deadline": video["deadline"],
+        "expected_start": now.isoformat(), "expected_end": (now + timedelta(minutes=30)).isoformat(), "at_risk": False}],
+        "total_seconds": 1800, "expected_end": (now + timedelta(minutes=30)).isoformat(), "warnings": []}
     errors = []
     async with async_playwright() as p:
         browser = await p.chromium.launch(channel="chrome", headless=True)
@@ -65,20 +75,11 @@ async def dashboard():
     assert not errors, errors
 
 
-async def test_todo_search_deadlines_and_mobile_layout(dashboard, tmp_path):
+async def test_home_and_mobile_layout(dashboard, tmp_path):
     page, _ = dashboard
-    await page.goto("http://dashboard.test/#todos")
-    await expect(page.locator("#todo-count")).to_have_text("3개")
-    await expect(page.get_by_text("마감 지남", exact=True)).to_be_visible()
-    await page.get_by_role("searchbox").fill("재귀")
-    await expect(page.locator("#todo-count")).to_have_text("1개")
-    await expect(page.locator("#todo-results")).to_contain_text("함수와 재귀")
-    await page.get_by_role("searchbox").fill("없는 검색어")
-    await page.get_by_role("button", name="전체 할 일 보기").click()
-    await page.get_by_label("24시간 내 마감만 보기").check()
-    await expect(page.locator("#todo-count")).to_have_text("1개")
-    await expect(page.locator("#todo-results")).to_contain_text("자료구조")
-    await page.get_by_label("24시간 내 마감만 보기").uncheck()
+    await page.goto("http://dashboard.test/")
+    await expect(page.get_by_role("heading", name="할 일이 2개 남았어요")).to_be_visible()
+    await expect(page.get_by_role("button", name="강의 1개 모두 재생")).to_be_visible()
     await page.screenshot(path=tmp_path / "desktop.png", full_page=True)
     for width in (1440, 1024, 768, 390, 375, 320):
         await page.set_viewport_size({"width": width, "height": 844})
@@ -94,11 +95,11 @@ async def test_todo_search_deadlines_and_mobile_layout(dashboard, tmp_path):
 async def test_boot_failure_can_retry(dashboard):
     page, _ = dashboard
     await page.route("**/me", lambda route: route.fulfill(status=503, json={"detail": "잠시 후 다시 시도하세요."}))
-    await page.goto("http://dashboard.test/#todos")
+    await page.goto("http://dashboard.test/")
     await expect(page.get_by_role("button", name="다시 시도", exact=True)).to_be_visible()
     await page.unroute("**/me")
     await page.get_by_role("button", name="다시 시도", exact=True).click()
-    await expect(page.locator("#todo-count")).to_have_text("3개")
+    await expect(page.get_by_role("heading", name="할 일이 2개 남았어요")).to_be_visible()
 
 
 async def test_notification_response_does_not_replace_another_view(dashboard):
@@ -111,7 +112,7 @@ async def test_notification_response_does_not_replace_another_view(dashboard):
         await route.fulfill(json=[])
 
     await page.route("**/notifications/channels", delayed)
-    await page.goto("http://dashboard.test/#todos")
+    await page.goto("http://dashboard.test/")
     await page.get_by_role("button", name="알림", exact=True).click()
     await asyncio.wait_for(requested.wait(), timeout=5)
     await page.get_by_role("button", name="과목", exact=True).click()
@@ -123,7 +124,7 @@ async def test_notification_response_does_not_replace_another_view(dashboard):
 
 async def test_login_password_visibility(dashboard, tmp_path):
     page, _ = dashboard
-    await page.goto("http://dashboard.test/#todos")
+    await page.goto("http://dashboard.test/")
     await page.get_by_role("button", name="로그아웃", exact=True).click()
     await page.get_by_label("비밀번호", exact=True).fill("example-password")
     await page.get_by_role("button", name="표시", exact=True).click()
@@ -133,34 +134,27 @@ async def test_login_password_visibility(dashboard, tmp_path):
     await page.screenshot(path=tmp_path / "login.png", full_page=True)
 
 
-async def test_summary_shortcuts_and_browser_history(dashboard):
+async def test_removed_pages_open_home_and_history_works(dashboard):
     page, _ = dashboard
-    await page.goto("http://dashboard.test/#todos")
-    await page.get_by_role("button", name="미수강 영상 1개 보기").click()
-    await expect(page.locator("#todo-count")).to_have_text("1개")
-    await expect(page.locator("#todo-results")).to_contain_text("함수와 재귀")
-    await page.get_by_role("button", name="수강 중인 과목 1개 보기").click()
-    await expect(page.locator(".overview")).to_be_hidden()
+    for old in ("todos", "assignments", "calendar"):  # 예전 즐겨찾기·알림 링크도 깨지지 않는다
+        await page.goto(f"http://dashboard.test/#{old}")
+        await expect(page.get_by_role("heading", name="할 일이 2개 남았어요")).to_be_visible()
+        await expect(page).to_have_url("http://dashboard.test/#dashboard")
+    await expect(page.locator('.side [data-view="todos"], .side [data-view="assignments"], .side [data-view="calendar"]')).to_have_count(0)
+    await page.get_by_role("button", name="과목", exact=True).click()
     await expect(page).to_have_url("http://dashboard.test/#courses")
     await page.go_back()
-    await expect(page.locator("#todo-search")).to_be_visible()
-    await expect(page.locator('[data-f="video"]')).to_have_attribute("aria-pressed", "true")
-    await page.get_by_role("button", name="24시간 내 마감 1개 보기").click()
-    await expect(page.get_by_label("24시간 내 마감만 보기")).to_be_checked()
-    await expect(page.locator("#todo-results")).to_contain_text("자료구조")
+    await expect(page.get_by_role("heading", name="할 일이 2개 남았어요")).to_be_visible()
 
 
-async def test_mobile_menu_calendar_and_long_titles(dashboard, tmp_path):
+async def test_mobile_menu_and_long_titles(dashboard, tmp_path):
     page, data = dashboard
-    title = "긴 강의 제목도 휴대폰에서 끝까지 읽을 수 있어야 합니다 " * 3
-    data["/todos"][0]["title"] = title.strip()
+    title = "긴 강의 제목도 휴대폰에서 화면 밖으로 넘치면 안 됩니다 " * 3
+    data["/playback/batches/preview"]["items"][0]["title"] = title.strip()
     await page.set_viewport_size({"width": 375, "height": 812})
     await page.emulate_media(reduced_motion="reduce")
-    await page.goto("http://dashboard.test/#todos")
-    await expect(page.locator("#calendar-content")).to_be_hidden()
-    await page.get_by_role("button", name="일정 펼치기").click()
-    await expect(page.locator("#calendar-content")).to_be_visible()
-    assert await page.locator(".chip span").first.evaluate("el => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight")
+    await page.goto("http://dashboard.test/")
+    await expect(page.locator(".task-title").first).to_be_visible()
     assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     await page.locator("#menu-toggle").click()
     await expect(page.get_by_role("button", name="계정", exact=True)).to_be_in_viewport()
@@ -180,7 +174,6 @@ async def test_deep_link_and_skip_link_keep_current_page(dashboard):
     await page.keyboard.press("Enter")
     await expect(page.locator("#view")).to_be_focused()
     await expect(page).to_have_url("http://dashboard.test/#courses")
-    await expect(page.locator(".overview")).to_be_hidden()
 
 
 async def test_playback_queue_shows_wait_and_deadline_risk(dashboard):
@@ -219,7 +212,7 @@ async def test_admin_shell_mobile_and_access(dashboard, tmp_path):
         "series": [{"day": (datetime.now(UTC).date() - timedelta(days=6 - i)).isoformat(),
                     "playback_done": 0, "logins": 0, "downloads": 0} for i in range(7)],
     }
-    await page.goto("http://dashboard.test/#todos")
+    await page.goto("http://dashboard.test/")
     await page.locator("#admin-menu").click()
     await expect(page).to_have_url("http://dashboard.test/#admin/overview")
     view = page.locator("#view")
@@ -251,9 +244,10 @@ async def test_lms_links_only_allow_https(dashboard):
     data["/announcements"] = [{"lms_id": 1, "lms_course_id": 1, "course_name": "컴퓨터프로그래밍", "title": "공지",
                                "message": "본문", "url": "javascript:alert(1)", "author": "교수", "posted_at": now,
                                "attachments": [{"name": "첨부", "url": "javascript:alert(2)"}, {"name": "정상", "url": "https://canvas.ssu.ac.kr/f/1"}]}]
-    data["/todos"][0]["url"] = "javascript:alert(3)"
-    data["/assignments"][0]["url"] = "data:text/html,<script>alert(4)</script>"
-    for view in ("announcements", "todos", "assignments", "dashboard"):
+    data["/week"]["assignments"][0]["url"] = "javascript:alert(3)"
+    data["/week"]["later_assignments"] = [{**data["/week"]["assignments"][0], "assignment_id": 9, "title": "다음 과제",
+                                           "url": "data:text/html,<script>alert(4)</script>"}]
+    for view in ("announcements", "dashboard"):
         await page.goto(f"http://dashboard.test/#{view}")
         await page.wait_for_load_state("networkidle")
         hrefs = await page.eval_on_selector_all("a[href]", "els => els.map((a) => a.getAttribute('href'))")
@@ -288,7 +282,7 @@ async def test_playback_history_reveals_item_error_and_retries_loading(dashboard
 
 async def test_privacy_notice_shows_once(dashboard):
     page, _ = dashboard
-    await page.goto("http://dashboard.test/#todos")
+    await page.goto("http://dashboard.test/")
     notice = page.locator("#privacy-notice")
     await expect(notice).to_contain_text("개인정보처리방침")
     await expect(notice.get_by_role("link")).to_have_attribute("href", "/privacy.html")
@@ -301,7 +295,7 @@ async def test_privacy_notice_shows_once(dashboard):
 
 async def test_privacy_notice_shows_again_after_access_change(dashboard):
     page, _ = dashboard
-    await page.goto("http://dashboard.test/#todos")
+    await page.goto("http://dashboard.test/")
     await page.evaluate("localStorage.setItem('privacy-notice-2026-11', '1')")  # 예전 안내를 닫은 사용자
     await page.reload()
     notice = page.locator("#privacy-notice")

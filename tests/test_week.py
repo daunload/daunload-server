@@ -27,9 +27,9 @@ def _video(uid, item, deadline, *, course=1, module_pos=1, item_pos=1, unlock=No
                    duration=600, unlock_at=unlock, active=active)
 
 
-def _assignment(uid, aid, deadline, state="unsubmitted", unlock=None, course=1):
+def _assignment(uid, aid, deadline, state="unsubmitted", unlock=None, course=1, lock=None):
     return AssignmentRow(user_id=uid, lms_course_id=course, course_name=f"과목{course}", assignment_id=aid, title=f"과제{aid}",
-                         kind="assignment", submission_state=state, deadline=deadline, due_at=deadline, unlock_at=unlock,
+                         kind="assignment", submission_state=state, deadline=deadline, due_at=deadline, unlock_at=unlock, lock_at=lock,
                          published=True, assignment_state="published", locked_for_user=False)
 
 
@@ -53,6 +53,8 @@ async def _seed():
             _assignment(1, 25, now - timedelta(minutes=1)),                           # 방금 마감 지남(이번 주에 놓침)
             _assignment(1, 26, None),                                                 # 마감 없음 → 나중에 낼 과제
             _assignment(1, 27, end + timedelta(days=2), state="submitted"),           # 다음 주지만 제출함 → 제외
+            _assignment(1, 28, now - timedelta(days=9), lock=now + timedelta(days=1)),  # 마감 지남, 아직 안 잠김 → 지각 제출
+            _assignment(1, 29, now - timedelta(days=9), lock=now - timedelta(days=1)),  # 이미 잠김 → 낼 수 없음
         ])
         await db.commit()
     return now, start, end
@@ -72,6 +74,7 @@ async def test_week_endpoint(env):
     assert [a["assignment_id"] for a in week["missed"]] == expected_missed
     # 다음 주 이후 마감이거나 마감이 없어도 아직 낼 과제가 있으면 '누워도 됨'이라고 하지 않도록 따로 내려 준다
     assert sorted(a["assignment_id"] for a in week["later_assignments"]) == [23, 26]
+    assert [a["assignment_id"] for a in week["late_assignments"]] == [28]
 
 
 async def test_week_batch_plays_only_this_weeks_videos(env):

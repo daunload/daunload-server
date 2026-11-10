@@ -61,7 +61,7 @@ async def mobile_page():
 
 async def test_error_toast_stays_until_closed_success_expires(page):
     await page.goto("http://dashboard.test/")
-    await expect(page.get_by_role("heading", name="이번 주 할 일이 3개 남았어요")).to_be_visible()
+    await expect(page.get_by_role("heading", name="할 일이 3개 남았어요")).to_be_visible()
     items = page.locator("#toast > *")
     await page.evaluate("toast('연결이 끊겼어요', true); toast('저장했어요')")
     await expect(items).to_have_count(2)
@@ -145,11 +145,12 @@ async def test_bulk_does_not_rerender_after_leaving_videos(dashboard):
     await page.goto("http://dashboard.test/#videos")
     await page.get_by_role("button", name="1주차 전체 내려받기 (2)").click()
     await page.wait_for_function("window.__extensionCalls.filter(x => x === 'start').length === 2")
-    await page.evaluate("location.hash = '#todos'")
-    await expect(page.locator("#todo-count")).to_be_visible()
+    await page.evaluate("location.hash = '#courses'")
+    courses = page.get_by_role("heading", name="과목", exact=True)
+    await expect(courses).to_be_visible()
     await page.evaluate("window.__extensionState = 'complete'")
     await expect(page.locator("#toast")).to_contain_text("2개를 모두 받았어요")
-    await expect(page.locator("#todo-count")).to_be_visible()  # 영상 목록이 할 일 화면을 덮어쓰지 않는다
+    await expect(courses).to_be_visible()  # 영상 목록이 다른 화면을 덮어쓰지 않는다
 
 
 async def test_outdated_extension_uses_toast(dashboard):

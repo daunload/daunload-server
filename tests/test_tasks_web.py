@@ -44,7 +44,7 @@ async def _open(page):
 
 async def test_bar_hidden_without_tasks(page):
     await page.goto("http://dashboard.test/")
-    await expect(page.get_by_role("heading", name="이번 주 할 일이 3개 남았어요")).to_be_visible()
+    await expect(page.get_by_role("heading", name="할 일이 3개 남았어요")).to_be_visible()
     await expect(page.locator("#task-panel")).to_be_hidden()
     await expect(page.locator("body")).not_to_have_class(re.compile(r"\bhas-task-bar\b"))
 
@@ -208,7 +208,7 @@ async def test_failed_batch_within_7_days_links_to_reason(page):
 async def test_old_or_only_cancelled_batches_are_not_failures(page):
     page.data["/playback/batches"] = [_past(31, days=8), _past(32, failed=0, status="cancelled")]
     await page.goto("http://dashboard.test/")
-    await expect(page.get_by_role("heading", name="이번 주 할 일이 3개 남았어요")).to_be_visible()
+    await expect(page.get_by_role("heading", name="할 일이 3개 남았어요")).to_be_visible()
     await expect(page.locator("#task-panel")).to_be_hidden()
 
 
@@ -307,7 +307,7 @@ async def test_bar_does_not_cover_last_row(page):
     await page.set_viewport_size({"width": 375, "height": 812})
     _active(page)
     await page.goto("http://dashboard.test/")
-    last = page.locator("#week-panel .today-links")
+    last = page.locator("#week-panel .task").last
     await expect(last).to_be_visible()
     await page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
     await page.wait_for_function("scrollY > 0")

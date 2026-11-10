@@ -128,7 +128,7 @@ async def test_request_429_shows_rejected_state(stage):
 
 async def test_access_required_mid_session_switches_screen(stage):
     stage.me = me_of("approved")
-    await stage.goto("http://dashboard.test/#todos")
+    await stage.goto("http://dashboard.test/#courses")
     await expect(stage.locator("#app")).to_be_visible()
     # 관리자가 권한을 회수했다: /me는 열려 있고 나머지는 403
     stage.me = me_of("revoked")
@@ -142,7 +142,7 @@ async def test_access_required_mid_session_switches_screen(stage):
 @pytest.mark.parametrize("failure", ["network", "5xx"])
 async def test_me_failure_during_switch_still_shows_access_screen(stage, failure):
     stage.me = me_of("approved")
-    await stage.goto("http://dashboard.test/#todos")
+    await stage.goto("http://dashboard.test/#courses")
     await expect(stage.locator("#app")).to_be_visible()
     stage.handlers[("GET", "/notifications/channels")] = (403, {"detail": {"code": "ACCESS_REQUIRED", "message": "관리자 승인이 필요합니다."}})
     if failure == "5xx":
@@ -157,7 +157,7 @@ async def test_me_failure_during_switch_still_shows_access_screen(stage, failure
 
 async def test_revoked_user_button_in_open_tab_runs_nothing(stage):
     stage.me = me_of("approved")
-    await stage.goto("http://dashboard.test/#todos")
+    await stage.goto("http://dashboard.test/#courses")
     await expect(stage.locator("#app")).to_be_visible()
     stage.me = me_of("revoked")
     stage.handlers[("POST", "/sync")] = (403, {"detail": {"code": "ACCESS_REQUIRED", "message": "관리자 승인이 필요합니다."}})

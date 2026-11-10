@@ -22,7 +22,7 @@ const store = {
 };
 
 const PRIVACY_NOTICE_KEY = "privacy-notice-2026-11-access";
-const VIEW_NAMES = { dashboard: "학습 현황", todos: "할 일", assignments: "미제출 과제", calendar: "캘린더", courses: "과목", announcements: "공지", playback: "강의 재생", videos: "내려받기·텍스트 변환", notifications: "알림", account: "계정", admin: "사용자 관리" };
+const VIEW_NAMES = { dashboard: "학습 현황", courses: "과목", announcements: "공지", playback: "강의 재생", videos: "내려받기·텍스트 변환", notifications: "알림", account: "계정", admin: "사용자 관리" };
 /** 주소의 해시를 화면 이름과 하위 경로로 나눈다. `#admin/users/2020%201234` → { view: "admin", path: ["users", "2020 1234"] } */
 function parseHash(hash) {
   const parts = String(hash || "").replace(/^#/, "").split("/").filter(Boolean).map((part) => {
@@ -38,10 +38,9 @@ const state = {
   view: Object.hasOwn(VIEW_NAMES, initialView.view) ? initialView.view : "dashboard",
   adminPath: initialView.view === "admin" && initialView.path.length ? initialView.path : ["overview"],
   me: null, cred: null, todos: [], courses: [], announcements: null,
-  batches: [], active: null, plan: null, todoFilter: "all", noticeCourse: null,
+  batches: [], active: null, plan: null, noticeCourse: null,
   videoCourse: null, videoList: null, savedVideos: null,
   videoTab: "videos", materialList: null, notDownloadedOnly: false, bulk: null,
-  assignments: null, assignmentFilter: "unsubmitted", todoSearch: "", todoDeadline: "all",
 };
 
 function esc(s) {
@@ -77,15 +76,6 @@ function fmtDuration(sec) {
 /** 마감 없는 할 일(영상)은 어떤 시각보다 뒤로 보낸다. new Date(null)은 1970년이 되므로 직접 쓰지 않는다. */
 const dueTime = (t) => t.deadline ? new Date(t.deadline).getTime() : Infinity;
 const dueText = (iso) => iso ? `마감 ${fmtDate(new Date(iso))}` : "마감 없음";
-
-function timeLeft(deadline) {
-  const ms = deadline - Date.now();
-  if (ms <= 0) return { text: "마감 지남", cls: "urgent" };
-  const cls = ms < 3 * 3600e3 ? "urgent" : ms < DAY ? "soon" : "";
-  const h = Math.floor(ms / 3600e3);
-  const text = h >= 24 ? `${Math.floor(h / 24)}일 ${h % 24}시간 남음` : h >= 1 ? `${h}시간 ${Math.floor((ms % 3600e3) / 60e3)}분 남음` : `${Math.max(1, Math.floor(ms / 60e3))}분 남음`;
-  return { text, cls };
-}
 
 class ApiError extends Error {
   constructor(status, message, code) { super(message); this.status = status; this.code = code; }
@@ -216,7 +206,7 @@ function logout() {
     dashboardPlan: null, dashboardError: null, dashboardLoading: false, playbackStarting: false,
     batches: [], active: null, plan: null, planForm: null, planQuery: null,
     videoCourse: null, videoList: null, savedVideos: null, materialList: null, bulk: null,
-  assignments: null, assignmentFilter: "unsubmitted", noticeCourse: null, todoSearch: "", todoFilter: "all", todoDeadline: "all" });
+  noticeCourse: null });
   closeConfirmDialog();
   $("#transcript-dialog")?.close();
   clearToasts();
@@ -290,25 +280,7 @@ $("#privacy-notice-close").addEventListener("click", () => {
 
 function renderAll() {
   renderSync();
-  renderOverview();
-  renderRail();
   renderView();
-}
-
-function renderOverview() {
-  const now = new Date();
-  $("#today-label").textContent = `${now.getMonth() + 1}월 ${now.getDate()}일 ${WEEKDAY[now.getDay()]}요일`;
-  const soon = state.todos.filter((t) => { const ms = dueTime(t) - now; return ms > 0 && ms <= DAY; }).length;
-  const videos = state.todos.filter((t) => t.kind === "video");
-  const stats = [
-    ["24시간 내 마감", soon, "개", soon ? "먼저 확인해 주세요" : "급한 마감 없이 여유로워요", "urgent"],
-    ["남은 할 일", state.todos.length, "개", "영상 · 과제 · 퀴즈", ""],
-    ["미수강 영상", videos.length, "개", `총 ${fmtDuration(videos.reduce((sum, t) => sum + (t.duration || 0), 0))} 분량`, ""],
-    ["수강 중인 과목", state.courses.length, "개", "과목별 출석을 확인하세요", ""],
-  ];
-  if (!state.cred?.last_synced_at) stats.forEach((stat) => { stat[1] = "—"; stat[3] = "첫 동기화를 기다리고 있어요"; });
-  const shortcuts = ["soon", "all", "video", "courses"];
-  $("#stats").innerHTML = stats.map(([label, value, unit, hint, cls], i) => `<button class="stat ${cls}" data-shortcut="${shortcuts[i]}" aria-label="${label} ${value}${unit} 보기"><span class="stat-label">${label}<span aria-hidden="true">›</span></span><span class="stat-value"><strong>${value}</strong><span>${unit}</span></span><small>${hint}</small></button>`).join("");
 }
 
 /* ---------------- 상단: 동기화 ---------------- */
@@ -338,7 +310,6 @@ $("#sync-btn").addEventListener("click", async () => {
     }
     await loadCore();
     state.announcements = null;
-    state.assignments = null;
     renderAll();
     const updated = state.cred?.last_synced_at && state.cred.last_synced_at !== before;
     toast(state.cred?.status !== "ok" ? "동기화하지 못했습니다. 계정 상태를 확인하세요."
@@ -350,91 +321,6 @@ $("#sync-btn").addEventListener("click", async () => {
     btn.textContent = "LMS 동기화";
   }
 });
-
-/* ---------------- 마감 레일 ---------------- */
-
-/** 진행 중인 묶음(없으면 재생 계획)의 항목별 예상 종료 시각과 전체 구간 */
-function playbackTimeline() {
-  if (state.active) {
-    const now = Date.now();
-    let cursor = now;
-    const ends = new Map();
-    for (const j of state.active.jobs) {
-      if (j.status !== "queued" && j.status !== "playing") continue;
-      const remaining = j.status === "playing" ? Math.max(0, j.duration - j.progress_seconds) : j.duration;
-      cursor = j.expected_end ? new Date(j.expected_end).getTime() : cursor + (remaining + GAP_SECONDS) * 1000;
-      ends.set(j.module_item_id, cursor);
-    }
-    return { kind: "run", start: now, end: cursor, ends };
-  }
-  if (state.plan && state.plan.items.length) {
-    const ends = new Map(state.plan.items.map((i) => [i.module_item_id, new Date(i.expected_end).getTime()]));
-    return {
-      kind: "plan",
-      start: new Date(state.plan.items[0].expected_start).getTime(),
-      end: new Date(state.plan.expected_end).getTime(),
-      ends,
-    };
-  }
-  return null;
-}
-
-function renderRail() {
-  const rail = $("#rail");
-  const today = startOfDay(new Date());
-  const timeline = playbackTimeline();
-  const days = [...Array(7)].map((_, i) => new Date(today.getTime() + i * DAY));
-  const end = days[6].getTime() + DAY;
-
-  const cols = days.map((d, i) => {
-    const items = state.todos
-      .filter((t) => t.deadline)
-      .map((t) => ({ ...t, at: new Date(t.deadline) }))
-      .filter((t) => t.at >= d && t.at < new Date(d.getTime() + DAY))
-      .sort((a, b) => a.at - b.at || a.title.localeCompare(b.title, "ko"));
-    const chips = items.map((t) => {
-      const expected = timeline?.ends.get(t.lms_item_id);
-      const risk = t.kind === "video" && expected && expected > t.at.getTime();
-      const soon = t.at - Date.now() < DAY;
-      const cls = `chip ${t.kind}${risk ? " risk" : soon ? " soon" : ""}`;
-      const tip = `${KIND[t.kind]} ${t.title} (${t.course_name})${risk ? " — 재생이 마감 전에 끝나지 않을 수 있음" : ""}`;
-      const url = safeUrl(t.url);
-      const content = `<time>${fmtTime(t.at)} · ${KIND[t.kind] || "할 일"}${url ? icon("external") : ""}</time><span>${esc(t.title)}</span><small>${esc(t.course_name)}</small>${risk ? '<small class="risk-label">예상 재생 마감 초과</small>' : ""}`;
-      return url ? `<a class="${cls}" href="${esc(url)}" target="_blank" rel="noopener" aria-label="${esc(tip)} (새 탭)">${content}</a>` : `<div class="${cls}">${content}</div>`;
-    }).join("");
-    const weekend = d.getDay() === 0 || d.getDay() === 6;
-    return `<div class="day${i === 0 ? " today" : ""}${weekend ? " weekend" : ""}">
-      <div class="day-label"><span>${i === 0 ? "오늘" : WEEKDAY[d.getDay()]}</span><b>${d.getDate()}</b></div>
-      <div class="chips">${chips || '<span class="day-empty">마감 일정 없음</span>'}</div></div>`;
-  }).join("");
-
-  let band = "";
-  let note = "";
-  if (timeline) {
-    const span = end - today.getTime();
-    const left = Math.max(0, (timeline.start - today.getTime()) / span) * 100;
-    const right = Math.min(1, (timeline.end - today.getTime()) / span) * 100;
-    band = `<div class="band${timeline.kind === "plan" ? " plan" : ""}" style="left:${left}%;width:${Math.max(0.5, right - left)}%"></div>`;
-    const risky = state.todos.filter((t) => t.kind === "video" && timeline.ends.get(t.lms_item_id) > dueTime(t)).length;
-    const finish = fmtDate(new Date(timeline.end));
-    if (timeline.kind === "run") {
-      const a = state.active;
-      note = `강의 재생 중: ${a.done_count + a.skipped_count}/${a.total}개 끝남, ${finish}쯤 모두 끝납니다.`;
-    } else {
-      note = `재생 계획대로라면 ${finish}쯤 끝납니다.`;
-    }
-    if (risky) note += ` 영상 ${risky}개는 마감 전에 끝나지 않습니다.`;
-  }
-  rail.innerHTML = `<div class="rail-inner">${cols}${band}</div>`;
-  let noteEl = $(".band-note");
-  if (!noteEl) {
-    noteEl = document.createElement("p");
-    noteEl.className = "band-note";
-    rail.after(noteEl);
-  }
-  noteEl.textContent = note || (state.todos.some((t) => dueTime(t) >= today.getTime() && dueTime(t) < end) ? "" : "앞으로 7일 안에 마감되는 할 일이 없습니다.");
-  noteEl.classList.toggle("risk", /마감 전에 끝나지 않습니다/.test(note));
-}
 
 /* ---------------- 화면 전환 ---------------- */
 
@@ -450,12 +336,12 @@ function viewHash() {
 /** target은 화면 이름이나 해시(`admin/users`). focus가 false면 포커스를 옮기지 않는다(관리자 탭 이동). */
 function navigate(target, push = true, { focus = true } = {}) {
   const { view, path } = parseHash(target);
-  state.view = Object.hasOwn(VIEW_NAMES, view) ? view : "todos";
+  state.view = Object.hasOwn(VIEW_NAMES, view) ? view : "dashboard";  // 없어진 화면(#todos 등)은 홈으로
   if (state.view === "admin") state.adminPath = path.length ? path : ["overview"];
   store.set("view", state.view);
   if (state.view === "videos") state.savedVideos = null;  // 동기화로 새로 저장된 주소 반영
   if (push && location.hash !== viewHash()) history.pushState(null, "", viewHash());
-  else if (!push && state.view === "admin" && location.hash !== viewHash()) history.replaceState(null, "", viewHash());  // #admin → #admin/overview
+  else if (!push && location.hash !== viewHash()) history.replaceState(null, "", viewHash());  // #admin → #admin/overview, 없어진 #todos → #dashboard
   closeMenu();
   renderView();
   if (!focus) return;
@@ -463,7 +349,7 @@ function navigate(target, push = true, { focus = true } = {}) {
   $("#view").scrollIntoView({ block: "start" });
 }
 window.addEventListener("popstate", () => {
-  if (!$("#app").hidden) navigate(location.hash || "todos", false);
+  if (!$("#app").hidden) navigate(location.hash || "dashboard", false);
 });
 $("#menu-toggle").addEventListener("click", () => {
   const open = $(".navigation").classList.toggle("expanded");
@@ -480,40 +366,18 @@ $(".skip-link").addEventListener("click", (e) => {
   target.scrollIntoView({ block: "start" });
 });
 $(".home-link").addEventListener("click", (e) => { e.preventDefault(); navigate("dashboard"); });
-$("#stats").addEventListener("click", (e) => {
-  const key = e.target.closest("[data-shortcut]")?.dataset.shortcut;
-  if (!key) return;
-  if (state.view === "dashboard") return;
-  if (key === "courses") return navigate("courses");
-  state.todoSearch = "";
-  state.todoFilter = key === "video" ? "video" : "all";
-  state.todoDeadline = key === "soon" ? "soon" : "all";
-  navigate("todos");
-});
-function setCalendar(open) {
-  $("#calendar-content").hidden = !open;
-  $("#calendar-toggle").setAttribute("aria-expanded", String(open));
-  $("#calendar-toggle").textContent = open ? "일정 접기" : "일정 펼치기";
-}
-setCalendar(false);
-$("#calendar-toggle").addEventListener("click", () => setCalendar($("#calendar-content").hidden));
-
 function renderView() {
-  $(".overview").hidden = state.view !== "todos";
   $(".workspace").classList.toggle("dashboard-workspace", state.view === "dashboard");
   $(".workspace").classList.toggle("admin-workspace", state.view === "admin");
-  $("#stats").hidden = state.view === "dashboard" || state.view === "admin";
-  $(".rail-wrap").hidden = !["todos", "playback"].includes(state.view);
-  $("#current-view").textContent = VIEW_NAMES[state.view] || "할 일";
-  document.title = `${VIEW_NAMES[state.view] || "할 일"} · 아유 하기싫어`;
+  $("#current-view").textContent = VIEW_NAMES[state.view] || "학습 현황";
+  document.title = `${VIEW_NAMES[state.view] || "학습 현황"} · 아유 하기싫어`;
   document.querySelectorAll(".side button").forEach((b) => {
     const selected = b.dataset.view === state.view;
     b.classList.toggle("on", selected);
     if (selected) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
   });
-  const views = { dashboard: viewDashboard, todos: viewTodos, assignments: viewAssignments, calendar: () => viewCalendar(), // calendar.js에 있다. 불러오지 못해도 다른 화면은 동작하도록 실행할 때 찾는다
-    courses: viewCourses, announcements: viewAnnouncements, playback: viewPlayback, videos: viewVideos, notifications: viewNotifications, account: viewAccount, admin: () => viewAdmin(state.adminPath) };  // viewAdmin은 admin.js에 있다
-  (views[state.view] || viewTodos)();
+  const views = { dashboard: viewDashboard, courses: viewCourses, announcements: viewAnnouncements, playback: viewPlayback, videos: viewVideos, notifications: viewNotifications, account: viewAccount, admin: () => viewAdmin(state.adminPath) };  // viewAdmin은 admin.js에 있다
+  (views[state.view] || viewDashboard)();
 }
 
 function viewError(message, retry) {
@@ -591,9 +455,17 @@ function drawDashboardPlayback() {
   if (typeof drawWeek === "function") drawWeek();
 }
 
+/* 학칙 확인 창은 처음 한 번만 띄운다. 동의한 뒤에는 버튼 한 번으로 바로 재생하고, 경고는 버튼 아래 글로 계속 보인다. */
+const PLAYBACK_CONSENT_KEY = "playback-consent-v1";
+const playbackConsented = () => store.get(PLAYBACK_CONSENT_KEY) === "1";
+
 async function confirmDashboardPlayback() {
   if (state.playbackStarting || state.active || !state.dashboardPlan?.items.length) return;
-  if (await confirmPlayback(state.dashboardPlan, "전체")) await startDashboardPlayback();
+  if (!playbackConsented()) {
+    if (!(await confirmPlayback(state.dashboardPlan, "전체"))) return;
+    store.set(PLAYBACK_CONSENT_KEY, "1");
+  }
+  await startDashboardPlayback();
 }
 
 async function startDashboardPlayback() {
@@ -627,137 +499,8 @@ async function startDashboardPlayback() {
   }
 }
 
-/* ---------------- 할 일 ---------------- */
-
-function viewTodos() {
-  if (needCred()) return;
-  const f = state.todoFilter;
-  const counts = (k) => state.todos.filter((t) => k === "all" || t.kind === k).length;
-  const filters = ["all", "video", "assignment", "quiz"].map((k) =>
-    `<button data-f="${k}" aria-pressed="${f === k}" class="${f === k ? "on" : ""}">${k === "all" ? "전체" : KIND[k]} ${counts(k)}</button>`).join("");
-  $("#view").innerHTML = `
-    <div class="view-head"><h2>나의 할 일 <span class="result-count" id="todo-count"></span></h2><span class="muted small-text">마감이 가까운 순서예요</span></div>
-    <div class="todo-toolbar"><label class="search-field"><span>할 일 검색</span><input id="todo-search" type="search" placeholder="할 일 또는 과목 검색" value="${esc(state.todoSearch)}"></label>
-      <div class="filters" aria-label="할 일 종류">${filters}</div></div>
-    <div class="row"><label class="check"><input type="checkbox" id="todo-soon" ${state.todoDeadline === "soon" ? "checked" : ""}><span>24시간 내 마감만 보기</span></label></div>
-    <span class="sr-only" id="todo-result-status" role="status" aria-atomic="true"></span><div class="panel" id="todo-results"></div>`;
-  renderTodoResults();
-  $("#view .filters").addEventListener("click", (e) => {
-    const k = e.target.closest("button")?.dataset.f;
-    if (k) { state.todoFilter = k; viewTodos(); $(`#view [data-f="${k}"]`).focus(); }
-  });
-  $("#todo-search").addEventListener("input", (e) => { state.todoSearch = e.target.value; renderTodoResults(); });
-  $("#todo-soon").addEventListener("change", (e) => { state.todoDeadline = e.target.checked ? "soon" : "all"; renderTodoResults(); });
-}
-
-function renderTodoResults() {
-  const query = state.todoSearch.trim().toLocaleLowerCase();
-  const todos = state.todos.filter((t) => {
-    const ms = dueTime(t) - Date.now();
-    return (state.todoFilter === "all" || t.kind === state.todoFilter)
-      && (!query || `${t.title} ${t.course_name}`.toLocaleLowerCase().includes(query))
-      && (state.todoDeadline !== "soon" || (ms > 0 && ms <= DAY));
-  }).sort((a, b) => (dueTime(a) === dueTime(b) ? 0 : dueTime(a) - dueTime(b)) || a.title.localeCompare(b.title, "ko"));
-  const groups = new Map();
-  for (const t of todos) {
-    const d = t.deadline ? new Date(t.deadline) : null;
-    const key = d ? startOfDay(d).getTime() : "none";
-    if (!groups.has(key)) groups.set(key, { label: d ? dayName(d) : "마감 없음", items: [] });
-    groups.get(key).items.push(t);
-  }
-  $("#todo-count").textContent = `${todos.length}개`;
-  $("#todo-result-status").textContent = `조건에 맞는 할 일 ${todos.length}개`;
-  const filtered = query || state.todoFilter !== "all" || state.todoDeadline !== "all";
-  $("#todo-results").innerHTML = groups.size
-    ? [...groups.values()].map((g) => `<div class="group-label">${esc(g.label)} · ${g.items.length}개</div><ul class="list">${g.items.map(todoItem).join("")}</ul>`).join("")
-    : `<div class="empty"><strong>${filtered ? "조건에 맞는 할 일이 없어요" : "할 거 없음. 누워도 됨"}</strong><p>${filtered ? "검색어나 필터를 바꿔 다른 할 일을 확인해 보세요." : state.cred?.last_synced_at ? "새로운 할 일이 생기면 이곳에 모아 보여드릴게요." : "첫 동기화가 끝나면 과목과 할 일이 표시됩니다. 잠시 후 ‘LMS 동기화’를 눌러 주세요."}</p>${filtered ? '<button class="btn" id="reset-todos">전체 할 일 보기</button>' : ""}</div>`;
-  $("#reset-todos")?.addEventListener("click", () => { state.todoSearch = ""; state.todoFilter = "all"; state.todoDeadline = "all"; viewTodos(); $("#todo-search").focus(); });
-}
-
-function todoItem(t) {
-  const left = t.deadline ? timeLeft(new Date(t.deadline)) : { text: "마감 없음", cls: "" };
-  const where = t.kind === "video" ? [t.module_title, t.duration && fmtDuration(t.duration)].filter(Boolean).join(" · ") : "";
-  const url = safeUrl(t.url);
-  const title = url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(t.title)} <span class="todo-link" aria-label="새 탭에서 열기">${icon("external")}</span></a>` : esc(t.title);
-  return `<li><div class="todo-title-row">
-    <span class="title"><span class="kind ${esc(t.kind)}">${KIND[t.kind] || "할 일"}</span>${title}</span>
-    <span class="left ${left.cls}">${left.text}</span></div>
-    <span class="meta row"><span>${esc(t.course_name)}</span>${where ? `<span>${esc(where)}</span>` : ""}${t.deadline ? `<span>${dueText(t.deadline)}</span>` : ""}</span>
-  </li>`;
-}
-
 function safeUrl(value) {
   try { const url = new URL(value); return ["http:", "https:"].includes(url.protocol) ? url.href : null; } catch { return null; }
-}
-
-/* ---------------- 미제출 과제 ---------------- */
-
-const ASSIGNMENT_STATUS = {
-  open: "제출 가능", locked: "잠김", overdue: "마감 지남", upcoming: "열리기 전", no_due: "마감 없음",
-};
-
-function daysAgo(d) {
-  const h = Math.floor((Date.now() - d) / 3600e3);
-  return h >= 24 ? `${Math.floor(h / 24)}일 지남` : `${Math.max(1, h)}시간 지남`;
-}
-
-async function viewAssignments() {
-  if (needCred()) return;
-  if (!state.assignments) {
-    $("#view").innerHTML = `<div class="view-head"><h1>미제출 과제</h1></div><div class="panel empty"><p>불러오는 중… 나도 하기 싫어…</p></div>`;
-    try { state.assignments = await api("/assignments"); } catch (err) { toast(err.message, true); return; }
-    if (state.view !== "assignments") return;
-  }
-  const all = state.assignments;
-  const f = state.assignmentFilter;
-  const count = (k) => all.filter((a) => k === "unsubmitted" || a.status === k || (k === "open" && a.status === "locked")).length;
-  const filters = ["unsubmitted", "open", "overdue", "upcoming", "no_due"]
-    .filter((k) => k === "unsubmitted" || count(k))
-    .map((k) => `<button data-f="${k}" class="${f === k ? "on" : ""}">${k === "unsubmitted" ? "전체" : ASSIGNMENT_STATUS[k]} ${count(k)}</button>`).join("");
-  const list = all.filter((a) => f === "unsubmitted" || a.status === f || (f === "open" && a.status === "locked"));
-
-  const groups = new Map();
-  for (const a of list) {
-    const g = a.status === "locked" ? "open" : a.status;
-    if (!groups.has(g)) groups.set(g, []);
-    groups.get(g).push(a);
-  }
-  const body = groups.size
-    ? [...groups.entries()].map(([g, items]) => `<div class="group-label">${ASSIGNMENT_STATUS[g]} ${items.length}</div>
-        <ul class="list">${items.map(assignmentItem).join("")}</ul>`).join("")
-    : `<div class="empty"><p>${f === "unsubmitted" ? "미제출 과제가 없습니다." : "해당하는 과제가 없습니다."}</p></div>`;
-
-  $("#view").innerHTML = `
-    <div class="view-head"><h1>미제출 과제</h1><div class="filters">${filters}</div></div>
-    <div class="panel">${body}</div>
-    <p class="muted small-text">마지막 동기화 기준입니다. 방금 제출했다면 ‘LMS 동기화’를 눌러 주세요. 제출 여부를 확인할 수 없는 과제는 넣지 않았습니다.</p>`;
-  $("#view .filters").addEventListener("click", (e) => {
-    const k = e.target.closest("button")?.dataset.f;
-    if (k) { state.assignmentFilter = k; viewAssignments(); }
-  });
-}
-
-function assignmentItem(a) {
-  const kind = a.kind === "quiz" ? "quiz" : "assignment";
-  const url = safeUrl(a.url);
-  const title = url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(a.title)}</a>` : esc(a.title);
-  const meta = [`<span>${esc(a.course_name)}</span>`];
-  if (a.group_name) meta.push(`<span>${esc(a.group_name)}</span>`);
-  const deadline = a.deadline && new Date(a.deadline);
-  if (a.status === "open" || a.status === "locked") {
-    const left = timeLeft(deadline);
-    meta.push(`<span>마감 ${fmtDate(deadline)}</span><span class="left ${left.cls}">${left.text}</span>`);
-    if (a.status === "locked") meta.push(`<span>LMS에서 잠겨 있음</span>`);
-  } else if (a.status === "overdue") {
-    meta.push(`<span>마감 ${fmtDate(deadline)}</span><span class="left urgent">${daysAgo(deadline)}</span>`);
-    const lock = a.lock_at && new Date(a.lock_at);
-    if (lock && lock > Date.now()) meta.push(`<span>LMS 잠금 ${fmtDate(lock)} (그전까지 지각 제출이 열려 있을 수 있음)</span>`);
-  } else if (a.status === "upcoming") {
-    meta.push(`<span>${a.unlock_at ? `${fmtDate(new Date(a.unlock_at))}에 열림` : ""}</span>${deadline ? `<span>마감 ${fmtDate(deadline)}</span>` : ""}`);
-  }
-  if (a.points_possible) meta.push(`<span>${a.points_possible}점</span>`);
-  return `<li><span class="title"><span class="kind ${kind}">${KIND[kind]}</span>${title}</span>
-    <span class="meta row">${meta.join("")}</span></li>`;
 }
 
 /* ---------------- 과목 ---------------- */
@@ -904,12 +647,11 @@ function bindPlanForm() {
     try {
       state.plan = await api(`/playback/batches/preview?${q}`);
       state.planQuery = Object.fromEntries(q);
-      renderRail();
       viewPlayback();
     } catch (err) { toast(err.message, true); }
   });
   $("#start-batch")?.addEventListener("click", startBatch);
-  $("#clear-plan")?.addEventListener("click", () => { state.plan = null; renderRail(); viewPlayback(); });
+  $("#clear-plan")?.addEventListener("click", () => { state.plan = null; viewPlayback(); });
 }
 
 function planHtml(plan) {
@@ -941,7 +683,6 @@ async function startBatch() {
     state.batches = await api("/playback/batches?limit=10");
     toast(`영상 ${batch.total}개 재생을 시작했습니다`);
     startPolling();
-    renderRail();
     viewPlayback();
   } catch (err) { toast(err.message, true); }
 }
@@ -1009,8 +750,21 @@ function playbackQueueHtml(b, jobs, lateIds) {
   </section>`;
 }
 
+/** 진행 중인 묶음의 강의별 예상 종료 시각. 마감 전에 끝나지 않을 강의를 표시하는 데 쓴다. */
+function playbackEnds(b) {
+  let cursor = Date.now();
+  const ends = new Map();
+  for (const j of b.jobs || []) {
+    if (j.status !== "queued" && j.status !== "playing") continue;
+    const remaining = j.status === "playing" ? Math.max(0, j.duration - j.progress_seconds) : j.duration;
+    cursor = j.expected_end ? new Date(j.expected_end).getTime() : cursor + (remaining + GAP_SECONDS) * 1000;
+    ends.set(j.module_item_id, cursor);
+  }
+  return ends;
+}
+
 function activeBatchHtml(b) {
-  const ends = playbackTimeline()?.ends || new Map();
+  const ends = playbackEnds(b);
   const jobs = [...(b.jobs || [])].sort((x, y) => x.position - y.position);
   const lateIds = new Set(jobs.filter((j) => ends.get(j.module_item_id) > dueTime(j)).map((j) => j.module_item_id));
   return playbackHeroHtml(b, jobs, lateIds) + playbackQueueHtml(b, jobs, lateIds);
@@ -1086,7 +840,6 @@ async function loadPlaybackFailure(details) {
 
 let pollTimer = null;
 function redrawPlayback() {
-  renderRail();
   if (state.view === "playback") viewPlayback();
   if (state.view === "dashboard" && typeof drawWeek === "function") drawWeek();
   renderTaskPanel();
@@ -1592,7 +1345,7 @@ function viewAccount() {
 
 /* ---------------- 시작 ---------------- */
 
-setInterval(() => { if (!$("#app").hidden && !document.activeElement.closest("#stats, #rail, #todo-results")) { renderOverview(); renderRail(); if (state.view === "todos" && $("#todo-results")) renderTodoResults(); if (state.view === "dashboard" && typeof drawWeek === "function") drawWeek(); } }, 60000); // 남은 시간·오늘 표시 갱신
+setInterval(() => { if (!$("#app").hidden && state.view === "dashboard" && !document.activeElement.closest("#week-panel") && typeof drawWeek === "function") drawWeek(); }, 60000); // 오늘 날짜·마감 표시 갱신
 // 모든 스크립트가 올라온 뒤에 시작한다: /me가 빨리 답해도 access.js 같은 뒤쪽 스크립트의 함수가 있어야 한다
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
 else boot();
