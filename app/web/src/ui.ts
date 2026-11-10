@@ -4,7 +4,7 @@ import { fmtDuration, fmtTime } from "./core";
 import type { Plan } from "./types";
 import { confirmDialog } from "./ui/confirm";
 
-export { icon, iconOnly, Icon } from "./ui/icons";
+export { icon, iconOnly, Icon, IconOnly } from "./ui/icons";
 export { clearToasts, mountToasts, toast } from "./ui/toast";
 export { closeConfirmDialog, confirmDialog } from "./ui/confirm";
 export type { ConfirmOptions } from "./ui/confirm";

@@ -39,3 +39,8 @@ export function Icon({ name }: { name: string }) {
       dangerouslySetInnerHTML={{ __html: paths }} />
   );
 }
+
+/** 글자 없는 아이콘 버튼의 내용(컴포넌트판 iconOnly). */
+export function IconOnly({ name, label }: { name: string; label: string }) {
+  return <><Icon name={name} /><span class="sr-only">{label}</span></>;
+}

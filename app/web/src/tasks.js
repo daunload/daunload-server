@@ -1,7 +1,8 @@
 import { esc, fmtDate, fmtDuration, state, store } from "./core";
 import { stopBulkDownload } from "./downloads";
 import { cancelTranscription, enqueueTranscription, tx } from "./transcribe";
-import { navigate, runBulkDownload } from "./app";
+import { navigate } from "./app";
+import { runBulkDownload } from "./screens/videos";
 import { cancelActivePlayback } from "./screens/playback";
 
 /* ---------------- 하단 진행 패널 ----------------
