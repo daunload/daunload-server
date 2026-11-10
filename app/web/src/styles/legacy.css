@@ -241,29 +241,7 @@ progress::-moz-progress-bar { background: var(--blue); }
 
 /* ---------- 첫 화면: 이번 주 할 일 (week.js) ---------- */
 .dashboard-workspace { max-width: 600px; margin-inline: auto; padding-top: 32px; }
-.today { display: grid; gap: 6px; }
-.today-date { font-size: var(--text-sm); color: var(--ink-3); }
-.today h1 { font-size: 24px; line-height: 1.35; }
-.today-sub { font-size: var(--text-sm); color: var(--ink-3); }
-.task-list { list-style: none; margin: 18px 0 0; padding: 4px 0; background: var(--surface); border-radius: var(--r-card); }
-.task { display: flex; align-items: center; gap: 12px; padding: 14px 20px; }
-.task + .task { box-shadow: inset 0 1px 0 var(--fill); }
-.task-main { flex: 1; min-width: 0; }
-.task-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.task-sub { font-size: var(--text-sm); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.task-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
-.task-due { font-size: var(--text-sm); color: var(--ink-2); }
-.task-state { font-size: var(--text-sm); font-weight: 600; color: var(--ink-3); }
-.task-state.on { color: var(--blue); }
-.task-state.done { color: var(--green); }
-.task-state.bad { color: var(--red); }
-.cta { margin-top: 16px; display: grid; gap: 8px; }
-.cta:empty { display: none; }
 .btn.block { width: 100%; min-height: 54px; font-size: var(--text-md); border-radius: 14px; }
-.cta-note { text-align: center; font-size: var(--text-sm); color: var(--ink-3); }
-.cta-note.warning-text { color: var(--red); font-weight: 600; }
-.task-due.late { color: var(--red); font-weight: 600; }
-.cta-progress { display: grid; gap: 10px; padding: 20px; background: var(--surface); border-radius: var(--r-card); }
 
 /* ---------- 캘린더 (calendar.js) ---------- */
 
@@ -344,8 +322,6 @@ i.done { background: var(--green); }
   .panel-title { padding-inline: 16px; }
   .thumb { display: none; }
   .panel-body { padding: 16px; }
-  .today h1 { font-size: var(--text-xl); }
-  .task { padding: 14px 16px; }
   .course { padding: 14px 16px; }
   .group-label { padding-inline: 16px; }
   .steps li { grid-template-columns: 1.4em minmax(0, 1fr) auto; gap: 8px; }
@@ -393,7 +369,7 @@ progress, progress::-webkit-progress-bar { height: 10px; background: var(--fill)
 progress { border: 2px solid var(--ink); border-radius: 6px; height: 12px; }
 
 /* 자막 상자: 이 서비스에서 가장 눈에 띄는 요소 */
-.today h1, .view-head h1, .auth h1, .startup h1 {
+.view-head h1, .auth h1, .startup h1 {  /* 옮긴 화면은 Tailwind의 caption 유틸리티를 쓴다(app.css) */
   width: fit-content; max-width: 100%; padding: 9px 16px 8px;
   font: 400 clamp(20px, 4.5vw, 26px)/1.3 var(--display); letter-spacing: 0; word-break: keep-all;
   background: var(--surface); border: 2.5px solid var(--ink); border-radius: 12px;
@@ -416,9 +392,6 @@ progress { border: 2px solid var(--ink); border-radius: 6px; height: 12px; }
 .auth-caption { position: absolute; left: 50%; bottom: 18px; translate: -50% 0; width: max-content; max-width: 92%; padding: 9px 18px 8px; font: 400 clamp(19px, 2.4vw, 30px)/1.3 var(--display); text-align: center; word-break: keep-all; background: var(--surface); border: 2.5px solid var(--ink); border-radius: 12px; box-shadow: inset 0 0 0 2px var(--surface), inset 0 0 0 4px var(--caption); }
 .auth-box { align-self: center; justify-self: center; width: min(400px, calc(100% - 32px)); margin: 24px 16px; }
 .startup-photo { display: block; width: min(300px, 100%); height: auto; border: 3px solid var(--ink); border-radius: 14px; box-shadow: 6px 6px 0 var(--ink); }
-.today-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
-.today-title { display: grid; gap: 6px; min-width: 0; }
-.today-photo { flex-shrink: 0; width: 128px; height: 128px; object-fit: cover; border: 2px solid var(--ink); border-radius: 10px; }
 .auth h1 { margin-bottom: 12px; }
 .brand-mark { display: block; width: 28px; height: 28px; background: none; border-radius: 0; }
 .brand { font: 400 var(--text-lg)/1.2 var(--display); letter-spacing: 0; }
@@ -430,36 +403,12 @@ progress { border: 2px solid var(--ink); border-radius: 6px; height: 12px; }
 .side button.on .icon { color: var(--ink); }
 .nav-label, .icon { color: var(--ink-2); }
 
-.panel, .task-list, .cta-progress, .notice-inline, .transcript-dialog {
+.panel, .notice-inline, .transcript-dialog {
   border: 2px solid var(--ink);
 }
-.task-list { overflow: hidden; padding: 0; }
-.task + .task, .list > li + li, .course + .course, .steps li + li { box-shadow: inset 0 1px 0 var(--line); }
-.task:first-child { background: var(--pink-soft); }
-.task:first-child .task-due { color: var(--ink); font-weight: 700; }
+.list > li + li, .course + .course, .steps li + li { box-shadow: inset 0 1px 0 var(--line); }
 
 /* 첫 화면: 같은 과목의 강의는 한 줄로 묶고 눌러야 펼친다. 강의가 많아도 화면 한 장 안에 들어오게 한다. */
-.task-group { display: block; padding: 0; }
-.task-group:first-child { background: none; }
-.task-group > details > summary {
-  display: flex; align-items: center; gap: 12px; min-height: var(--touch); padding: 14px 20px;
-  list-style: none; cursor: pointer; transition: background-color .15s;
-}
-.task-group:first-child > details > summary { background: var(--pink-soft); }
-.task-group > details > summary::-webkit-details-marker { display: none; }
-.task-group > details > summary:hover { background: var(--fill-hover); }
-.task-group > details > summary:focus-visible { outline-offset: -4px; }
-.task-group > details[open] > summary .chevron { rotate: 180deg; }
-.task-sublist { list-style: none; margin: 0; padding: 0 20px 6px 36px; }
-.task-sublist li { display: flex; align-items: center; gap: 12px; padding: 10px 0; box-shadow: inset 0 1px 0 var(--line); }
-.task-sublist .task-title { font-weight: 500; white-space: normal; overflow-wrap: anywhere; }
-.task-sublist .task-sub { white-space: normal; }
-#week-tabpanel:empty { display: none; }
-@media (max-width: 760px) {
-  .task-group > details > summary { padding: 14px 16px; }
-  .task-sublist { padding: 0 16px 6px 24px; }
-}
-@media (prefers-reduced-motion: reduce) { .task-group > details > summary { transition: none; } }
 .tabs [role="tab"] { border: 2px solid var(--ink); background: var(--surface); color: var(--ink); }
 .tabs [role="tab"][aria-selected="true"] { background: var(--ink); color: #fff; }
 .filters button { border: 2px solid var(--ink); color: var(--ink); }
@@ -472,7 +421,6 @@ progress { border: 2px solid var(--ink); border-radius: 6px; height: 12px; }
   .mobile-menu { border: 0; border-bottom: 2px solid var(--ink); }
   .side :is(button, .privacy-link) { border: 2px solid var(--ink); }
   .auth-box { box-shadow: 4px 4px 0 var(--ink); }
-  .today-photo { width: 84px; height: 84px; }
 }
 @media (max-width: 900px) {
   .auth { grid-template-columns: minmax(0, 1fr); align-content: start; }

@@ -7,9 +7,10 @@ import { failedPlaybackBatches, renderTaskPanel } from "./tasks";
 import { bulk } from "./downloads";
 import { ext, extensionRequest } from "./extension";
 import { cancelTranscription, tx } from "./transcribe";
-import { boot, logout, planHtml, renderVideoList, reportDownloadError } from "./app";
+import { boot, logout, renderVideoList, reportDownloadError } from "./app";
+import { planHtml } from "./screens/playback";
 import "./access";
-import "./week";
+import "./screens/home";
 import { esc, fmtDate, state } from "./core";
 
 // 테스트와 디버깅용 손잡이. 모듈 안의 상태는 전역이 아니므로 여기로만 들여다본다.

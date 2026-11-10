@@ -1,12 +1,17 @@
-import { $, BATCH_STATUS, GAP_SECONDS, JOB_STATUS, PRIVACY_NOTICE_KEY, VIEW_NAMES, api, dueText, dueTime, esc, fmtDate, fmtDuration, fmtSize, parseHash, setApiHandlers, state, store } from "./core";
+import { $, PRIVACY_NOTICE_KEY, VIEW_NAMES, api, esc, fmtDate, fmtDuration, fmtSize, parseHash, setApiHandlers, state, store } from "./core";
 import { whenIdle } from "./assets";
-import { PLAYBACK_WARNING, clearToasts, closeConfirmDialog, confirmDialog, confirmPlayback, icon, iconOnly, isPhoneDevice, skeletonRows, toast, withPending } from "./ui";
+import { clearToasts, closeConfirmDialog, icon, iconOnly, isPhoneDevice, skeletonRows, toast } from "./ui";
 import { renderTaskPanel } from "./tasks";
 import { bulkDownloadSupported, downloadDirectVideo, requireDownloadExtension, startBulkDownload, stopBulkDownload } from "./downloads";
 import { ext } from "./extension";
 import { cancelTranscription, transcribeButton, transcribeGroupButton, tx, wireTranscribe } from "./transcribe";
 import { showAccessScreen } from "./access";
-import { drawWeek, renderWeek } from "./week";
+import { drawWeek, loadDashboardPlayback, renderWeek } from "./screens/home";
+import { startPolling, stopPolling, viewPlayback } from "./screens/playback";
+import { unmountScreen } from "./screens/mount";
+import { viewCourses } from "./screens/courses";
+import { viewNotifications } from "./screens/notifications";
+import { viewAccount } from "./screens/account";
 
 /* ---------------- 로그인 ---------------- */
 
@@ -135,7 +140,7 @@ $("#logout-btn").addEventListener("click", serverLogout);
 
 /* ---------------- 데이터 ---------------- */
 
-async function loadCore(knownMe) {
+export async function loadCore(knownMe) {
   const [me, cred, todos, courses, batches] = await Promise.all([
     knownMe ?? api("/me"),
     api("/lms/credentials").catch((e) => (e.status === 404 ? null : Promise.reject(e))),
@@ -274,6 +279,7 @@ $(".skip-link").addEventListener("click", (e) => {
 });
 $(".home-link").addEventListener("click", (e) => { e.preventDefault(); navigate("dashboard"); });
 function renderView() {
+  unmountScreen();  // 이전 Preact 화면을 정리한다(같은 화면을 다시 그릴 때도 처음부터 그린다)
   $(".workspace").classList.toggle("dashboard-workspace", state.view === "dashboard");
   $(".workspace").classList.toggle("admin-workspace", state.view === "admin");
   $("#current-view").textContent = VIEW_NAMES[state.view] || "학습 현황";
@@ -298,12 +304,12 @@ function renderAdminView() {
   );
 }
 
-function viewError(message, retry) {
+export function viewError(message, retry) {
   $("#view").innerHTML = `<div class="panel empty" role="alert"><strong>불러오지 못했어요</strong><p>${esc(message)}</p><button class="btn" id="retry-view">다시 시도</button></div>`;
   $("#retry-view").addEventListener("click", retry);
 }
 
-function needCred() {
+export function needCred() {
   if (state.cred) return false;
   $("#view").innerHTML = `<div class="panel empty"><p>LMS 연결 정보가 없습니다. 로그아웃한 뒤 다시 로그인하세요.</p></div>`;
   return true;
@@ -320,441 +326,10 @@ function viewDashboard() {
   renderWeek();
 }
 
-export async function loadDashboardPlayback() {
-  const root = $("#week-panel");
-  if (!root) return;
-  const token = state.token;
-  const valid = () => root.isConnected && state.token === token && state.view === "dashboard";
-  state.dashboardLoading = true;
-  state.dashboardError = null;
-  drawDashboardPlayback();
-  try {
-    const plan = await api("/playback/batches/preview?scope=all");
-    if (valid()) state.dashboardPlan = plan;
-  } catch (err) {
-    if (valid()) state.dashboardError = err.message;
-  } finally {
-    if (valid()) {
-      state.dashboardLoading = false;
-      drawDashboardPlayback();
-    }
-  }
-}
-
-// Playback time includes confirmed completion and the current video's reported time.
-function jobProgressPercent(job) {
-  if (["done", "skipped"].includes(job.status)) return 100;
-  if (job.status !== "playing" || !(job.duration > 0)) return 0;
-  return Math.min(100, Math.max(0, (Number(job.progress_seconds) || 0) / job.duration * 100));
-}
-
-/** 재생이 정상이면 진행률이 말해 주므로 아무것도 쓰지 않는다. 확인이 필요할 때만 한 줄을 보인다. */
-function playbackActivityHtml(job) {
-  const updated = job.progress_updated_at ? new Date(job.progress_updated_at) : null;
-  if (!updated || !Number.isFinite(updated.getTime())) return '<p class="muted small-text">재생 위치를 확인하는 중이에요</p>';
-  const age = Math.max(0, Math.floor((Date.now() - updated.getTime()) / 1000));
-  if (age <= 45) return "";
-  return `<p class="warning">재생 확인 필요 · 45초 넘게 진행 보고가 없어요 (마지막 ${esc(updated.toLocaleTimeString("ko-KR", { hour12: false }))})</p>`;
-}
-
-function playbackPosition(seconds) {
-  const value = Math.max(0, Math.floor(Number(seconds) || 0));
-  return `${Math.floor(value / 60)}분 ${value % 60}초`;
-}
-
-function playbackOverallPercent(jobs) {
-  const duration = jobs.reduce((sum, job) => sum + Math.max(0, job.duration || 0), 0);
-  const played = jobs.reduce((sum, job) => sum + Math.max(0, job.duration || 0) * jobProgressPercent(job) / 100, 0);
-  return duration > 0 ? Math.floor(played / duration * 100) : 0;
-}
-
-/** 재생 가능한 강의 목록은 첫 화면 카드(week.js)가 함께 그린다. */
-function drawDashboardPlayback() {
-  drawWeek();
-}
-
-/* 학칙 확인 창은 처음 한 번만 띄운다. 동의한 뒤에는 버튼 한 번으로 바로 재생하고, 경고는 버튼 아래 글로 계속 보인다. */
-const PLAYBACK_CONSENT_KEY = "playback-consent-v1";
-export const playbackConsented = () => store.get(PLAYBACK_CONSENT_KEY) === "1";
-
-export async function confirmDashboardPlayback() {
-  if (state.playbackStarting || state.active || !state.dashboardPlan?.items.length) return;
-  if (!playbackConsented()) {
-    if (!(await confirmPlayback(state.dashboardPlan, "전체"))) return;
-    store.set(PLAYBACK_CONSENT_KEY, "1");
-  }
-  await startDashboardPlayback();
-}
-
-async function startDashboardPlayback() {
-  if (state.playbackStarting || state.active || !state.dashboardPlan?.items.length) return;
-  const token = state.token;
-  state.playbackStarting = true;
-  drawDashboardPlayback();
-  try {
-    const batch = await api("/playback/batches", { method: "POST", json: { scope: "all" } });
-    if (state.token !== token) return;
-    // Keep the accepted queue entry even if the subsequent detail request fails.
-    state.active = { ...batch, jobs: [] };
-    startPolling();
-    toast(`강의 ${batch.total}개를 재생 대기열에 등록했습니다`);
-    try {
-      const detail = await api(`/playback/batches/${batch.id}`);
-      if (state.token === token && state.active?.id === batch.id) state.active = detail;
-    } catch { /* 진행 상황은 다음 폴링에서 다시 조회한다. */ }
-  } catch (err) {
-    if (state.token !== token) return;
-    toast(err.message, true);
-    if (err.status === 409) {
-      try { await loadCore(); } catch (refreshError) { toast(refreshError.message, true); }
-    }
-    if (err.status === 404) await loadDashboardPlayback();
-  } finally {
-    if (state.token === token) {
-      state.playbackStarting = false;
-      drawDashboardPlayback();
-    }
-  }
-}
-
-
-/* ---------------- 과목 ---------------- */
-
-/** 주차별 출석 칸. 과목 화면과 관리자 상세가 같이 쓴다. 기록이 없으면 empty 문구를 쓴다. */
-export function attendanceHtml(attendance, empty = "출석 기록이 아직 없습니다.") {
-  const weeks = (attendance || []).filter((w) => w.statuses?.length);
-  if (!weeks.length) return `<p class="muted small-text">${esc(empty)}</p>`;
-  return `<div class="attend" aria-label="주차별 출석">${weeks.map((w) => `<div class="week"><div class="cells">${w.statuses
-    .map((s) => `<i class="cell ${esc(s)}" title="${esc(w.week)}주차 ${({ attendance: "출석", late: "지각", absent: "결석" })[s] || "기록 없음"}"></i>`).join("")}</div><small>${esc(w.week)}</small></div>`).join("")}</div>`;
-}
-
-function viewCourses() {
-  if (needCred()) return;
-  const rows = state.courses.map((c) => {
-    const grid = attendanceHtml(c.attendance);
-    const pending = state.todos.filter((t) => t.lms_course_id === c.lms_course_id && t.kind === "video").length;
-    return `<div class="course">
-      <div class="course-head"><h3>${esc(c.name)}</h3><span class="muted small-text">${esc(c.professors || "")}</span>
-        <label class="toggle"><input type="checkbox" data-course="${c.lms_course_id}" ${c.auto_play ? "checked" : ""}>자동 수강</label></div>
-      ${grid}
-      <p class="muted small-text">남은 영상 ${pending}개</p>
-    </div>`;
-  }).join("");
-  $("#view").innerHTML = `
-    <div class="view-head"><h1>과목</h1></div>
-    <p class="notice-inline">자동 수강을 켜면 동기화할 때마다 새로 열린 영상을 순서대로 재생합니다. 직접 시청하지 않은 수강은 학칙상 문제가 될 수 있으니 확인 후 켜세요.</p>
-    <div class="panel">${rows || `<div class="empty"><p>과목이 없습니다. ‘LMS 동기화’를 눌러 불러오세요.</p></div>`}</div>
-    <p class="muted small-text">초록 출석, 노랑 지각, 빨강 결석, 회색 기록 없음</p>`;
-  $("#view").querySelectorAll("input[data-course]").forEach((el) => el.addEventListener("change", onAutoPlay));
-}
-
-async function onAutoPlay(e) {
-  const input = e.currentTarget;
-  const id = Number(input.dataset.course);
-  input.disabled = true;
-  try {
-    const row = await api(`/courses/${id}/auto-play`, { method: "PUT", json: { enabled: input.checked } });
-    state.courses = state.courses.map((c) => (c.lms_course_id === id ? row : c));
-    toast(input.checked ? `${row.name} 자동 수강을 켰습니다` : `${row.name} 자동 수강을 껐습니다`);
-  } catch (err) {
-    input.checked = !input.checked;
-    toast(err.message, true);
-  } finally { input.disabled = false; }
-}
-
-/* ---------------- 강의 재생 ---------------- */
-
-function viewPlayback() {
-  if (needCred()) return;
-  const v = $("#view");
-  const helpFocused = document.activeElement?.closest?.(".playback-help") != null;  // 5초마다 다시 그려도 포커스를 잃지 않는다
-  v.innerHTML = `<div class="view-head"><h1>강의 재생</h1></div>
-    ${state.active ? activeBatchHtml(state.active) : planFormHtml()}
-    ${historyHtml()}`;
-  const help = v.querySelector(".playback-help");
-  help?.addEventListener("toggle", () => { state.playbackHelpOpen = help.open; });
-  if (helpFocused) help?.querySelector("summary")?.focus();
-  document.querySelectorAll(".playback-failure").forEach((details) => {
-    details.addEventListener("toggle", () => {
-      if (details.open && !details.dataset.loaded) loadPlaybackFailure(details);
-    });
-  });
-  if (!state.active) bindPlanForm();
-}
-
-function videoTodos() { return state.todos.filter((t) => t.kind === "video"); }
-
-function planFormHtml() {
-  const videos = videoTodos();
-  if (!videos.length) return `<div class="panel empty"><p>기간 안에 남은 영상이 없습니다.</p></div>`;
-  const courses = [...new Map(videos.map((t) => [t.lms_course_id, t.course_name])).entries()];
-  const plan = state.plan;
-  return `<div class="panel"><form class="panel-body" id="plan-form">
-      <div class="row">
-        <label>범위<select name="scope">
-          <option value="module">주차 하나</option><option value="course">과목 하나</option><option value="all">모든 과목</option></select></label>
-        <label>과목<select name="course">${courses.map(([id, n]) => `<option value="${id}">${esc(n)}</option>`).join("")}</select></label>
-        <label>주차<select name="module"></select></label>
-      </div>
-      <div class="row"><button class="btn">재생 계획 보기</button>
-        <span class="muted small-text">1배속으로 처음부터 끝까지 재생하고, 영상마다 LMS에서 완료로 바뀌었는지 확인합니다.</span></div>
-    </form></div>
-    ${plan ? planHtml(plan) : ""}`;
-}
-
-function bindPlanForm() {
-  const form = $("#plan-form");
-  if (!form) return;
-  const saved = state.planForm || {};
-  const syncModules = () => {
-    const course = Number(form.course.value);
-    const mods = [...new Map(videoTodos().filter((t) => t.lms_course_id === course).map((t) => [t.module_id, t.module_title])).entries()];
-    form.module.innerHTML = mods.map(([id, n]) => `<option value="${id}">${esc(n || `모듈 ${id}`)}</option>`).join("");
-    form.module.disabled = form.scope.value !== "module";
-    form.course.disabled = form.scope.value === "all";
-  };
-  if (saved.scope) form.scope.value = saved.scope;
-  if (saved.course) form.course.value = saved.course;
-  syncModules();
-  if (saved.module) form.module.value = saved.module;
-  form.scope.addEventListener("change", syncModules);
-  form.course.addEventListener("change", syncModules);
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    state.planForm = { scope: form.scope.value, course: form.course.value, module: form.module.value };
-    const q = new URLSearchParams({ scope: form.scope.value });
-    if (form.scope.value !== "all") q.set("course_id", form.course.value);
-    if (form.scope.value === "module") q.set("module_id", form.module.value);
-    try {
-      state.plan = await api(`/playback/batches/preview?${q}`);
-      state.planQuery = Object.fromEntries(q);
-      viewPlayback();
-    } catch (err) { toast(err.message, true); }
-  });
-  $("#start-batch")?.addEventListener("click", startBatch);
-  $("#clear-plan")?.addEventListener("click", () => { state.plan = null; viewPlayback(); });
-}
-
-export function planHtml(plan) {
-  if (!plan.items.length) return `<div class="panel empty"><p>이 범위에는 재생할 영상이 없습니다.</p></div>`;
-  const steps = plan.items.map((i) => `<li class="${i.at_risk ? "risk" : ""}">
-      <span class="num">${i.position + 1}</span>
-      <span><span class="title">${esc(i.title)}</span><br>
-        <span class="meta row small-text"><span>${esc(i.course_name)} ${esc(i.module_title)}</span><span>${fmtDuration(i.duration)}</span>
-        <span>예상 종료 ${fmtDate(new Date(i.expected_end))}</span><span>${dueText(i.deadline)}</span></span></span>
-      <span class="status ${i.at_risk ? "failed" : "queued"}">${i.at_risk ? "마감 초과" : ""}</span></li>`).join("");
-  const warn = plan.warnings.length
-    ? `<p class="warning">${plan.warnings.length}개 영상은 순서대로 재생하면 마감 전에 끝나지 않습니다. 마감이 이른 과목부터 재생하니, 필요하면 범위를 줄이세요.</p>` : "";
-  return `<div class="panel">
-    <div class="panel-body"><div class="summary-line">
-      <span><b>${plan.items.length}</b>개 영상</span><span><b>${fmtDuration(plan.total_seconds)}</b>예상 소요</span>
-      <span><b>${fmtDate(new Date(plan.expected_end))}</b>예상 종료</span></div><p class="muted small-text">현재 대기열을 반영한 예상입니다. 새 요청·재시도에 따라 달라집니다.</p>${warn}<p class="warning">${esc(PLAYBACK_WARNING)}</p></div>
-    <ol class="steps">${steps}</ol>
-    <div class="actions"><button class="btn primary" id="start-batch">${plan.items.length}개 재생 시작</button>
-      <button class="btn ghost" id="clear-plan">계획 닫기</button></div></div>`;
-}
-
-async function startBatch() {
-  const q = state.planQuery || {};
-  const body = { scope: q.scope, course_id: q.course_id ? Number(q.course_id) : null, module_id: q.module_id ? Number(q.module_id) : null };
-  try {
-    const batch = await api("/playback/batches", { method: "POST", json: body });
-    state.plan = null;
-    state.active = await api(`/playback/batches/${batch.id}`);
-    state.batches = await api("/playback/batches?limit=10");
-    toast(`영상 ${batch.total}개 재생을 시작했습니다`);
-    startPolling();
-    viewPlayback();
-  } catch (err) { toast(err.message, true); }
-}
-
-const playbackCourseName = (job) => state.courses.find((course) => course.lms_course_id === job.lms_course_id)?.name || "";
-
-/** 지금 강의 한 개가 화면의 주인공이다. 진행률과 제목은 여기서만 크게 보여 준다. */
-function playbackHeroHtml(b, jobs, lateIds) {
-  const current = jobs.find((job) => job.status === "playing");
-  const focus = current || (b.cancel_requested ? null : jobs.find((job) => job.status === "queued"));
-  const waiting = b.status === "queued" && b.queue_position != null
-    ? `다음 영상 대기 ${b.queue_position}번째 · 약 ${fmtDuration(b.estimated_wait_seconds || 0)} 후 시작` : "다음 강의를 기다리는 중";
-  const stateLabel = b.cancel_requested ? "재생 중지 요청됨" : current ? "지금 재생 중" : waiting;
-  const finished = (b.done_count || 0) + (b.skipped_count || 0);
-  const percent = current ? Math.floor(jobProgressPercent(current)) : 0;
-  const extras = [b.failed_count ? `실패 ${b.failed_count}` : "", b.skipped_count ? `이미 완료 ${b.skipped_count}` : "",
-    b.expected_end ? `예상 종료 ${fmtDate(new Date(b.expected_end))}` : ""].filter(Boolean).join(" · ");
-  return `<section class="panel playback-hero" aria-label="지금 재생 상황">
-    <div class="panel-body">
-      <p class="playback-state" role="status">${stateLabel}</p>
-      <h2>${focus ? esc(focus.title) : b.cancel_requested ? "예정된 강의는 재생하지 않아요" : "재생을 준비하고 있어요"}</h2>
-      ${focus ? `<p class="meta">${[esc(playbackCourseName(focus)), current
-        ? `${playbackPosition(Math.min(Math.max(0, current.progress_seconds || 0), Math.max(0, current.duration || 0)))} / ${playbackPosition(current.duration)}`
-        : fmtDuration(focus.duration), dueText(focus.deadline)].filter(Boolean).join(" · ")}</p>` : ""}
-      ${current ? `<p class="playback-percent"><strong>${percent}%</strong></p>
-        <progress value="${jobProgressPercent(current)}" max="100" aria-label="현재 강의 재생 진행률"></progress>${playbackActivityHtml(current)}` : ""}
-      ${focus && lateIds.has(focus.module_item_id) ? '<p class="warning">마감 전에 끝나지 않을 예정이에요</p>' : ""}
-      ${focus?.attempts > 1 ? `<p class="meta">${focus.attempts}번째 시도</p>` : ""}
-      ${focus?.error ? `<p class="warning">${esc(focus.error)}</p>` : ""}
-      ${b.deadline_at_risk ? '<p class="warning">대기 시간 때문에 일부 강의가 마감 전에 끝나지 않을 수 있어요</p>' : ""}
-    </div>
-    <div class="panel-body playback-overall">
-      ${b.total > 1 ? `<p><strong>전체 진행률 ${playbackOverallPercent(jobs)}%</strong> · ${finished}/${b.total}개 완료</p>
-        <progress value="${playbackOverallPercent(jobs)}" max="100" aria-label="전체 재생 진행률"></progress>` : ""}
-      ${extras ? `<p class="meta">${extras}</p>` : ""}
-      <p class="meta">창을 닫아도 서버에서 계속돼요</p>
-      <details class="playback-help" ${state.playbackHelpOpen ? "open" : ""}><summary>재생 방식 안내</summary>
-        <ul>
-          <li>사용자별로 강의를 한 개씩 번갈아 재생해요.</li>
-          <li>예상 시간은 현재 대기열 기준이라 새 요청이나 재시도에 따라 달라져요.</li>
-          <li>전체 진행률은 영상 길이 기준이고 이미 완료된 강의도 포함해요.</li>
-          <li>학습 완료는 LMS에서 확인한 뒤 반영돼요.</li>
-        </ul></details>
-    </div>
-  </section>`;
-}
-
-/** 강의가 2개 이상일 때만 목록을 둔다. 진행률은 위에서 보여 주므로 여기서는 순서와 상태만 쓴다. */
-function playbackQueueHtml(b, jobs, lateIds) {
-  if (b.total < 2 || !jobs.length) return "";
-  const manyCourses = new Set(jobs.map((job) => job.lms_course_id)).size > 1;
-  const nextId = b.cancel_requested ? null : jobs.find((job) => job.status === "queued")?.module_item_id;
-  return `<section class="panel playback-queue" aria-labelledby="playback-queue-title">
-    <h2 class="panel-title" id="playback-queue-title">재생 목록 ${b.total}개</h2>
-    <ol class="steps">${jobs.map((j) => {
-      const late = lateIds.has(j.module_item_id);
-      const isNext = j.module_item_id === nextId;
-      const meta = [manyCourses ? esc(playbackCourseName(j)) : "", fmtDuration(j.duration), dueText(j.deadline),
-        j.status === "queued" && !b.cancel_requested && j.expected_start ? `예상 시작 ${fmtDate(new Date(j.expected_start))}` : "",
-        late ? "마감 전에 끝나지 않을 예정" : "", j.attempts > 1 ? `${j.attempts}번 시도` : "", j.error ? esc(j.error) : ""];
-      return `<li class="${[late ? "risk" : "", j.status === "playing" ? "now" : ""].filter(Boolean).join(" ")}"><span class="num">${j.position + 1}</span>
-        <span><span class="title">${esc(j.title)}</span><span class="meta row small-text">${meta.filter(Boolean).map((m) => `<span>${m}</span>`).join("")}</span></span>
-        <span class="status ${esc(j.status)}">${isNext ? "다음 재생" : JOB_STATUS[j.status] || esc(j.status)}</span></li>`;
-    }).join("")}</ol>
-  </section>`;
-}
-
-/** 진행 중인 묶음의 강의별 예상 종료 시각. 마감 전에 끝나지 않을 강의를 표시하는 데 쓴다. */
-function playbackEnds(b) {
-  let cursor = Date.now();
-  const ends = new Map();
-  for (const j of b.jobs || []) {
-    if (j.status !== "queued" && j.status !== "playing") continue;
-    const remaining = j.status === "playing" ? Math.max(0, j.duration - j.progress_seconds) : j.duration;
-    cursor = j.expected_end ? new Date(j.expected_end).getTime() : cursor + (remaining + GAP_SECONDS) * 1000;
-    ends.set(j.module_item_id, cursor);
-  }
-  return ends;
-}
-
-function activeBatchHtml(b) {
-  const ends = playbackEnds(b);
-  const jobs = [...(b.jobs || [])].sort((x, y) => x.position - y.position);
-  const lateIds = new Set(jobs.filter((j) => ends.get(j.module_item_id) > dueTime(j)).map((j) => j.module_item_id));
-  return playbackHeroHtml(b, jobs, lateIds) + playbackQueueHtml(b, jobs, lateIds);
-}
-
-/** 확인 창을 거쳐 진행 중인 묶음을 멈춘다. 창이 열린 동안 묶음이 끝나거나 바뀌었으면 아무것도 보내지 않는다. */
-export async function cancelActivePlayback() {
-  const id = state.active?.id;
-  if (id == null) return;
-  const ok = await confirmDialog({
-    title: "재생을 중지할까요?",
-    body: ["지금 재생 중인 강의도 바로 멈춰요. 끝까지 듣지 않은 강의는 완료되지 않아요."],
-    confirmLabel: "재생 중지",
-    danger: true,
-  });
-  if (!ok || state.active?.id !== id) return;
-  try {
-    await api(`/playback/batches/${id}`, { method: "DELETE" });
-    if (state.active?.id !== id) return;
-    state.active = { ...state.active, cancel_requested: true };
-    toast("재생을 중지했어요.");
-    try {
-      const detail = await api(`/playback/batches/${id}`);
-      if (state.active?.id === id) state.active = detail;
-    } catch { /* 중지는 접수됐다. 진행 상황은 다음 폴링에서 다시 조회한다. */ }
-    if (state.active?.id === id && !["queued", "running"].includes(state.active.status)) await finishActive();
-  } catch (err) { toast(err.message, true); }
-  if (state.token) redrawPlayback();
-}
-
-function historyHtml() {
-  const past = state.batches.filter((b) => !["queued", "running"].includes(b.status));
-  if (!past.length) return "";
-  const scopeName = { item: "영상 하나", module: "주차", course: "과목", all: "모든 과목", auto: "자동 수강" };
-  const counts = (b) => [["완료", b.done_count], ["실패", b.failed_count], ["이미 완료", b.skipped_count]]
-    .filter(([, n]) => n).map(([name, n]) => `<span>${name} ${n}</span>`).join("");
-  return `<section class="panel playback-history" aria-labelledby="playback-history-title">
-    <h2 class="panel-title" id="playback-history-title">지난 재생</h2>
-    <ul class="list">${past.map((b) => {
-      const failed = b.failed_count || b.status === "failed" || b.status === "partial";
-      return `<li>
-      <span class="history-head"><span class="title">${scopeName[b.scope] || esc(b.scope)} ${b.total}개</span>
-        <span class="status ${esc(b.status)}">${BATCH_STATUS[b.status] || esc(b.status)}</span></span>
-      <span class="meta row">${counts(b)}<span>${fmtDate(new Date(b.created_at))}</span>${!failed && b.error ? `<span>${esc(b.error)}</span>` : ""}</span>
-      ${failed ? `<details class="playback-failure" data-batch-id="${b.id}"><summary>실패한 영상과 오류 사유 보기</summary><div class="playback-failure-content" aria-live="polite"></div></details>` : ""}</li>`;
-    }).join("")}</ul>
-  </section>`;
-}
-
-async function loadPlaybackFailure(details) {
-  const content = details.querySelector(".playback-failure-content");
-  if (details.dataset.loading) return;
-  details.dataset.loading = "true";
-  content.innerHTML = '<p role="status">실패 내용을 불러오는 중입니다.</p>';
-  try {
-    const batch = await api(`/playback/batches/${details.dataset.batchId}`);
-    if (!details.isConnected) return;
-    const failed = batch.jobs.filter((job) => ["failed", "locked"].includes(job.status));
-    content.innerHTML = `${batch.error ? `<p>${esc(batch.error)}</p>` : ""}
-      ${failed.length ? `<ul>${failed.map((job) => `<li><strong>${esc(job.title)}</strong>
-        <p>${esc(job.error || batch.error || "오류 사유가 기록되지 않았습니다. 서버의 재생 워커 로그를 확인해야 합니다.")}</p>
-        <p class="muted small-text">시도 ${job.attempts}회 · 마지막 재생 위치 ${fmtDuration(job.progress_seconds || 0)} / ${fmtDuration(job.duration)}</p></li>`).join("")}</ul>`
-        : '<p>영상별 실패 기록이 없습니다.</p>'}`;
-    details.dataset.loaded = "true";
-  } catch (err) {
-    if (!details.isConnected) return;
-    content.innerHTML = `<p role="alert">${esc(err.message)}</p><button class="btn">다시 시도</button>`;
-    content.querySelector("button").addEventListener("click", () => loadPlaybackFailure(details));
-  } finally {
-    delete details.dataset.loading;
-  }
-}
-
-let pollTimer = null;
-function redrawPlayback() {
-  if (state.view === "playback") viewPlayback();
-  if (state.view === "dashboard" ) drawWeek();
-  renderTaskPanel();
-}
-function startPolling() {
-  renderTaskPanel();
-  if (pollTimer) return;
-  pollTimer = setInterval(async () => {
-    if (!state.active) return stopPolling();
-    try {
-      state.active = await api(`/playback/batches/${state.active.id}`);
-      if (!["queued", "running"].includes(state.active.status)) await finishActive();
-      redrawPlayback();
-    } catch { /* 일시적 오류는 다음 주기에 다시 시도 */ }
-  }, 5000);
-}
-export function stopPolling() { clearInterval(pollTimer); pollTimer = null; }
-
-async function finishActive() {
-  const b = state.active;
-  stopPolling();
-  toast(`강의 재생 ${BATCH_STATUS[b.status]}: 완료 ${b.done_count}, 실패 ${b.failed_count}`, b.status === "failed");
-  state.active = null;
-  renderTaskPanel();
-  [state.todos, state.batches] = await Promise.all([api("/todos"), api("/playback/batches?limit=10")]);
-  renderTaskPanel();
-  if (state.view === "dashboard") {
-    loadDashboardPlayback();
-    renderWeek();
-  }
-}
+/* 옮긴 화면: 홈(screens/home.tsx), 강의 재생(screens/playback.tsx), 과목(screens/courses.tsx),
+ * 알림(screens/notifications.tsx), 계정(screens/account.tsx). */
 
 /* ---------------- 강의 영상 내려받기 ---------------- */
-
 
 async function viewVideos() {
   if (needCred()) return;
@@ -1087,140 +662,6 @@ async function downloadVideo(btn, linkPath) {
     btn.disabled = false;
     btn.innerHTML = face;
   }
-}
-
-/* ---------------- 알림 ---------------- */
-
-async function viewNotifications() {
-  $("#view").innerHTML = '<div class="panel empty" role="status">알림 설정을 불러오는 중입니다.</div>';
-  let channels = [];
-  try { channels = await api("/notifications/channels"); }
-  catch (err) { if (state.view === "notifications") viewError(err.message, viewNotifications); return; }
-  if (state.view !== "notifications") return;
-  const name = { discord: "Discord", telegram: "Telegram" };
-  const list = channels.length
-    ? `<ul class="list">${channels.map((c) => `<li class="row"><span class="title">${name[c.kind] || c.kind}</span>
-        <span class="meta">${fmtDate(new Date(c.created_at))} 등록</span><span style="margin-left:auto" class="row">
-        <button class="btn small" data-test="${c.id}">테스트 메시지 보내기</button>
-        <button class="btn small danger" data-del="${c.id}">삭제</button></span></li>`).join("")}</ul>`
-    : `<div class="empty"><p>알림 받을 곳을 추가하면 마감 24시간·3시간 전, 재생 결과를 보내 드립니다.</p></div>`;
-  $("#view").innerHTML = `
-    <div class="view-head"><h1>알림</h1></div>
-    <div class="panel">${list}</div>
-    <div class="panel"><form class="panel-body" id="channel-form">
-      <h3>알림 받을 곳 추가</h3>
-      <label>종류<select name="kind"><option value="discord">Discord 웹훅</option><option value="telegram">Telegram 봇</option></select></label>
-      <label data-for="discord">웹훅 URL<input name="webhook_url" placeholder="https://discord.com/api/webhooks/..."></label>
-      <label data-for="telegram" hidden>봇 토큰<input name="bot_token"></label>
-      <label data-for="telegram" hidden>채팅 ID<input name="chat_id"></label>
-      <div><button class="btn primary">추가하기</button></div>
-    </form></div>`;
-  const form = $("#channel-form");
-  const toggle = () => form.querySelectorAll("[data-for]").forEach((el) => (el.hidden = el.dataset.for !== form.kind.value));
-  form.kind.addEventListener("change", toggle);
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const body = { kind: form.kind.value, webhook_url: form.webhook_url.value || null, bot_token: form.bot_token.value || null, chat_id: form.chat_id.value || null };
-    try {
-      await withPending(form.querySelector("button:not([type=button])"), "처리 중", () => api("/notifications/channels", { method: "POST", json: body }));
-      toast("알림 받을 곳을 추가했습니다"); viewNotifications();
-    } catch (err) { toast(err.message, true); }
-  });
-  $("#view").querySelectorAll("[data-test]").forEach((b) => b.addEventListener("click", async () => {
-    try { await withPending(b, "처리 중", () => api(`/notifications/channels/${b.dataset.test}/test`, { method: "POST" })); toast("테스트 메시지를 보냈습니다"); }
-    catch (err) { toast(err.message, true); }
-  }));
-  $("#view").querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", async () => {
-    const ok = await confirmDialog({ title: "이 알림 채널을 삭제할까요?", body: ["삭제하면 이 채널로 더 이상 알림을 보내지 않아요."],
-      confirmLabel: "알림 채널 삭제", danger: true });
-    if (!ok) return;
-    try { await withPending(b, "처리 중", () => api(`/notifications/channels/${b.dataset.del}`, { method: "DELETE" })); toast("삭제했습니다"); viewNotifications(); }
-    catch (err) { toast(err.message, true); }
-  }));
-}
-
-/* ---------------- 계정 ---------------- */
-
-function viewAccount() {
-  const c = state.cred;
-  const statusName = { ok: "정상", invalid: "다시 로그인 필요", error: "최근 오류" };
-  $("#view").innerHTML = `
-    <div class="view-head"><h1>계정</h1></div>
-    <div class="panel"><div class="panel-body">
-      <div class="summary-line"><span><b>${esc(state.me?.student_id || "")}</b>학번</span>
-        ${c ? `<span><b>${statusName[c.status] || esc(c.status)}</b>LMS 연결</span>` : ""}</div>
-      ${c ? `<p class="muted small-text">마지막 LMS 로그인 ${c.last_login_at ? fmtDate(new Date(c.last_login_at)) : "없음"},
-        다음 자동 동기화 ${c.next_sync_at ? fmtDate(new Date(c.next_sync_at)) : "예정 없음"}</p>` : ""}
-      ${c?.last_error ? `<p class="error">${esc(c.last_error)}</p>` : ""}
-      <p class="small-text">학습 연결이 만료되면 등록한 개인 토큰, 학교 로그인 정보 순으로 복구합니다. 모두 만료되면 다시 로그인하거나 새 토큰을 등록하세요. 학교 비밀번호는 저장하지 않습니다.</p>
-    </div></div>
-    <div class="panel"><div class="panel-body">
-      <h3>개인 액세스 토큰</h3>
-      <p class="small-text">${c?.personal_token_registered
-        ? (c.personal_token_status === "invalid"
-          ? (c.personal_token_managed ? "자동 발급한 토큰이 만료되거나 폐기됐습니다. 다시 로그인하면 새로 발급합니다." : "만료되거나 폐기된 토큰입니다. 새 토큰을 등록하세요.")
-          : (c.personal_token_managed ? "로그인할 때 서버가 자동 발급해 관리합니다 · 학습 연결 자동 복구에 사용합니다. 제거해도 Canvas 설정 > 승인된 통합의 ‘SSU LMS 자동 수강’ 토큰은 직접 삭제해야 합니다." : "등록됨 · 학습 연결 자동 복구에 사용합니다."))
-        : "로그인하면 서버가 토큰을 자동 발급합니다. 직접 발급한 토큰을 등록할 수도 있습니다."}
-        ${c?.personal_token_registered_at ? `등록일 ${fmtDate(new Date(c.personal_token_registered_at))}` : ""}</p>
-      <p class="muted small-text" id="personal-token-help"><a href="https://canvas.ssu.ac.kr/profile/settings" target="_blank" rel="noopener noreferrer">Canvas 설정에서 토큰 발급</a> 후 붙여넣으세요. 토큰은 서버에 암호화해 보관합니다. 만료·폐기 시 새 토큰이 필요합니다.</p>
-      <form id="personal-token-form">
-        <label for="personal-token">개인 액세스 토큰</label>
-        <input id="personal-token" type="password" required maxlength="4096" autocomplete="off" spellcheck="false" aria-describedby="personal-token-help personal-token-error">
-        <p id="personal-token-error" class="error small-text" role="alert" tabindex="-1"></p>
-        <div class="actions"><button class="btn primary" type="submit">${c?.personal_token_registered ? "토큰 교체" : "토큰 등록"}</button>
-        ${c?.personal_token_registered ? '<button class="btn ghost" type="button" id="remove-personal-token">저장된 토큰 제거</button>' : ""}</div>
-      </form>
-      <p class="muted small-text">여기서 제거해도 학교의 토큰과 현재 학습 세션은 유지됩니다. 토큰 자체를 폐기하려면 Canvas 설정에서 삭제하세요.</p>
-    </div></div>
-    <div class="panel"><div class="panel-body">
-      <h3>계정 삭제</h3>
-      <p class="muted small-text">저장된 학교 로그인 세션과 동기화한 과목·할 일, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다.</p>
-      <div><button class="btn danger" id="delete-me">계정 삭제</button></div>
-    </div></div>`;
-  const tokenForm = $("#personal-token-form");
-  async function updatePersonalToken(method) {
-    const input = $("#personal-token", tokenForm);
-    const error = $("#personal-token-error", tokenForm);
-    const submit = tokenForm.querySelector('[type="submit"]');
-    const buttons = [...tokenForm.querySelectorAll("button")];
-    const label = submit.textContent;
-    let body = method === "PUT" ? { access_token: input.value.trim() } : undefined;
-    input.value = "";
-    error.textContent = "";
-    buttons.forEach(b => { b.disabled = true; });
-    input.disabled = true;
-    submit.textContent = method === "PUT" ? "학교 연결 확인 중…" : "제거 중…";
-    try {
-      state.cred = await api("/lms/access-token", { method, ...(body ? { json: body } : {}) });
-      if (state.view === "account") viewAccount();
-      toast(method === "PUT" ? "토큰을 등록하고 학습 연결을 확인했습니다" : "저장된 개인 토큰을 제거했습니다");
-    } catch (err) {
-      error.textContent = err.message;
-      if (tokenForm.isConnected) error.focus();
-    } finally {
-      body = undefined;
-      buttons.forEach(b => { b.disabled = false; });
-      input.disabled = false;
-      submit.textContent = label;
-    }
-  }
-  tokenForm.addEventListener("submit", e => { e.preventDefault(); updatePersonalToken("PUT"); });
-  $("#remove-personal-token")?.addEventListener("click", () => updatePersonalToken("DELETE"));
-  $("#delete-me").addEventListener("click", async () => {
-    const ok = await confirmDialog({
-      title: "계정을 삭제할까요?",
-      body: ["저장된 학교 로그인 세션과 동기화한 과목·할 일, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다.",
-        "서버가 발급한 Canvas 토큰은 Canvas 설정 > 승인된 통합에서 ‘SSU LMS 자동 수강’ 항목을 직접 삭제해 주세요."],
-      requireText: state.me.student_id, requireLabel: "확인을 위해 학번을 입력하세요",
-      confirmLabel: "계정 삭제", danger: true,
-    });
-    if (!ok) return;
-    try {
-      await withPending($("#delete-me"), "처리 중", () => api("/me", { method: "DELETE" }));
-      logout();
-      toast("계정과 저장된 정보를 모두 지웠습니다");
-    } catch (err) { toast(err.message, true); }
-  });
 }
 
 /* ---------------- 시작 ---------------- */

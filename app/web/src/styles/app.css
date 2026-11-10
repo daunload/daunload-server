@@ -1,13 +1,14 @@
 /* 스타일 진입점.
  * - 디자인 토큰은 legacy.css의 :root에 있다(색, 글자 크기, 반경, 터치 영역, z-index). Tailwind 테마는 그 변수를 그대로 가리킨다.
  * - Tailwind의 기본 색·글자 크기는 끄고 토큰만 쓴다: 새 컴포넌트는 bg-pink, text-ink, text-sm, rounded-card, min-h-touch 같은 유틸리티를 쓴다.
- * - Preflight(기본 스타일 초기화)는 아직 넣지 않는다. legacy.css로 그린 화면이 남아 있는 동안 모양이 바뀌지 않게 한다.
- * - 화면을 Preact 컴포넌트로 옮길 때 그 화면의 legacy.css 규칙을 지운다. legacy.css는 레이어 밖이라 같은 요소에서는 유틸리티보다 우선한다.
+ * - legacy.css(아직 옮기지 않은 화면과 공통 .btn 등)는 legacy 레이어에 넣어 유틸리티보다 항상 약하게 둔다.
+ *   그래서 컴포넌트의 유틸리티가 legacy의 h1·p·input 같은 전역 규칙을 이긴다. 화면을 옮기면 그 화면의 legacy 규칙을 지운다.
+ * - Preflight(기본 스타일 초기화)는 아직 넣지 않는다. legacy.css로 그린 화면의 모양이 바뀌지 않게 한다.
  */
-@layer theme, base, components, utilities;
+@layer theme, base, legacy, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
-@import "./legacy.css";
+@import "./legacy.css" layer(legacy);
 
 /* Tailwind가 클래스 이름을 찾을 파일(Vite 루트 기준). */
 @source "../../index.html";
@@ -60,6 +61,26 @@
   --spacing-touch: var(--touch);
   --spacing-gutter: var(--gutter);
 
+  /* 화면 폭 구간. legacy.css의 @media (max-width: 760px)는 max-phone:, 900px는 max-narrow:, 1024px는 max-tablet:와 같다. */
+  --breakpoint-*: initial;
+  --breakpoint-phone: 761px;
+  --breakpoint-narrow: 901px;
+  --breakpoint-tablet: 1025px;
+
   --animate-toast-in: toast-in .2s ease-out;
   @keyframes toast-in { from { opacity: 0; transform: translateY(12px); } }
+}
+
+/* 자막 상자 제목: 이 서비스에서 가장 눈에 띄는 요소. 화면 제목(h1)에 쓴다. */
+@utility caption {
+  width: fit-content; max-width: 100%; padding: 9px 16px 8px;
+  font: 400 clamp(20px, 4.5vw, 26px)/1.3 var(--display); letter-spacing: 0; word-break: keep-all;
+  background: var(--surface); border: 2.5px solid var(--ink); border-radius: 12px;
+  box-shadow: inset 0 0 0 2px var(--surface), inset 0 0 0 4px var(--caption);
+  transform: rotate(-.6deg);
+}
+
+/* 목록 줄 사이의 얇은 구분선(첫 줄 제외는 컴포넌트가 정한다). */
+@utility divide-line {
+  box-shadow: inset 0 1px 0 var(--line);
 }

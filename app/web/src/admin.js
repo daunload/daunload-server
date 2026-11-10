@@ -1,6 +1,7 @@
 import { $, KIND, api, esc, fmtDate, fmtDuration, fmtSize, pad, state } from "./core";
 import { confirmDialog, icon, skeletonRows, toast, withPending } from "./ui";
-import { attendanceHtml, navigate, viewHash } from "./app";
+import { navigate, viewHash } from "./app";
+import { attendanceHtml } from "./screens/courses";
 import { adminActivity, adminProblems } from "./admin-feeds";
 
 /* ---------------- 관리자 ----------------
