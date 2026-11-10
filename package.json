@@ -1,0 +1,12 @@
+{
+  "name": "ssu-lms-web",
+  "private": true,
+  "type": "module",
+  "description": "배포용 웹 파일 빌드(app/web → app/web-dist). 런타임 의존성은 없다.",
+  "scripts": {
+    "build:web": "node scripts/build-web.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.0"
+  }
+}

@@ -11,6 +11,8 @@ deploy/hetzner/.release.env*
 deploy/hetzner/.deploy.lock
 
 dist/
+app/web-dist/
+node_modules/
 
 .superpowers/
 

@@ -1,6 +1,6 @@
 # 아유 하기싫어 웹 디자인 규칙
 
-대상: `app/web` (순수 HTML, CSS, JS). 색상, Pretendard·Black Han Sans 글꼴, 뚱이 콘셉트는 바꾸지 않는다. 프레임워크와 빌드 도구는 쓰지 않는다. 기준은 하나다. **버튼을 본 순간 어떤 동작인지 예측할 수 있어야 한다.**
+대상: `app/web` (순수 HTML, CSS, JS). 색상, Pretendard·Black Han Sans 글꼴, 뚱이 콘셉트는 바꾸지 않는다. UI 프레임워크와 런타임 의존성은 쓰지 않는다. 원본은 빌드 없이 그대로 동작해야 하고, 배포 때만 `scripts/build-web.mjs`(esbuild)가 묶고 압축한다(9장). 기준은 하나다. **버튼을 본 순간 어떤 동작인지 예측할 수 있어야 한다.**
 
 설계 배경: `docs/superpowers/specs/2026-11-05-web-design-system-design.md`
 
@@ -153,7 +153,22 @@ button.innerHTML = `${icon("external")}LMS에서 제출`;
 - **문구:** 마감이 비어 있으면 `마감 없음`으로 쓰고 `new Date(null)`을 그리지 않는다. 동기화에서 빠진 할 일(`active=false`)은 완료로 단정하지 않고 `목록에서 사라짐(완료 또는 마감)`으로 쓴다. 시각이 저장되지 않은 문제는 `시각 기록 없음`이다. 재생 묶음 범위는 `ADMIN_BATCH_SCOPE`의 이름(`전체 재생 묶음` 등)으로 쓰고 `all` 같은 값을 그대로 보이지 않는다.
 - **숫자:** 문제 탭 이름의 `문제 N건`은 네 종류의 합이고, 현황의 `재생 실패`는 시도한 영상만 센다. 다운로드는 `완료 보고 또는 링크 발급 횟수`라고 설명을 붙인다.
 
-## 8. 완료 체크
+## 8. 성능 (첫 화면을 막지 않는다)
+
+2026-11-10 측정 기준: 일반 사용자가 첫 화면에 받는 자체 JS는 gzip 약 31KB(관리자 묶음 12KB는 관리자 화면을 열 때만).
+
+- **스크립트:** 모두 일반 `<script>`이며 전역을 공유한다. 새 파일은 `index.html`의 순서에 맞춰 넣는다. 특정 화면에서만 쓰는 큰 코드는 `<template id="scripts-NAME">`에 넣고, 그 화면을 열 때 `loadScripts("NAME")`로 받는다(예: `renderAdminView()`). 첫 화면에서 실행되는 최상위 코드는 템플릿에 넣지 않는다.
+- **인라인 금지:** CSP가 인라인 스크립트와 `onload=` 속성을 막는다. 늦게 붙일 자원은 `assets.js`에 둔다.
+- **글꼴:** 글꼴 CSS는 `preload` + `media="print" data-font`로 받고 `assets.js`가 적용한다. 렌더링을 막는 `<link rel="stylesheet">`로 되돌리지 않는다.
+- **광고:** AdSense 로더는 `load` 뒤 브라우저가 한가할 때 `loadAds()`가 붙인다. 사이트 확인은 `<meta name="google-adsense-account">`가 맡는다.
+- **이미지:** 사진은 WebP(640px, 품질 78)로 두고 `width`·`height`를 적는다. 첫 화면의 큰 사진(로그인 화면 뚱이)에만 `fetchpriority="high"`를 쓴다. 지금 화면에 없는 사진은 미리 받지 않는다(표정 사진은 로그인 화면이 뜬 뒤 `preloadAuthMoods()`).
+
+## 9. 빌드와 테스트
+
+- `npm install && npm run build:web` → `app/web-dist/`. 배포 이미지는 Dockerfile의 `web` 단계에서 같은 명령을 돌리고 `WEB_DIR=/app/app/web-dist`로 서빙한다. 최종 이미지에는 Node가 없다.
+- 브라우저 테스트는 기본으로 원본을 쓴다. `WEB_ROOT=app/web-dist uv run pytest -m browser`는 빌드 결과로 같은 테스트를 돌린다. 스크립트 순서나 `<template>`을 바꾸면 두 방식 모두 돌린다.
+
+## 10. 완료 체크
 
 - [ ] 375, 768, 1024, 1440px에서 가로 스크롤이 없고 진행 패널이 내용을 가리지 않는다.
 - [ ] 휴대폰 크기에서 모든 버튼의 터치 영역이 44px 이상이다.

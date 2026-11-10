@@ -1,4 +1,5 @@
 import hashlib
+import os
 import re
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -90,7 +91,9 @@ class SecurityHeaders:
         await self.app(scope, receive, send_with_headers)
 
 
-WEB_DIR = Path(__file__).parent / "web"
+# 원본(app/web)은 빌드 없이 그대로 동작한다. 배포 이미지는 압축한 app/web-dist를 WEB_DIR로 지정해 서빙한다
+# (scripts/build-web.mjs, Dockerfile의 web 단계).
+WEB_DIR = Path(os.environ.get("WEB_DIR") or Path(__file__).parent / "web")
 LOCAL_ASSET = re.compile(r'((?:src|href)="/[\w.-]+\.(?:js|css))"')
 
 

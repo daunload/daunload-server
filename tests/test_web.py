@@ -2,13 +2,13 @@
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
 from playwright.async_api import async_playwright, expect
 
-WEB = Path(__file__).resolve().parents[1] / "app" / "web"
+from tests.web_root import WEB
+
 pytestmark = pytest.mark.browser
 
 

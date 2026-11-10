@@ -2,13 +2,13 @@
 
 import asyncio
 import json
-from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
 from playwright.async_api import async_playwright, expect
 
-WEB = Path(__file__).resolve().parents[1] / "app" / "web"
+from tests.web_root import BUILT, WEB
+
 MIME = {".html": "text/html", ".js": "application/javascript", ".css": "text/css"}
 pytestmark = pytest.mark.browser
 
@@ -245,11 +245,13 @@ async def test_boot_waits_for_every_script_before_reading_me(stage):
     """/me가 뒤에 오는 스크립트보다 먼저 답해도 showAccessScreen이 있어야 한다."""
     stage.me = me_of("none")
 
+    script = "main.min.js" if BUILT else "access.js"  # 빌드 결과는 한 파일로 묶여 있다
+
     async def slow(r):
         await asyncio.sleep(0.4)
-        await r.fulfill(body=(WEB / "access.js").read_text(), content_type="application/javascript")
+        await r.fulfill(body=(WEB / script).read_text(), content_type="application/javascript")
 
-    await stage.route("**/access.js", slow)
+    await stage.route(f"**/{script}", slow)
     await stage.goto("http://dashboard.test/")
     await expect(stage.get_by_role("heading", name="아직 권한이 없어요")).to_be_visible()
     await expect(stage.locator("#startup-message")).not_to_contain_text("불러오지 못했습니다")

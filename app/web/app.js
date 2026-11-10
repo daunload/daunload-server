@@ -110,6 +110,7 @@ function showAuth() {
   $("#app").hidden = true;
   $("#access").hidden = true;
   $("#auth").hidden = false;
+  preloadAuthMoods();
 }
 
 // 로그인 화면의 뚱이 표정. 실제 안내와 오류는 폼이 맡고, 여기는 분위기만 바꾼다.
@@ -122,10 +123,16 @@ const AUTH_MOODS = {
 };
 function setAuthMood(mood) {
   const [image, caption] = AUTH_MOODS[mood];
-  $("#auth-mood").src = `/patrick-${image}.jpg`;
+  $("#auth-mood").src = `/patrick-${image}.webp`;
   $("#auth-caption").textContent = caption;
 }
-Object.values(AUTH_MOODS).forEach(([image]) => { new Image().src = `/patrick-${image}.jpg`; });
+/** 표정 사진은 로그인 화면에서만 쓴다. 로그인한 사용자는 받지 않고, 로그인 화면이 뜬 뒤 한가할 때 받아 둔다. */
+let authMoodsPreloaded = false;
+function preloadAuthMoods() {
+  if (authMoodsPreloaded) return;
+  authMoodsPreloaded = true;
+  whenIdle(() => new Set(Object.values(AUTH_MOODS).map(([image]) => image)).forEach((image) => { new Image().src = `/patrick-${image}.webp`; }));
+}
 $("#password").addEventListener("focus", () => setAuthMood("password"));
 $("#password").addEventListener("blur", () => { if (!$("#auth-error").textContent) setAuthMood("idle"); });
 
@@ -242,7 +249,7 @@ async function boot() {
   $("#access").hidden = true;
   $("#startup").hidden = false;
   $("#startup-message").textContent = "잠시만 기다려 주세요.";
-  $("#startup-photo").src = "/patrick-steam.jpg";
+  $("#startup-photo").src = "/patrick-steam.webp";
   $("#retry-boot").hidden = true;
   $("#startup-login").hidden = true;
   try {
@@ -252,7 +259,7 @@ async function boot() {
   } catch (err) {
     if (err.status !== 401 && err.code !== "ACCESS_REQUIRED") {
       $("#startup-message").textContent = `학습 현황을 불러오지 못했습니다. ${err.message}`;
-      $("#startup-photo").src = "/patrick-burnt.jpg";
+      $("#startup-photo").src = "/patrick-burnt.webp";
       $("#retry-boot").hidden = false;
       $("#startup-login").hidden = false;
     }
@@ -368,8 +375,18 @@ function renderView() {
     b.classList.toggle("on", selected);
     if (selected) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
   });
-  const views = { dashboard: viewDashboard, courses: viewCourses, playback: viewPlayback, videos: viewVideos, notifications: viewNotifications, account: viewAccount, admin: () => viewAdmin(state.adminPath) };  // viewAdmin은 admin.js에 있다
+  const views = { dashboard: viewDashboard, courses: viewCourses, playback: viewPlayback, videos: viewVideos, notifications: viewNotifications, account: viewAccount, admin: renderAdminView };
   (views[state.view] || viewDashboard)();
+}
+
+/** viewAdmin은 admin.js에 있다. 관리자만 쓰므로 처음 열 때 불러온다. */
+function renderAdminView() {
+  if (typeof viewAdmin === "function") return viewAdmin(state.adminPath);
+  $("#view").innerHTML = `<div class="panel" aria-busy="true">${skeletonRows(4)}<p class="sr-only" role="status">불러오는 중입니다.</p></div>`;
+  loadScripts("admin").then(
+    () => { if (state.view === "admin") viewAdmin(state.adminPath); },
+    (err) => { if (state.view === "admin") viewError(err.message, renderAdminView); },
+  );
 }
 
 function viewError(message, retry) {

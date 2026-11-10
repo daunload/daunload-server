@@ -169,7 +169,7 @@ function drawWeek() {
           <p class="today-date">${today}</p>
           ${head}
         </div>
-        <img class="today-photo" src="/patrick-${photo}.jpg" alt="" width="128" height="128">
+        <img class="today-photo" src="/patrick-${photo}.webp" alt="" width="128" height="128">
       </div>
       <div class="cta">${ctaHtml(videos, work)}</div>
       ${body}

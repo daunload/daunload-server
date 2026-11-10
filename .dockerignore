@@ -14,3 +14,5 @@ backups/
 **/.deploy.lock
 
 dist/
+node_modules/
+app/web-dist/

@@ -3,13 +3,13 @@
 import json
 import re
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
 from playwright.async_api import async_playwright, expect
 
-WEB = Path(__file__).resolve().parents[1] / "app" / "web"
+from tests.web_root import WEB
+
 pytestmark = pytest.mark.browser
 MIME = {".html": "text/html", ".js": "application/javascript", ".css": "text/css"}
 LMS = "https://canvas.ssu.ac.kr/courses/1/assignments/3"

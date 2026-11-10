@@ -521,7 +521,9 @@ async def test_security_headers_on_dashboard_and_api(env):
 
 async def test_adsense_loader_and_ads_txt_are_served(env):
     api, _ = env
-    assert "pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1006974862356513" in (await api.get("/")).text
+    # 광고 로더는 첫 화면을 그린 뒤 assets.js가 붙인다. HTML에는 사이트 확인용 계정 태그를 둔다.
+    assert '<meta name="google-adsense-account" content="ca-pub-1006974862356513">' in (await api.get("/")).text
+    assert "pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1006974862356513" in (await api.get("/assets.js")).text
     r = await api.get("/ads.txt")
     assert r.status_code == 200
     assert r.text.strip() == "google.com, pub-1006974862356513, DIRECT, f08c47fec0942fa0"

@@ -23,16 +23,19 @@
   <meta name="twitter:image" content="https://daunload.cloud/og-image.jpg">
   <meta name="twitter:image:alt" content="멍한 표정의 뚱이와 ‘아유 하기 싫어’ 제목">
   <link rel="icon" href="/mark.png" type="image/png">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/black-han-sans@5.3.0/400.css">
+  <meta name="google-adsense-account" content="ca-pub-1006974862356513">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <!-- 글꼴 CSS는 렌더링을 막지 않는다. 미리 받아 두고 assets.js가 media를 all로 바꾼다(CSP가 인라인 onload를 막는다). -->
+  <link rel="preload" as="style" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  <link rel="preload" as="style" href="https://cdn.jsdelivr.net/npm/@fontsource/black-han-sans@5.3.0/400.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" media="print" data-font>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/black-han-sans@5.3.0/400.css" media="print" data-font>
   <link rel="stylesheet" href="/style.css">
-  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1006974862356513"
-     crossorigin="anonymous"></script>
 </head>
 <body>
   <a class="skip-link" href="#view">본문으로 건너뛰기</a>
   <div id="startup" class="startup" role="status">
-    <img class="startup-photo" id="startup-photo" src="/patrick-steam.jpg" alt="" width="300" height="300">
+    <img class="startup-photo" id="startup-photo" src="/patrick-steam.webp" alt="" width="300" height="300">
     <h1>불러오는 중… 나도 하기 싫어…</h1>
     <p class="muted" id="startup-message">잠시만 기다려 주세요.</p>
     <button class="btn primary" id="retry-boot" hidden>다시 시도</button>
@@ -59,7 +62,7 @@
   </main>
   <!-- 로그인 / 가입 -->
   <main id="auth" class="auth" hidden>
-    <div class="auth-stage" aria-hidden="true"><div class="auth-frame"><img id="auth-mood" src="/patrick-blank.jpg" alt="" width="640" height="640"><p class="auth-caption" id="auth-caption">아유… 하기 싫어…</p></div></div>
+    <div class="auth-stage" aria-hidden="true"><div class="auth-frame"><img id="auth-mood" src="/patrick-blank.webp" fetchpriority="high" alt="" width="640" height="640"><p class="auth-caption" id="auth-caption">아유… 하기 싫어…</p></div></div>
     <div class="auth-box">
       <div class="auth-brand"><img class="brand-mark" src="/mark.png" alt="" width="26" height="26"><span class="brand">아유 하기싫어</span></div>
       <div><h1>아유… 로그인부터 하자</h1><p class="muted small-text">통합 로그인(유세인트, LMS) 학번과 비밀번호를 그대로 써요. 학교 공식 서비스가 아니에요.</p></div>
@@ -123,14 +126,18 @@
   </aside>
   <dialog class="transcript-dialog" id="transcript-dialog"></dialog>
   <dialog class="confirm-dialog" id="confirm-dialog"></dialog>
+  <script src="/assets.js"></script>
   <script src="/ui.js"></script>
   <script src="/tasks.js"></script>
   <script src="/downloads.js"></script>
   <script src="/transcribe.js"></script>
   <script src="/app.js"></script>
   <script src="/access.js"></script>
-  <script src="/admin.js"></script>
-  <script src="/admin-feeds.js"></script>
   <script src="/week.js"></script>
+  <!-- 관리자 화면은 관리자만 연다. 처음 열 때 loadScripts("admin")가 이 스크립트를 순서대로 붙인다. -->
+  <template id="scripts-admin">
+    <script src="/admin.js"></script>
+    <script src="/admin-feeds.js"></script>
+  </template>
 </body>
 </html>
