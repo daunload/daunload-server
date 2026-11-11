@@ -112,13 +112,13 @@ function PlanSection() {
   return (
     <>
       <Panel>
-        <form class="panel-body" id="plan-form" onSubmit={submit}>
+        <form class="card-body" id="plan-form" onSubmit={submit}>
           <div class="flex flex-wrap items-center gap-2">
-            <label>범위<select name="scope" value={form.scope} onChange={(e) => set({ scope: e.currentTarget.value })}>
+            <label>범위<select class="select" name="scope" value={form.scope} onChange={(e) => set({ scope: e.currentTarget.value })}>
               <option value="module">주차 하나</option><option value="course">과목 하나</option><option value="all">모든 과목</option></select></label>
-            <label>과목<select name="course" value={form.course} disabled={form.scope === "all"} onChange={(e) => set({ course: e.currentTarget.value })}>
+            <label>과목<select class="select" name="course" value={form.course} disabled={form.scope === "all"} onChange={(e) => set({ course: e.currentTarget.value })}>
               {courses.map(([id, n]) => <option key={id} value={String(id)}>{n}</option>)}</select></label>
-            <label>주차<select name="module" value={form.module} disabled={form.scope !== "module"} onChange={(e) => set({ module: e.currentTarget.value })}>
+            <label>주차<select class="select" name="module" value={form.module} disabled={form.scope !== "module"} onChange={(e) => set({ module: e.currentTarget.value })}>
               {modules.map(([id, n]) => <option key={String(id)} value={String(id)}>{n || `모듈 ${id}`}</option>)}</select></label>
           </div>
           <div class="flex flex-wrap items-center gap-2"><button class="btn">재생 계획 보기</button>
@@ -156,7 +156,7 @@ function PlanView({ plan }: { plan: Plan }) {
           </li>
         ))}
       </ol>
-      <div class="actions">
+      <div class="card-actions items-center px-5 pt-3 pb-5 max-phone:px-4">
         <button class="btn btn-primary" id="start-batch" onClick={startBatch}>{plan.items.length}개 재생 시작</button>
         <button class="btn btn-ghost" id="clear-plan" onClick={() => { state.plan = null; viewPlayback(); }}>계획 닫기</button>
       </div>
@@ -227,7 +227,7 @@ function PlaybackHero({ b, jobs, lateIds }: { b: BatchDetail; jobs: Job[]; lateI
         {current && (
           <>
             <p class="playback-percent"><strong>{Math.floor(jobProgressPercent(current))}%</strong></p>
-            <progress value={jobProgressPercent(current)} max={100} aria-label="현재 강의 재생 진행률" />
+            <progress class="progress progress-info" value={jobProgressPercent(current)} max={100} aria-label="현재 강의 재생 진행률" />
             <PlaybackActivity job={current} />
           </>
         )}
@@ -240,7 +240,7 @@ function PlaybackHero({ b, jobs, lateIds }: { b: BatchDetail; jobs: Job[]; lateI
         {b.total > 1 && (
           <>
             <p><strong>전체 진행률 {overall}%</strong> · {finished}/{b.total}개 완료</p>
-            <progress value={overall} max={100} aria-label="전체 재생 진행률" />
+            <progress class="progress progress-info" value={overall} max={100} aria-label="전체 재생 진행률" />
           </>
         )}
         {extras && <p class="meta">{extras}</p>}
@@ -267,7 +267,7 @@ function PlaybackQueue({ b, jobs, lateIds }: { b: BatchDetail; jobs: Job[]; late
   const nextId = b.cancel_requested ? null : jobs.find((job) => job.status === "queued")?.module_item_id;
   return (
     <Panel as="section" class="playback-queue" aria-labelledby="playback-queue-title">
-      <h2 class="panel-title" id="playback-queue-title">재생 목록 {b.total}개</h2>
+      <h2 class="card-title px-5 pt-[18px] pb-1 max-phone:px-4" id="playback-queue-title">재생 목록 {b.total}개</h2>
       <ol class="steps">
         {jobs.map((j) => {
           const late = lateIds.has(j.module_item_id);
@@ -296,7 +296,7 @@ function History() {
   if (!past.length) return null;
   return (
     <Panel as="section" class="playback-history" aria-labelledby="playback-history-title">
-      <h2 class="panel-title" id="playback-history-title">지난 재생</h2>
+      <h2 class="card-title px-5 pt-[18px] pb-1 max-phone:px-4" id="playback-history-title">지난 재생</h2>
       <ul class="list">
         {past.map((b) => {
           const failed = !!b.failed_count || b.status === "failed" || b.status === "partial";

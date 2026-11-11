@@ -55,7 +55,7 @@ function playbackTask(a: BatchDetail): TaskItem {
     note: a.cancel_requested ? "중지하는 중이에요"
       : [wait, "창을 닫아도 서버에서 계속돼요"].filter(Boolean).join(" · "),
     failed: false,
-    actions: a.cancel_requested ? [] : [{ label: "재생 중지", cls: "btn btn-sm btn-danger", run: cancelActivePlayback }],
+    actions: a.cancel_requested ? [] : [{ label: "재생 중지", cls: "btn btn-sm btn-error btn-outline", run: cancelActivePlayback }],
   };
 }
 
@@ -176,7 +176,7 @@ function TaskRow({ item }: { item: TaskItem }) {
           </div>
         )}
       </div>
-      {!item.failed && <progress max={100} value={item.pct ?? undefined} aria-labelledby={titleId} />}
+      {!item.failed && <progress class="progress progress-info" max={100} value={item.pct ?? undefined} aria-labelledby={titleId} />}
       {item.note && <p class="tp-note">{item.note}</p>}
       {([] as string[]).concat(item.detail || []).map((d, i) => <p key={i} class="tp-note">{d}</p>)}
     </li>

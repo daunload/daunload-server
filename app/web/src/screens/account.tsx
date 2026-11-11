@@ -53,11 +53,11 @@ function TokenForm({ c }: { c: Credentials | null }) {
   return (
     <form id="personal-token-form" onSubmit={(e) => { e.preventDefault(); update("PUT"); }}>
       <label for="personal-token">개인 액세스 토큰</label>
-      <input id="personal-token" type="password" required maxLength={4096} autocomplete="off" spellcheck={false}
+      <input class="input" id="personal-token" type="password" required maxLength={4096} autocomplete="off" spellcheck={false}
         aria-describedby="personal-token-help personal-token-error" value={value} disabled={busy !== null}
         onInput={(e) => setValue(e.currentTarget.value)} />
       <p id="personal-token-error" class="text-sm text-red empty:hidden" role="alert" tabIndex={-1} ref={errorRef}>{error}</p>
-      <div class="actions">
+      <div class="card-actions items-center pt-1">
         <PendingButton class="btn btn-primary" type="submit" busy={busy !== null} busyLabel={busy === "DELETE" ? "제거 중…" : "학교 연결 확인 중…"}>
           {registered ? "토큰 교체" : "토큰 등록"}
         </PendingButton>
@@ -86,7 +86,7 @@ function DeleteAccount() {
       toast("계정과 저장된 정보를 모두 지웠습니다");
     } catch (err) { toast((err as Error).message, true); }
   };
-  return <div><PendingButton class="btn btn-danger" id="delete-me" busy={busy} onClick={remove}>계정 삭제</PendingButton></div>;
+  return <div><PendingButton class="btn btn-error btn-outline" id="delete-me" busy={busy} onClick={remove}>계정 삭제</PendingButton></div>;
 }
 
 function Account() {

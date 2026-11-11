@@ -45,7 +45,7 @@
     <header class="access-top">
       <span class="brand"><img class="brand-mark" src="/mark.png" alt="" width="26" height="26">아유 하기싫어</span>
       <button class="btn btn-sm btn-ghost" id="access-logout" type="button">로그아웃</button>
-      <button class="btn btn-sm btn-danger" id="access-delete" type="button">계정 삭제</button>
+      <button class="btn btn-sm btn-error btn-outline" id="access-delete" type="button">계정 삭제</button>
     </header>
     <section class="access-box" aria-labelledby="access-title" tabindex="-1" id="access-box">
       <h1 class="access-cap" id="access-title"></h1>
@@ -66,16 +66,16 @@
       <div class="auth-brand"><img class="brand-mark" src="/mark.png" alt="" width="26" height="26"><span class="brand">아유 하기싫어</span></div>
       <div><h1>아유… 로그인부터 하자</h1><p class="text-sm text-ink-3">통합 로그인(유세인트, LMS) 학번과 비밀번호를 그대로 써요. 학교 공식 서비스가 아니에요.</p></div>
       <form id="login-form" class="grid gap-3.5">
-        <label>학번<input name="student_id" placeholder="학번을 입력하세요" inputmode="numeric" autocomplete="username" required></label>
+        <label>학번<input class="input" name="student_id" placeholder="학번을 입력하세요" inputmode="numeric" autocomplete="username" required></label>
         <label for="password">비밀번호</label>
-        <div class="password-field"><input id="password" name="password" type="password" placeholder="학교 계정 비밀번호" autocomplete="current-password" required><button type="button" id="password-toggle" aria-controls="password" aria-pressed="false">표시</button></div>
+        <div class="password-field"><input class="input pr-[60px]" id="password" name="password" type="password" placeholder="학교 계정 비밀번호" autocomplete="current-password" required><button type="button" id="password-toggle" aria-controls="password" aria-pressed="false">표시</button></div>
         <div class="consent" id="consent-row" hidden>
           <p>처음 로그인하셨네요. 시작하기 전에 확인해 주세요.</p>
           <ul>
             <li>학교 비밀번호는 로그인할 때 학교 서버로 확인하는 데에만 쓰고 저장하지 않습니다. LMS를 대신 조회하기 위해 학교 로그인 세션만 암호화해 보관하며, 계정 메뉴에서 언제든 지울 수 있습니다.</li>
             <li>강의 자동 재생은 직접 시청하지 않은 수강이므로 학칙상 문제가 될 수 있습니다. 과목마다 직접 켜야 동작합니다.</li>
           </ul>
-          <label class="check"><input name="agree" type="checkbox"><span>위 내용을 이해했고 동의합니다.</span></label>
+          <label class="flex min-h-touch cursor-pointer items-center gap-2 font-normal text-ink"><input name="agree" type="checkbox" class="checkbox"><span>위 내용을 이해했고 동의합니다.</span></label>
         </div>
         <p class="text-sm text-red empty:hidden" id="auth-error" role="alert"></p>
         <button class="btn btn-primary" id="auth-submit">로그인</button>
@@ -109,7 +109,7 @@
       </nav>
       </div>
       <div class="workspace">
-        <div class="notice-inline privacy-notice" id="privacy-notice" role="note" hidden>
+        <div class="alert alert-outline privacy-notice" id="privacy-notice" role="note" hidden>
           <p>개인정보처리방침이 바뀌었어요. 관리자가 승인한 사용자만 서비스를 쓸 수 있고, 권한 요청과 결정 기록을 보관해요.</p>
           <div class="privacy-notice-actions"><a class="btn btn-sm" href="/privacy.html" target="_blank" rel="noopener">자세히 보기</a><button class="btn btn-sm" id="privacy-notice-close" type="button" aria-label="개인정보처리방침 안내 닫기">닫기</button></div>
         </div>
@@ -118,13 +118,14 @@
     </div>
   </div>
 
-  <div class="toast-stack" id="toast" aria-live="polite"></div>
+  <div class="toast toast-center toast-bottom" id="toast" aria-live="polite"></div>
   <aside id="task-panel" aria-label="진행 중인 작업" hidden>
     <button type="button" id="task-bar" aria-expanded="false" aria-controls="task-sheet"><span id="task-dot" aria-hidden="true" hidden></span><span id="task-summary" aria-live="polite"></span><span id="task-toggle">펼치기</span></button>
     <div id="task-sheet" hidden></div>
   </aside>
-  <dialog class="transcript-dialog" id="transcript-dialog"></dialog>
-  <dialog class="confirm-dialog m-auto max-h-[calc(100vh-64px)] w-[min(440px,calc(100vw-32px))] gap-3 overflow-y-auto rounded-card border-2 border-ink bg-surface p-5 text-ink open:grid backdrop:bg-[rgb(0_0_0/.35)]" id="confirm-dialog"></dialog>
+  <!-- 대화상자는 daisyUI modal: <dialog class="modal"> 안의 .modal-box에 내용을 그린다(크기·먹선·휴대폰 폭은 daisy.css). -->
+  <dialog class="modal" id="transcript-dialog"><div class="modal-box flex max-w-[760px] flex-col gap-2.5 overflow-hidden"></div></dialog>
+  <dialog class="modal" id="confirm-dialog"><div class="modal-box grid max-w-[440px] gap-3 overscroll-contain"></div></dialog>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

@@ -17,7 +17,7 @@ function AccessRequests() {
   const d = load.data;
   if (!d.items.length) return null;
   return (
-    <section class="panel admin-box admin-access border-amber" aria-labelledby="admin-access-title">
+    <section class="card admin-box admin-access border-amber" aria-labelledby="admin-access-title">
       <h2 id="admin-access-title">권한 요청 {adminNumber(d.total)}건</h2>
       <Table caption="권한 요청" cls="admin-linked" rows={d.items} columns={[
         { label: "학번", render: (r) => <UserLink id={r.student_id} />, cls: "admin-nowrap" },
@@ -31,7 +31,7 @@ function AccessRequests() {
 }
 
 function Kpi({ label, value, sub, bad }: { label: string; value: string; sub: string; bad?: boolean }) {
-  return <div class={`panel admin-kpi${bad ? " bad" : ""}`}><span class="admin-kpi-label">{label}</span><strong>{value}</strong><span class="admin-kpi-sub">{sub}</span></div>;
+  return <div class={`card admin-kpi${bad ? " bad" : ""}`}><span class="admin-kpi-label">{label}</span><strong>{value}</strong><span class="admin-kpi-sub">{sub}</span></div>;
 }
 
 /** 일별 막대. 값은 각 막대의 title과 아래 표에 있다. */
@@ -44,7 +44,7 @@ function Chart({ d }: { d: Row }) {
   const step = n <= 7 ? 1 : n <= 31 ? 5 : 15;  // 마지막 날부터 거꾸로 셀 때 이 간격마다 날짜를 쓴다
   const since = d.tracking_since ? ` · 로그인·다운로드 추이는 ${d.tracking_since}부터 집계` : " · 로그인·다운로드 기록은 아직 없습니다";
   return (
-    <section class="panel admin-box admin-chart" aria-labelledby="admin-chart-title">
+    <section class="card admin-box admin-chart" aria-labelledby="admin-chart-title">
       <div class="admin-box-head"><h2 id="admin-chart-title">일별 {label}</h2>
         <div class="admin-seg" role="group" aria-label="그래프 항목">
           {Object.entries(ADMIN_METRICS).map(([key, name]) => (
@@ -92,7 +92,7 @@ function OverviewBody({ d }: { d: Row }) {
       </section>
       <div class="admin-grid">
         <Chart d={d} />
-        <section class="panel admin-box" aria-labelledby="admin-feed-title">
+        <section class="card admin-box" aria-labelledby="admin-feed-title">
           <h2 id="admin-feed-title">최근 활동</h2>
           {d.recent_activity.length ? (
             <ul class="admin-feed">
@@ -109,7 +109,7 @@ function OverviewBody({ d }: { d: Row }) {
           ) : <p class="admin-empty admin-feed">기간 안에 활동이 없습니다.</p>}
         </section>
       </div>
-      <section class="panel admin-box admin-problems" aria-labelledby="admin-problems-title">
+      <section class="card admin-box admin-problems" aria-labelledby="admin-problems-title">
         <div class="admin-box-head"><h2 id="admin-problems-title">확인이 필요한 문제</h2>
           <a class="admin-more" href="#admin/problems">문제 {adminNumber(d.problem_count)}건 모두 보기</a></div>
         {d.recent_problems.length ? (

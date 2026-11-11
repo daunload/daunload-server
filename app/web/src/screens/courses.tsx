@@ -51,8 +51,8 @@ function CourseRow({ c }: { c: Course }) {
   return (
     <div class="course">
       <div class="course-head"><h3>{c.name}</h3><span class="text-sm text-ink-3">{c.professors || ""}</span>
-        <label class="toggle">
-          <input type="checkbox" data-course={c.lms_course_id} checked={pending ?? c.auto_play} disabled={pending !== null}
+        <label class="inline-flex cursor-pointer items-center gap-2 text-sm font-medium text-ink-2">
+          <input type="checkbox" class="toggle" data-course={c.lms_course_id} checked={pending ?? c.auto_play} disabled={pending !== null}
             onChange={(e) => toggle(e.currentTarget.checked)} />자동 수강
         </label>
       </div>
@@ -66,7 +66,7 @@ function Courses() {
   return (
     <>
       <ViewHead title="과목" />
-      <p class="notice-inline">자동 수강을 켜면 동기화할 때마다 새로 열린 영상을 순서대로 재생합니다. 직접 시청하지 않은 수강은 학칙상 문제가 될 수 있으니 확인 후 켜세요.</p>
+      <p class="alert alert-outline">자동 수강을 켜면 동기화할 때마다 새로 열린 영상을 순서대로 재생합니다. 직접 시청하지 않은 수강은 학칙상 문제가 될 수 있으니 확인 후 켜세요.</p>
       <Panel>
         {state.courses.length
           ? state.courses.map((c) => <CourseRow key={c.lms_course_id} c={c} />)

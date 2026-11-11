@@ -253,8 +253,8 @@ export function AccessButtons({ id, status, isAdmin, reload }: { id: string; sta
   );
   return (
     <div class="admin-acts">
-      {status === "pending" ? [btn("approve", "승인", " btn-primary"), btn("reject", "거절", " btn-danger")]
-        : status === "approved" ? btn("revoke", "권한 회수", " btn-danger")
+      {status === "pending" ? [btn("approve", "승인", " btn-primary"), btn("reject", "거절", " btn-error btn-outline")]
+        : status === "approved" ? btn("revoke", "권한 회수", " btn-error btn-outline")
           : btn("approve", "바로 승인", "")}
     </div>
   );

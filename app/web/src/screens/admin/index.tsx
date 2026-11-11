@@ -66,7 +66,7 @@ function PeriodActions({ onPeriod, onReload }: { onPeriod: () => void; onReload:
   return (
     <>
       <label class="admin-period">기간
-        <select id="admin-days" value={String(adminUi.days)} onChange={(e) => { adminUi.days = Number(e.currentTarget.value); onPeriod(); }}>
+        <select class="select w-auto min-w-0 flex-1" id="admin-days" value={String(adminUi.days)} onChange={(e) => { adminUi.days = Number(e.currentTarget.value); onPeriod(); }}>
           {ADMIN_PERIODS.map((d) => <option key={d} value={String(d)}>최근 {d}일</option>)}
         </select>
       </label>
@@ -97,9 +97,9 @@ function Admin({ path, nav }: { path: string[]; nav: number }) {
   return (
     <div class="admin" onClick={onLinkClick}>
       <ViewHead title="운영 현황"><div class="admin-actions" id="admin-actions">{actions}</div></ViewHead>
-      <nav class="admin-tabs" aria-label="관리자 메뉴">
+      <nav class="admin-tabs tabs tabs-box" aria-label="관리자 메뉴">
         {ADMIN_TABS.map((t) => (
-          <a key={t.key} class="admin-tab" href={`#admin/${t.key}`} data-admin-tab={t.key} aria-current={t.key === tab ? "page" : undefined}><TabLabel tab={t} /></a>
+          <a key={t.key} class="tab admin-tab" href={`#admin/${t.key}`} data-admin-tab={t.key} aria-current={t.key === tab ? "page" : undefined}><TabLabel tab={t} /></a>
         ))}
       </nav>
       <div class="admin-body" id="admin-body" key={`${nav}:${path.join("/")}`}>

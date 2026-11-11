@@ -1,7 +1,7 @@
-/* 알림 토스트. index.html의 #toast(.toast-stack) 안에 그린다.
+/* 알림 토스트. index.html의 #toast(daisyUI toast) 안에 daisyUI alert로 그린다.
  * 성공은 3200ms 뒤 사라지고, 오류는 닫기 전까지 남는다(role="alert" + 닫기 버튼).
  * 같은 오류가 이미 떠 있으면 늘리지 않고, 최대 3개까지만 둔다. 넘치면 오류가 아닌 알림부터 지우고, 모두 오류일 때만 가장 오래된 것을 지운다.
- * 위치(.toast-stack)는 진행 패널·하단 광고와 함께 움직이므로 legacy.css에 남아 있다.
+ * 아래쪽 위치는 진행 패널·하단 광고와 함께 움직이므로 daisy.css의 #toast 규칙이 정한다.
  */
 import { render } from "preact";
 
@@ -41,10 +41,10 @@ export function clearToasts(): void {
 function Toast({ item }: { item: ToastItem }) {
   return (
     <div
-      class={`toast ${item.bad ? "bad bg-red" : "bg-ink"} pointer-events-auto flex max-w-full items-center gap-3 rounded-card border-2 border-surface px-4.5 py-3 text-sm text-white animate-toast-in motion-reduce:animate-none`}
+      class={`alert ${item.bad ? "bad alert-error" : "bg-ink text-white"} pointer-events-auto flex max-w-full items-center gap-3 rounded-card border-surface px-4.5 py-3`}
       role={item.bad ? "alert" : undefined}
     >
-      <span>{item.msg}</span>
+      <span class="break-keep wrap-anywhere">{item.msg}</span>
       {item.bad && (
         <button type="button"
           class="toast-close flex-none min-h-touch min-w-touch cursor-pointer rounded-btn border border-current bg-transparent px-2.5 font-sans text-sm font-bold text-white"

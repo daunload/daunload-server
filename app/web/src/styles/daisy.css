@@ -1,0 +1,126 @@
+/* daisyUI 컴포넌트를 뚱이 모양으로 맞춘다(app.css에서 utilities 레이어로 불러온다).
+ * daisyUI는 기본 모양을 daisyui.l1.l2.l3, 색·크기 변형을 l1.l2, hover·active를 l1에 둔다(바깥 단계일수록 강하다).
+ * 이 파일은 daisyUI보다 먼저 출력되므로 같은 레이어에 쓰면 진다. 그래서 각 단계 바로 뒤에 ttungi 레이어를 선언해 둔다:
+ *   l1.l2.ttungi(기본 모양) > daisyUI 기본 모양, 하지만 < daisyUI 변형(btn-primary 등)
+ *   l1.ttungi(변형)        > daisyUI 변형,     하지만 < daisyUI hover·active
+ *   daisyui.ttungi(눌림)   > daisyUI hover·active
+ * Tailwind 유틸리티는 하위 레이어 밖에 있으므로 이 파일보다도 강하다.
+ * 색은 테마 변수(--color-*)를 쓰고, 글자 크기·터치 영역은 tokens.css를 쓴다.
+ */
+@layer daisyui.l1.l2.l3, daisyui.l1.l2.ttungi, daisyui.l1.ttungi, daisyui.ttungi;
+
+/* ---------- 기본 모양 ---------- */
+@layer daisyui.l1.l2.ttungi {
+  /* 버튼: 높이 고정 대신 44px 이상으로 두어 긴 문구는 줄바꿈된다. 테두리 있는 버튼은 먹선, 바탕은 흰색. */
+  .btn {
+    --size: var(--touch);
+    --fontsize: var(--text-sm);
+    --btn-p: 14px;
+    height: auto; min-height: var(--size); padding-block: 6px;
+    font-family: var(--font); line-height: 1.25; letter-spacing: -0.01em;
+    white-space: normal; overflow-wrap: anywhere; text-decoration: none; gap: 4px;
+    flex-shrink: 1; /* daisyUI는 0이라 좁은 줄에서 긴 버튼이 화면 밖으로 밀린다 */
+    & .icon { width: 16px; height: 16px; flex: 0 0 16px; color: currentColor; }
+    & .icon[data-icon="download-done"] { color: var(--color-success); }
+    & .icon[data-icon="text-view"] { color: var(--color-info); }
+  }
+  .btn:not(.btn-ghost, .btn-outline, .btn-dash, .btn-soft, .btn-link) {
+    --btn-bg: var(--btn-color, var(--color-base-100));
+    border-color: var(--color-base-content);
+  }
+  .btn-soft { border-width: 1.5px; border-color: var(--line); }
+  .btn-link { min-height: var(--touch); padding-inline: 4px; font-weight: 500; color: var(--color-info); }
+
+  /* 카드: 흰 바탕 + 먹선. 본문 글자는 16px(daisyUI 기본 14px 대신). */
+  .card {
+    --card-p: 20px; --card-fs: var(--text-md); --cardtitle-fs: var(--text-md);
+    background-color: var(--color-base-100); border: var(--border) solid var(--color-base-content);
+    @media (max-width: 760px) { --card-p: 16px; }
+  }
+  .card-body { gap: 12px; }
+  .card-title { font-weight: 700; }
+
+  /* 안내 상자 */
+  /* daisyUI는 테두리 색을 하위 레이어 밖에서 --alert-border-color로 정하므로 색은 그 변수로 바꾼다. */
+  /* daisyUI alert는 아이콘·글·버튼을 가로로 늘어놓는 격자다. 여기서는 안내 문단 상자로 쓰므로 위에서 아래로 쌓는다. */
+  .alert {
+    grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); justify-items: stretch; align-items: start;
+    padding: 12px 14px; gap: 8px; border-radius: var(--radius-field); overflow-wrap: anywhere;
+  }
+
+  /* 입력칸·선택칸: 44px, 먹선, 16px 글자(휴대폰에서 확대되지 않게) */
+  .input, .select {
+    --size: var(--touch);
+    width: 100%; max-width: 100%; min-width: 0;
+    font-family: var(--font); font-size: var(--text-md);
+    border-color: var(--color-base-content); border-radius: var(--radius-field);
+  }
+  .input:focus, .input:focus-within, .select:focus, .select:focus-within {
+    --input-color: var(--color-info);
+    border-color: var(--color-info); outline: 2px solid var(--color-info); outline-offset: 0;
+  }
+
+  .checkbox { --input-color: var(--color-secondary); border-color: var(--color-base-content); }
+  .toggle { --input-color: var(--color-base-content); }
+
+  .progress { height: 12px; border: var(--border) solid var(--color-base-content); background-color: var(--color-base-200); }
+
+  .skeleton { height: 44px; border-radius: var(--radius-field); background-color: var(--color-base-200); }
+
+  /* 가운데 창: 휴대폰 주소창을 뺀 높이(dvh) 안에 두고, 먹선과 먹선 그림자를 준다. */
+  .modal-box {
+    max-height: calc(100dvh - 32px); padding: 20px;
+    border: var(--border) solid var(--color-base-content); box-shadow: 4px 4px 0 var(--color-base-content);
+    word-break: keep-all;
+    @media (max-width: 760px) { width: calc(100vw - 2 * var(--gutter)); max-width: none; padding: 16px; }
+  }
+}
+
+/* ---------- 변형 ---------- */
+@layer daisyui.l1.ttungi {
+  /* daisyUI의 btn-sm은 32px로 줄어든다. 여기서는 좌우 여백만 줄이고 높이는 44px을 지킨다. */
+  .btn-sm { --size: var(--touch); --fontsize: var(--text-sm); --btn-p: 12px; }
+  .btn-block { min-height: 54px; border-radius: var(--radius-box); --fontsize: var(--text-md); }
+  .btn-square { width: var(--touch); padding: 0; flex: none; & .icon { width: 20px; height: 20px; flex-basis: 20px; } }
+  .btn-primary { box-shadow: 3px 3px 0 var(--color-base-content); }
+  .btn-primary:disabled { box-shadow: none; }
+  /* 눌림 상태(aria-pressed)는 검정 바탕 */
+  .btn[aria-pressed="true"] { --btn-color: var(--color-neutral); --btn-fg: var(--color-neutral-content); }
+
+  .progress-info::-webkit-progress-value, .progress-info::-moz-progress-bar { background-color: var(--color-info); }
+
+  /* 탭: 칩 모양. daisyUI는 tabs-box와 그 안의 탭 모양을 변형 단계(l1.l2)에 두므로 여기(l1.ttungi)에 쓴다. */
+  .tabs-box { padding: 0; gap: 6px; flex-wrap: wrap; background: none; box-shadow: none; }
+  .tab {
+    --tab-height: var(--touch);
+    display: inline-flex; align-items: center; gap: 4px; text-decoration: none; cursor: pointer;
+    height: auto; min-height: var(--touch); padding-inline: 14px;
+    font-weight: 600; font-size: var(--text-md); color: var(--color-base-content);
+    background: var(--color-base-100); border: var(--border) solid var(--color-base-content); border-radius: var(--radius-selector);
+    &::before { display: none; }
+    &:hover { background: var(--color-base-200); }
+  }
+  /* 고른 탭은 검정 바탕(hover보다 뒤에 둔다) */
+  .tab-active, .tab[aria-selected="true"], .tab[aria-current="page"] { background: var(--color-neutral); color: var(--color-neutral-content); }
+  .tab:disabled, .tab[aria-disabled="true"] { cursor: not-allowed; opacity: .45; }
+
+  /* 토스트: 화면 아래 가운데. 하단 광고(--ad-inset)와 진행 패널(body.has-task-bar) 위로 올라간다. */
+  #toast {
+    z-index: var(--z-toast); bottom: calc(24px + var(--ad-inset)); max-width: calc(100% - 32px); align-items: center; pointer-events: none;
+    @media (max-width: 760px) { bottom: calc(max(16px, env(safe-area-inset-bottom)) + var(--ad-inset)); }
+  }
+  body.has-task-bar #toast { bottom: calc(72px + var(--ad-inset)); }
+}
+
+/* ---------- 눌림·hover, 그리고 daisyUI가 l1에 두는 변형(alert-soft, alert-outline) ---------- */
+@layer daisyui.ttungi {
+  /* 경고: 연한 빨강 바탕 + 빨간 먹선 */
+  .alert-error.alert-soft { --alert-border-color: var(--color-error); background: var(--red-soft); color: var(--color-error); }
+  /* 안내: 흰 바탕 + 먹선 */
+  .alert-outline { --alert-border-color: var(--color-base-content); background-color: var(--color-base-100); color: var(--ink-2); }
+
+  .btn-primary:active:not(:disabled) { translate: 3px 3px; box-shadow: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .btn:active, .btn-primary:active:not(:disabled) { translate: none; }
+  }
+}

@@ -22,7 +22,6 @@
 .consent { display: grid; gap: 8px; padding: 14px; border-radius: var(--r-btn); background: var(--fill); font-size: var(--text-sm); color: var(--ink-2); }
 .consent ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 .password-field { display: flex; position: relative; }
-.password-field input { width: 100%; padding-right: 60px; }
 .password-field button { position: absolute; right: 4px; top: 4px; bottom: 4px; border: 0; background: transparent; color: var(--ink-3); font: 500 13px var(--font); padding: 0 10px; cursor: pointer; border-radius: 8px; }
 .password-field button:hover { color: var(--ink-2); }
 .skip-link { position: fixed; left: 16px; top: -100px; z-index: var(--z-skip); padding: 10px 16px; background: var(--surface); border-radius: var(--r-btn); box-shadow: 0 0 0 2px var(--blue); }
@@ -129,13 +128,6 @@ i.done { background: var(--green); }
 .bar { height: 4px; background: var(--fill); border-radius: 2px; overflow: hidden; margin-top: 6px; }
 .bar i { display: block; height: 100%; background: var(--blue); }
 
-/* ---------- 토스트 ---------- */
-.toast-stack {
-  z-index: var(--z-toast); position: fixed; left: 50%; bottom: calc(24px + var(--ad-inset)); transform: translateX(-50%);
-  display: flex; flex-direction: column; align-items: center; gap: 8px; width: max-content; max-width: calc(100% - 32px);
-  pointer-events: none;
-}
-
 /* ---------- 비활성 이유 ---------- */
 .reason, .tabs-reason { font-size: var(--text-sm); color: var(--ink-2); }
 .tabs-reason { margin: 4px 0 0; }
@@ -163,7 +155,6 @@ i.done { background: var(--green); }
   .group-label { padding-inline: 16px; }
   .steps li { grid-template-columns: 1.4em minmax(0, 1fr) auto; gap: 8px; }
   .auth-box { padding: 28px 20px; }
-  .toast-stack { bottom: calc(max(16px, env(safe-area-inset-bottom)) + var(--ad-inset)); }
 }
 @media (prefers-reduced-motion: reduce) {
   .icon[data-icon="loader"] { animation: none !important; }
@@ -173,11 +164,6 @@ i.done { background: var(--green); }
 .view:focus-visible { outline: none; }
 .view-head label { grid-auto-flow: column; align-items: center; gap: 8px; }
 
-.transcript-dialog { border: 2px solid var(--ink); border-radius: var(--r-card); padding: 20px; width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 64px); display: grid; gap: 10px; }
-.transcript-dialog:not([open]) { display: none; }
-.transcript-dialog::backdrop { background: rgba(0,0,0,.35); }
-.dialog-head { display: grid; gap: 2px; }
-.transcript-text { white-space: pre-wrap; word-break: keep-all; font: inherit; margin: 0; padding: 12px; background: var(--fill); border-radius: var(--r-btn); max-height: 60vh; overflow: auto; }
 
 .playback-failure { margin-top: 12px; overflow-wrap: anywhere; }
 .playback-failure summary { cursor: pointer; min-height: 44px; padding: 12px 0; color: var(--ink); }
@@ -241,6 +227,7 @@ i.done { background: var(--green); }
   width: 320px; max-height: calc(100dvh - 16px - var(--ad-inset));
   display: flex; flex-direction: column; overflow: hidden;
   background: var(--surface); border: 2px solid var(--ink); border-radius: 12px; box-shadow: 3px 3px 0 var(--ink);
+  word-break: keep-all;
 }
 #task-bar {
   flex: none; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 48px; padding: 6px 12px;
@@ -260,12 +247,12 @@ i.done { background: var(--green); }
 .tp-row.bad .tp-title { color: var(--red); }
 .tp-row progress { width: 100%; accent-color: var(--blue); }
 .tp-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
-.tp-title { flex: 1 1 10em; min-width: 0; margin: 0; font-size: var(--text-md); font-weight: 700; overflow-wrap: anywhere; }
+/* 제목이 14em보다 좁아지면 버튼 줄이 제목 아래로 내려간다(휴대폰의 긴 실패 제목). */
+.tp-title { flex: 1 1 14em; min-width: 0; margin: 0; font-size: var(--text-md); font-weight: 700; overflow-wrap: anywhere; }
 .tp-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .tp-note { margin: 0; font-size: var(--text-sm); color: var(--ink-2); overflow-wrap: anywhere; }
-/* 바(8px 여백 + 52px 높이)와 그 위 12px 간격만큼 비워 내용과 토스트가 가려지지 않게 한다 */
+/* 바(8px 여백 + 52px 높이)와 그 위 12px 간격만큼 비워 내용이 가려지지 않게 한다(토스트 위치는 daisy.css) */
 body.has-task-bar { padding-bottom: calc(72px + var(--ad-inset)); }
-body.has-task-bar .toast-stack { bottom: calc(72px + var(--ad-inset)); }
 @media (max-width: 760px) {
   #task-panel { left: 8px; right: 8px; width: auto; }
 }
@@ -367,15 +354,6 @@ body.has-task-bar .toast-stack { bottom: calc(72px + var(--ad-inset)); }
 .admin { display: grid; gap: 12px; min-width: 0; }
 .admin-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .view-head .admin-period { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); font-weight: 600; white-space: nowrap; }
-.admin-period select { min-width: 0; min-height: var(--touch); background: var(--surface); border: 2px solid var(--ink); }
-.admin-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
-.admin-tab {
-  display: inline-flex; align-items: center; gap: 4px; min-height: var(--touch); padding: 0 16px;
-  border: 2px solid var(--ink); border-radius: var(--r-chip); background: var(--surface);
-  color: var(--ink); font-size: var(--text-sm); font-weight: 600;
-}
-.admin-tab:hover { background: var(--fill); text-decoration: none; }
-.admin-tab[aria-current="page"] { background: var(--ink); color: #fff; }
 .admin-count { font-weight: 700; }
 .admin-tab:not([aria-current="page"]) .admin-count { color: var(--red); }
 .admin-body { display: grid; gap: 12px; min-width: 0; }
@@ -433,11 +411,9 @@ body.has-task-bar .toast-stack { bottom: calc(72px + var(--ad-inset)); }
 
 /* 사용자 목록 */
 .admin-filters { display: flex; align-items: end; gap: 8px 12px; flex-wrap: wrap; }
-.admin-filters label:not(.check) { min-width: 0; }
-.admin-filters input:not([type="checkbox"]), .admin-filters select { background: var(--surface); border: 2px solid var(--ink); }
+.admin-filters label:not(:has(.checkbox)) { min-width: 0; }
 .admin-filters .admin-search { flex: 1 1 220px; max-width: 320px; }
 .admin-filters .admin-search input { width: 100%; }
-.admin-box .admin-filters select, .admin-box .admin-filters input:not([type="checkbox"]) { border-width: 1.5px; border-color: var(--line); }
 .admin-users tbody tr { cursor: pointer; }
 .admin-users tbody tr:hover { background: var(--fill); }
 .admin-users td a { display: inline-flex; align-items: center; min-height: var(--touch); font-weight: 700; }
@@ -450,7 +426,6 @@ body.has-task-bar .toast-stack { bottom: calc(72px + var(--ad-inset)); }
 .admin-linked td a { display: inline-flex; align-items: center; min-height: var(--touch); font-weight: 700; }
 .admin-linked td { vertical-align: middle; }
 .admin-hint { flex: 1 1 220px; align-self: center; font-size: var(--text-xs); color: var(--ink-3); }
-.admin-filters select:disabled { color: var(--ink-3); border-color: var(--line); cursor: not-allowed; }
 
 /* 사용자 상세 */
 .admin-back { display: inline-flex; align-items: center; gap: 4px; min-height: var(--touch); justify-self: start; font-size: var(--text-sm); font-weight: 600; }
@@ -463,8 +438,6 @@ body.has-task-bar .toast-stack { bottom: calc(72px + var(--ad-inset)); }
 .admin-err { display: block; margin-top: 2px; color: var(--red); font-size: var(--text-xs); overflow-wrap: anywhere; }
 .admin-sub .admin-err { font-size: var(--text-sm); }
 .admin-sum { grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: 6px; }
-.admin-subtabs { display: flex; gap: 6px; flex-wrap: wrap; }
-.admin-subtabs .admin-tab { border-width: 1.5px; padding: 0 12px; }
 .admin-user-tab h3 { font-size: var(--text-md); }
 .admin-user-tab > section, .admin-paged { display: grid; gap: 10px; min-width: 0; }
 .admin-user-tab > section + section { border-top: 1px solid var(--line); padding-top: 16px; }
@@ -486,11 +459,9 @@ body.has-task-bar .toast-stack { bottom: calc(72px + var(--ad-inset)); }
   .admin-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .admin-kpi { padding: 12px 14px; }
   .admin-box { padding: 16px; }
-  .admin-tab { padding: 0 12px; }
   .admin-actions { width: 100%; flex-wrap: nowrap; }
   .view-head .admin-period { flex: 1; width: auto; min-width: 0; }
-  .admin-period select { flex: 1; width: auto; }
-  .admin-feed li { flex-direction: column; }
+    .admin-feed li { flex-direction: column; }
   /* 표는 줄마다 카드가 되고, 칸 이름은 data-label로 붙인다 */
   .admin-table thead { display: none; }
   .admin-table tr { display: grid; gap: 4px; padding: 10px 0; border-bottom: 1px solid var(--line); }
@@ -498,11 +469,10 @@ body.has-task-bar .toast-stack { bottom: calc(72px + var(--ad-inset)); }
   .admin-table td { display: grid; grid-template-columns: 5.5em minmax(0, 1fr); gap: 8px; padding: 0; border: 0; }
   .admin-table td::before { content: attr(data-label); font-size: var(--text-xs); font-weight: 600; color: var(--ink-3); padding-top: 2px; }
   .admin-table .admin-nowrap { white-space: normal; }
-  .admin-filters > label:not(.check) { flex: 1 1 140px; }
+  .admin-filters > label:not(:has(.checkbox)) { flex: 1 1 140px; }
   .admin-filters .admin-search { flex-basis: 100%; max-width: none; }
   .admin-filters select { width: 100%; }
   .admin-sum { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .admin-subtabs .admin-tab { padding: 0 10px; }
   .admin-dl > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .admin-users td a { min-height: 0; }
   .admin-linked td:has(> div > a:only-child)::before { align-self: center; padding-top: 0; }  /* 44px 학번 링크와 머리글을 같은 줄에 */

@@ -24,11 +24,11 @@ export function TranscribeButton({ v, courseId }: { v: TxSource; courseId: numbe
   const st = v.mediaPath ? txStatusOf(courseId, v.module_item_id) : null;
   if (st) {
     const label = st === "running" ? "변환 중" : "대기 중";
-    return <button class="btn btn-icon btn-ghost" data-tx={v.module_item_id} title={label} disabled><IconOnly name={st === "running" ? "loader" : "clock"} label={label} /></button>;
+    return <button class="btn btn-square btn-ghost" data-tx={v.module_item_id} title={label} disabled><IconOnly name={st === "running" ? "loader" : "clock"} label={label} /></button>;
   }
   if (v.transcript_id) {
     return (
-      <button class="btn btn-icon btn-ghost" data-tx-open={v.transcript_id} title="텍스트 보기"
+      <button class="btn btn-square btn-ghost" data-tx-open={v.transcript_id} title="텍스트 보기"
         onClick={() => openTranscript(v.transcript_id!, v.mediaPath ? toJob(v, courseId) : null)}>
         <IconOnly name="text-view" label="텍스트 보기" />
       </button>
@@ -36,7 +36,7 @@ export function TranscribeButton({ v, courseId }: { v: TxSource; courseId: numbe
   }
   if (!v.mediaPath) return null;
   return (
-    <button class="btn btn-icon btn-ghost" data-tx={v.module_item_id} title="텍스트로 변환"
+    <button class="btn btn-square btn-ghost" data-tx={v.module_item_id} title="텍스트로 변환"
       onClick={() => { enqueueTranscription([toJob(v, courseId)]); renderVideoList(); }}>
       <IconOnly name="text-convert" label="텍스트로 변환" />
     </button>
@@ -71,7 +71,11 @@ function fmtStamp(sec: number): string {
   return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
+const PHONE_HALF = "max-phone:grow max-phone:basis-[calc(50%-3px)]";
+
 const dialog = () => document.getElementById("transcript-dialog") as HTMLDialogElement;
+/** 내용은 <dialog class="modal"> 안의 .modal-box에 그린다. */
+const dialogBox = () => dialog().querySelector<HTMLElement>(".modal-box")!;
 
 function TranscriptView({ t, redoJob }: { t: Transcript; redoJob: TxJob | null }) {
   const [withTime, setWithTime] = useState(false);
@@ -103,15 +107,17 @@ function TranscriptView({ t, redoJob }: { t: Transcript; redoJob: TxJob | null }
 
   return (
     <>
-      <div class="dialog-head"><strong>{t.title}</strong><span class="meta">{t.course_name} · {t.model}</span></div>
-      <label class="check"><input type="checkbox" id="tx-time" checked={withTime} onChange={(e) => setWithTime(e.currentTarget.checked)} /><span>시간 표시</span></label>
-      <pre id="tx-text" class="transcript-text">{text}</pre>
-      <div class="dialog-actions flex flex-wrap items-center gap-1.5">
-        <button class="btn btn-sm" id="tx-copy" onClick={copy}>복사</button>
-        <button class="btn btn-sm" id="tx-save" onClick={save}>.txt로 받기</button>
-        {redoJob && <button class="btn btn-sm" id="tx-redo" onClick={redo}>다시 변환</button>}
-        <PendingButton class="btn btn-sm btn-danger" id="tx-delete" busy={deleting} onClick={remove}>삭제</PendingButton>
-        <button class="btn btn-sm btn-primary ml-auto" id="tx-close" onClick={close}>닫기</button>
+      <div class="grid flex-none gap-0.5 wrap-anywhere"><strong>{t.title}</strong><span class="meta">{t.course_name} · {t.model}</span></div>
+      <label class="flex min-h-touch cursor-pointer items-center gap-2 font-normal text-ink flex-none"><input type="checkbox" class="checkbox" id="tx-time" checked={withTime} onChange={(e) => setWithTime(e.currentTarget.checked)} /><span>시간 표시</span></label>
+      {/* 창 높이가 모자라면 본문만 줄어들어 안에서 스크롤한다. 버튼 줄은 항상 보인다. */}
+      <pre id="tx-text" class="m-0 min-h-24 flex-1 overflow-auto overscroll-contain rounded-btn bg-fill p-3 font-sans text-md whitespace-pre-wrap break-keep wrap-anywhere">{text}</pre>
+      {/* 휴대폰: 보조 버튼은 한 줄에 둘씩 나눠 채우고, 닫기는 맨 아래 한 줄을 다 쓴다. */}
+      <div class="flex flex-none flex-wrap items-center gap-1.5">
+        <button class={`btn btn-sm ${PHONE_HALF}`} id="tx-copy" onClick={copy}>복사</button>
+        <button class={`btn btn-sm ${PHONE_HALF}`} id="tx-save" onClick={save}>.txt로 받기</button>
+        {redoJob && <button class={`btn btn-sm ${PHONE_HALF}`} id="tx-redo" onClick={redo}>다시 변환</button>}
+        <PendingButton class={`btn btn-sm btn-error btn-outline ${PHONE_HALF}`} id="tx-delete" busy={deleting} onClick={remove}>삭제</PendingButton>
+        <button class="btn btn-sm btn-primary ml-auto max-phone:ml-0 max-phone:basis-full" id="tx-close" onClick={close}>닫기</button>
       </div>
     </>
   );
@@ -119,14 +125,15 @@ function TranscriptView({ t, redoJob }: { t: Transcript; redoJob: TxJob | null }
 
 export async function openTranscript(id: number, redoJob: TxJob | null = null): Promise<void> {
   const dlg = dialog();
-  render(null, dlg);  // 지난번 창의 상태(시간 표시 등)를 버린다
-  render(<p class="meta">불러오는 중</p>, dlg);
+  const box = dialogBox();
+  render(null, box);  // 지난번 창의 상태(시간 표시 등)를 버린다
+  render(<p class="meta">불러오는 중</p>, box);
   dlg.showModal();
   let t: Transcript;
   try { t = await api<Transcript>(`/transcripts/${id}`); }
   catch (err) {
-    render(<><p>{(err as Error).message}</p><button class="btn" id="tx-close" onClick={() => dlg.close()}>닫기</button></>, dlg);
+    render(<><p>{(err as Error).message}</p><button class="btn self-end" id="tx-close" onClick={() => dlg.close()}>닫기</button></>, box);
     return;
   }
-  render(<TranscriptView t={t} redoJob={redoJob} />, dlg);
+  render(<TranscriptView t={t} redoJob={redoJob} />, box);
 }

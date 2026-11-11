@@ -48,12 +48,12 @@ export function Users({ again }: { again: number }) {
       <form class="admin-filters" role="search" aria-label="사용자 찾기" ref={formRef}
         onSubmit={(e) => { e.preventDefault(); apply(); }}
         onChange={(e) => { if ((e.target as HTMLInputElement).name !== "q") apply(); }}>
-        <label class="admin-search">학번 검색<input type="search" name="q" maxLength={32} autocomplete="off" defaultValue={f.q} onInput={search} /></label>
-        <label>LMS 상태<select name="lms_status" value={f.lms_status}>
+        <label class="admin-search">학번 검색<input class="input" type="search" name="q" maxLength={32} autocomplete="off" defaultValue={f.q} onInput={search} /></label>
+        <label>LMS 상태<select class="select" name="lms_status" value={f.lms_status}>
           <option value="">전체</option>{Object.entries(ADMIN_LMS_STATUS).map(([k, s]) => <option key={k} value={k}>{s.label}</option>)}
         </select></label>
-        <label>정렬<select name="sort" value={f.sort}>{Object.entries(SORTS).map(([k, label]) => <option key={k} value={k}>{label}</option>)}</select></label>
-        <label class="check"><input type="checkbox" name="has_problem" defaultChecked={f.has_problem} /><span>문제 있음만</span></label>
+        <label>정렬<select class="select" name="sort" value={f.sort}>{Object.entries(SORTS).map(([k, label]) => <option key={k} value={k}>{label}</option>)}</select></label>
+        <label class="flex min-h-touch cursor-pointer items-center gap-2 font-normal text-ink"><input type="checkbox" class="checkbox" name="has_problem" defaultChecked={f.has_problem} /><span>문제 있음만</span></label>
       </form>
       <div class="admin-seg admin-access-filter" role="group" aria-label="권한">
         {[["", "전체"], ...Object.entries(ADMIN_ACCESS).map(([k, a]) => [k, a.label])].map(([k, label]) => (
@@ -61,7 +61,7 @@ export function Users({ again }: { again: number }) {
             onClick={() => { f.access = k; f.offset = 0; redraw((n) => n + 1); }}>{label}</button>
         ))}
       </div>
-      <section class="panel admin-box" aria-labelledby="admin-users-title">
+      <section class="card admin-box" aria-labelledby="admin-users-title">
         <div class="admin-box-head"><h2 id="admin-users-title" tabIndex={-1} ref={titleRef}>사용자 <span class="admin-count" id="admin-user-count" role="status">
           {load.kind === "ok" ? `${adminNumber(load.data.total)}명` : ""}</span></h2></div>
         <div id="admin-user-list" onClick={rowClick}>

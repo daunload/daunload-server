@@ -1,19 +1,64 @@
-/* 스타일 진입점. 레이어는 약한 것부터 theme → base → legacy → components → utilities 순이다.
- * - tokens.css: 디자인 토큰(:root의 색, 글자 크기, 반경, 터치 영역, z-index). 아래 @theme이 그 변수를 가리킨다.
- * - base.css: 요소 기본 모양(body, h1~h3, a, label, input, select, progress, 포커스 테두리).
- * - components.css: 여러 화면이 함께 쓰는 클래스(btn, panel, warning, empty, check, toggle, skeleton …).
+/* 스타일 진입점. 레이어는 약한 것부터 theme → base → legacy → utilities 순이다.
+ * - tokens.css: 디자인 토큰(:root의 색, 글자 크기, 반경, 터치 영역, z-index). 아래 @theme과 daisyUI 테마가 이 변수를 가리킨다.
+ * - base.css: 요소 기본 모양(body, h1~h3, a, label, 포커스 테두리).
+ * - 공통 컴포넌트는 daisyUI 5(아래 @plugin, CSS만 있고 런타임 JS 없음)를 쓴다: btn, card, alert, modal, toast, input, select,
+ *   checkbox, toggle, progress, skeleton, tabs. daisyUI는 utilities 레이어 안의 하위 레이어(daisyui.l1 > l1.l2 > l1.l2.l3)에 들어간다.
+ * - daisy.css: daisyUI 컴포넌트를 뚱이 모양(먹선, 분홍 주요 버튼, 44px 터치 영역)으로 맞추는 덮어쓰기. daisyUI와 같은 하위 레이어에 둔다.
+ * - components.css: daisyUI에 없는 공통 클래스(empty, skeleton-list). utilities 레이어로 불러와 card와 함께 써도 이긴다.
  * - legacy.css: 아직 화면 전용으로 남은 규칙(상단·메뉴, 로그인, 목록 줄, 진행 패널, 관리자 표 …). 새 규칙은 여기에 더하지 않는다.
- * - 유틸리티가 가장 강하다: 컴포넌트에서 bg-pink, text-ink, text-sm, rounded-card, min-h-touch처럼 토큰 이름으로 쓴다.
+ * - Tailwind 유틸리티가 가장 강하다(daisyUI 하위 레이어보다도 강하다): class="btn btn-sm px-2.5"처럼 덧붙여 한 곳만 바꾼다.
  *   Tailwind의 기본 색·글자 크기·화면 폭은 끄고 이 토큰만 쓴다.
- * - Preflight(기본 스타일 초기화)는 넣지 않는다. base.css가 그 역할을 한다.
+ * - Preflight(기본 스타일 초기화)와 daisyUI의 reset은 넣지 않는다. base.css가 그 역할을 한다.
  */
-@layer theme, base, legacy, components, utilities;
+@layer theme, base, legacy, utilities;
 @import "tailwindcss/theme.css" layer(theme);
 @import "./tokens.css" layer(base);
 @import "./base.css" layer(base);
 @import "./legacy.css" layer(legacy);
-@import "./components.css" layer(components);
+@import "./components.css" layer(utilities);
 @import "tailwindcss/utilities.css" layer(utilities);
+@import "./daisy.css" layer(utilities);
+
+/* daisyUI: 내장 테마는 쓰지 않고 아래 ttungi 테마 하나만 쓴다.
+ * 빼는 것: reset(Preflight와 같은 초기화), rootcolor(html 배경을 흰색으로 덮어 꽃무늬 배경을 가린다), 스크롤바 모양 바꾸기. */
+@plugin "daisyui" {
+  themes: false;
+  exclude: reset, rootcolor, rootscrollgutter, scrollbar;
+  logs: false;
+}
+@plugin "daisyui/theme" {
+  name: "ttungi";
+  default: true;
+  color-scheme: light;
+  --color-base-100: #ffffff;
+  --color-base-200: #e6f4f4;
+  --color-base-300: #d5ebec;
+  --color-base-content: #1a1a18;
+  --color-primary: #ff9aa2;
+  --color-primary-content: #1a1a18;
+  --color-secondary: #0b5f7a;
+  --color-secondary-content: #ffffff;
+  --color-accent: #7a4fb5;
+  --color-accent-content: #ffffff;
+  --color-neutral: #1a1a18;
+  --color-neutral-content: #ffffff;
+  --color-info: #0b5f7a;
+  --color-info-content: #ffffff;
+  --color-success: #0b7a50;
+  --color-success-content: #ffffff;
+  --color-warning: #a85b00;
+  --color-warning-content: #ffffff;
+  --color-error: #c4301c;
+  --color-error-content: #ffffff;
+  --radius-selector: 7px;
+  --radius-field: 10px;
+  --radius-box: 14px;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 2px;
+  --depth: 0;
+  --noise: 0;
+}
 
 /* Tailwind가 클래스 이름을 찾을 파일(Vite 루트 기준). */
 @source "../../index.html";

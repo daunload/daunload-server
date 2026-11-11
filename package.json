@@ -14,6 +14,7 @@
   "devDependencies": {
     "@preact/preset-vite": "2.10.1",
     "@tailwindcss/vite": "4.1.11",
+    "daisyui": "5.7.50",
     "tailwindcss": "4.1.11",
     "typescript": "5.8.3",
     "vite": "6.3.5"

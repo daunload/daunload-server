@@ -40,7 +40,7 @@ function ChannelRow({ c }: { c: Channel }) {
       <span class="meta">{fmtDate(new Date(c.created_at))} 등록</span>
       <span class="ml-auto flex flex-wrap items-center gap-2">
         <PendingButton class="btn btn-sm" data-test={c.id} busy={testing} onClick={sendTest}>테스트 메시지 보내기</PendingButton>
-        <PendingButton class="btn btn-sm btn-danger" data-del={c.id} busy={deleting} onClick={remove}>삭제</PendingButton>
+        <PendingButton class="btn btn-sm btn-error btn-outline" data-del={c.id} busy={deleting} onClick={remove}>삭제</PendingButton>
       </span>
     </li>
   );
@@ -60,13 +60,13 @@ function ChannelForm() {
     } catch (err) { toast((err as Error).message, true); }
   };
   return (
-    <form class="panel-body" id="channel-form" onSubmit={submit}>
+    <form class="card-body" id="channel-form" onSubmit={submit}>
       <h3>알림 받을 곳 추가</h3>
-      <label>종류<select name="kind" value={kind} onChange={(e) => setKind(e.currentTarget.value)}>
+      <label>종류<select class="select" name="kind" value={kind} onChange={(e) => setKind(e.currentTarget.value)}>
         <option value="discord">Discord 웹훅</option><option value="telegram">Telegram 봇</option></select></label>
-      <label data-for="discord" hidden={kind !== "discord"}>웹훅 URL<input name="webhook_url" placeholder="https://discord.com/api/webhooks/..." /></label>
-      <label data-for="telegram" hidden={kind !== "telegram"}>봇 토큰<input name="bot_token" /></label>
-      <label data-for="telegram" hidden={kind !== "telegram"}>채팅 ID<input name="chat_id" /></label>
+      <label data-for="discord" hidden={kind !== "discord"}>웹훅 URL<input class="input" name="webhook_url" placeholder="https://discord.com/api/webhooks/..." /></label>
+      <label data-for="telegram" hidden={kind !== "telegram"}>봇 토큰<input class="input" name="bot_token" /></label>
+      <label data-for="telegram" hidden={kind !== "telegram"}>채팅 ID<input class="input" name="chat_id" /></label>
       <div><PendingButton class="btn btn-primary" busy={busy}>추가하기</PendingButton></div>
     </form>
   );

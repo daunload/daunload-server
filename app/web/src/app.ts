@@ -302,7 +302,7 @@ function renderView(): void {
 let adminModule: typeof import("./screens/admin") | null = null;
 function renderAdminView(): void {
   if (adminModule) { adminModule.viewAdmin(state.adminPath); return; }
-  $("#view").innerHTML = `<div class="panel" aria-busy="true">${skeletonRows(4)}<p class="sr-only" role="status">불러오는 중입니다.</p></div>`;
+  $("#view").innerHTML = `<div class="card" aria-busy="true">${skeletonRows(4)}<p class="sr-only" role="status">불러오는 중입니다.</p></div>`;
   import("./screens/admin").then(
     (mod) => { adminModule = mod; if (state.view === "admin") mod.viewAdmin(state.adminPath); },
     () => { if (state.view === "admin") viewError("화면을 불러오지 못했어요. 네트워크를 확인하고 다시 시도하세요.", renderAdminView); },
@@ -310,13 +310,13 @@ function renderAdminView(): void {
 }
 
 export function viewError(message: string, retry: () => unknown): void {
-  $("#view").innerHTML = `<div class="panel empty" role="alert"><strong>불러오지 못했어요</strong><p>${esc(message)}</p><button class="btn" id="retry-view">다시 시도</button></div>`;
+  $("#view").innerHTML = `<div class="card empty" role="alert"><strong>불러오지 못했어요</strong><p>${esc(message)}</p><button class="btn" id="retry-view">다시 시도</button></div>`;
   $("#retry-view").addEventListener("click", retry);
 }
 
 export function needCred(): boolean {
   if (state.cred) return false;
-  $("#view").innerHTML = `<div class="panel empty"><p>LMS 연결 정보가 없습니다. 로그아웃한 뒤 다시 로그인하세요.</p></div>`;
+  $("#view").innerHTML = `<div class="card empty"><p>LMS 연결 정보가 없습니다. 로그아웃한 뒤 다시 로그인하세요.</p></div>`;
   return true;
 }
 

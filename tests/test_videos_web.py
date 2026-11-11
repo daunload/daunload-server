@@ -396,9 +396,9 @@ async def test_row_buttons_keep_weight_only_on_work_left_to_do(dashboard):
     await page.goto('http://dashboard.test/#videos')
     rows = page.locator('#video-list li.video-row')
     await expect(rows).to_have_count(2)
-    await expect(rows.nth(0).get_by_role('button', name='내려받기', exact=True)).to_have_class('btn btn-icon btn-ghost')
-    await expect(rows.nth(1).get_by_role('button', name='내려받기', exact=True)).to_have_class('btn btn-icon btn-soft')
-    await expect(rows.nth(1).get_by_role('button', name='텍스트로 변환', exact=True)).to_have_class('btn btn-icon btn-ghost')
+    await expect(rows.nth(0).get_by_role('button', name='내려받기', exact=True)).to_have_class('btn btn-square btn-ghost')
+    await expect(rows.nth(1).get_by_role('button', name='내려받기', exact=True)).to_have_class('btn btn-square btn-soft')
+    await expect(rows.nth(1).get_by_role('button', name='텍스트로 변환', exact=True)).to_have_class('btn btn-square btn-ghost')
     for button in await page.locator('#video-list .video-row .btn').all():
         assert (await button.bounding_box())['height'] >= 44
 

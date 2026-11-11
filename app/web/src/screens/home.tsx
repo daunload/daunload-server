@@ -298,7 +298,7 @@ function Home() {
       </div>
       <div class="cta mt-4 grid gap-2 empty:hidden">{cta}</div>
       {state.dashboardError && (
-        <div class="notice-inline" role="alert">
+        <div class="alert alert-outline" role="alert">
           <p>{state.dashboardError}</p>
           <button class="btn" id="dashboard-playback-retry" onClick={loadDashboardPlayback}>다시 시도</button>
         </div>

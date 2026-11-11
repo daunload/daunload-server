@@ -29,7 +29,7 @@ const Err = ({ children }: { children: ComponentChildren }) => <span class="admi
 /* ---------- 머리 ---------- */
 
 function Kpi({ label, value, bad }: { label: string; value: number; bad?: boolean }) {
-  return <div class={`panel admin-kpi${bad ? " bad" : ""}`}><span class="admin-kpi-label">{label}</span><strong>{adminNumber(value)}</strong></div>;
+  return <div class={`card admin-kpi${bad ? " bad" : ""}`}><span class="admin-kpi-label">{label}</span><strong>{adminNumber(value)}</strong></div>;
 }
 
 function Head({ s, reload }: { s: Row; reload: () => void }) {
@@ -223,11 +223,11 @@ function Playback({ id, st, again }: TabProps) {
   return (
     <>
       <form class="admin-filters" aria-label="재생 기록 조건" onSubmit={(e) => e.preventDefault()} onChange={change}>
-        <label>상태<select name="status" value={st.status}><option value="">전체</option>
+        <label>상태<select class="select" name="status" value={st.status}><option value="">전체</option>
           {PLAYBACK_FILTER.map((k) => <option key={k} value={k}>{ADMIN_PLAYBACK_STATUS[k]}</option>)}</select></label>
-        <label>과목<select name="course" value={st.course}><option value="">전체</option>
+        <label>과목<select class="select" name="course" value={st.course}><option value="">전체</option>
           {courseList.map((c) => <option key={c.lms_course_id} value={String(c.lms_course_id)}>{c.name}</option>)}</select></label>
-        <label>기간<select name="days" value={st.days}><option value="">전체 기간</option>
+        <label>기간<select class="select" name="days" value={st.days}><option value="">전체 기간</option>
           {ADMIN_PERIODS.map((d) => <option key={d} value={String(d)}>최근 {d}일</option>)}</select></label>
       </form>
       <Paged path={`${adminUserPath(id)}/playback`} st={st} name="playback" again={again} params={params} cls="admin-paged">
@@ -352,7 +352,7 @@ export function UserDetail({ id, tabKey, again, onNotFound }: { id: string; tabK
 
   if (notFound) {
     return (
-      <div class="panel admin-box" role="alert"><p><strong>사용자를 찾을 수 없습니다.</strong> 학번을 확인하세요.</p>
+      <div class="card admin-box" role="alert"><p><strong>사용자를 찾을 수 없습니다.</strong> 학번을 확인하세요.</p>
         <a class="admin-more" href="#admin/users">사용자 목록으로</a></div>
     );
   }
@@ -365,13 +365,13 @@ export function UserDetail({ id, tabKey, again, onNotFound }: { id: string; tabK
         {summary ? <Head s={summary} reload={reloadSummary} />
           : headState?.kind === "error" ? <ErrorBox message={headState.message} retry={retrySummary} /> : <Skeleton rows={2} />}
       </section>
-      <nav class="admin-subtabs" aria-label="사용자 기록">
+      <nav class="admin-subtabs tabs tabs-box" aria-label="사용자 기록">
         {TABS.map((t) => (
-          <a key={t.key} class="admin-tab" href={`#admin/users/${encodeURIComponent(id)}/${t.key}`} data-admin-subtab={t.key}
+          <a key={t.key} class="tab admin-tab" href={`#admin/users/${encodeURIComponent(id)}/${t.key}`} data-admin-subtab={t.key}
             aria-current={t.key === tab ? "page" : undefined}>{t.label}</a>
         ))}
       </nav>
-      <section class="panel admin-box admin-user-tab" aria-label={label}
+      <section class="card admin-box admin-user-tab" aria-label={label}
         aria-busy={tab === "lms" && !summary && headState?.kind === "loading" ? "true" : undefined}>
         {tab === "lms"
           ? (summary ? <LmsTab s={summary} /> : headState?.kind === "error" ? <ErrorBox message={headState.message} retry={retrySummary} /> : <Skeleton />)

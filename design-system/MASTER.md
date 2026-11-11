@@ -1,6 +1,6 @@
 # 아유 하기싫어 웹 디자인 규칙
 
-대상: `app/web` (Vite + Preact + Tailwind CSS, 9장). 색상, Pretendard·Black Han Sans 글꼴, 뚱이 콘셉트는 바꾸지 않는다. 런타임 의존성은 Preact 하나만 쓴다. 기준은 하나다. **버튼을 본 순간 어떤 동작인지 예측할 수 있어야 한다.**
+대상: `app/web` (Vite + Preact + Tailwind CSS, 9장). 색상, Pretendard·Black Han Sans 글꼴, 뚱이 콘셉트는 바꾸지 않는다. 런타임 의존성은 Preact 하나만 쓴다. 공통 컴포넌트는 daisyUI 5(빌드 때만 쓰는 Tailwind CSS 플러그인, 런타임 JS 없음)를 뚱이 테마로 맞춰 쓴다. 기준은 하나다. **버튼을 본 순간 어떤 동작인지 예측할 수 있어야 한다.**
 
 설계 배경: `docs/superpowers/specs/2026-11-05-web-design-system-design.md`
 
@@ -32,13 +32,13 @@
 | 주요 동작 | `.btn.btn-primary` | 화면에서 가장 중요한 일 하나 | 분홍 배경, 먹선 그림자 |
 | 일반 동작 | `.btn` | 사이트 안에서 바로 실행 | 흰 배경, 먹선 테두리, 필요하면 아이콘 |
 | 사이트 밖으로 이동 | `.btn` + 새 탭 아이콘 | 새 탭 열기 (예: LMS에서 제출) | 일반 모양 + 새 탭 아이콘 |
-| 위험한 동작 | `.btn.btn-danger` | 삭제, 재생 중지 | 빨간 글자와 테두리, 가운데 창으로 확인 |
+| 위험한 동작 | `.btn.btn-error.btn-outline` | 삭제, 재생 중지 | 빨간 글자와 테두리, 가운데 창으로 확인 |
 
-보조 클래스: `.btn-soft`(얇은 연한 테두리), `.btn-ghost`(테두리 없는 보조), `.btn-link`(글자 링크), `.btn-sm`(좁은 곳), `.btn-block`(전체 너비), `.btn-icon`(44px 정사각 아이콘 버튼). 눌림 상태(`aria-pressed="true"`)는 검정 바탕이다. 모두 터치 영역은 44px이다. `.btn`은 `white-space: normal`이라 긴 문구는 줄바꿈된다.
+보조 클래스: `.btn-soft`(얇은 연한 테두리), `.btn-ghost`(테두리 없는 보조), `.btn-link`(글자 링크), `.btn-sm`(좁은 곳), `.btn-block`(전체 너비, 54px), `.btn-square`(44px 정사각 아이콘 버튼). daisyUI의 `btn-sm`은 32px로 줄지만 여기서는 좌우 여백만 줄고 44px을 유지한다(`daisy.css`). 눌림 상태(`aria-pressed="true"`)는 검정 바탕이다. 모두 터치 영역은 44px이다. `.btn`은 `white-space: normal`이라 긴 문구는 줄바꿈된다.
 
 - 한 화면의 주요 동작은 하나만 둔다.
 - **반복되는 목록은 약하게 그린다.** 강의 줄에서 아직 받지 않은 `내려받기`만 `.btn-soft`이고, 받은 뒤의 `내려받기`, 비활성 버튼, 텍스트 변환 버튼은 `.btn-ghost`다. 주차 머리줄의 일괄 버튼은 `.btn-link`다.
-- **강의·자료 줄의 동작은 44px 아이콘 버튼으로 둔다(`.btn-icon`).** 내용은 `iconOnly(이름, 라벨)`로 만들어 접근 가능한 이름을 유지하고, 터치 화면을 위해 뜻은 목록 위 `.icon-legend`에 한 번만 적는다. 수강 상태도 아이콘(`VIDEO_STATUS`)이며 모양이 달라 색에만 기대지 않는다. 한 줄의 버튼은 2개까지다(텍스트 변환 또는 보기 + 내려받기). `다시 변환`은 텍스트 창 안에 둔다. 주차 일괄 버튼은 `아이콘 + 전체 N`으로 쓰고 전체 문구는 `aria-label`과 `title`에 둔다.
+- **강의·자료 줄의 동작은 44px 아이콘 버튼으로 둔다(`.btn-square`).** 내용은 `iconOnly(이름, 라벨)`로 만들어 접근 가능한 이름을 유지하고, 터치 화면을 위해 뜻은 목록 위 `.icon-legend`에 한 번만 적는다. 수강 상태도 아이콘(`VIDEO_STATUS`)이며 모양이 달라 색에만 기대지 않는다. 한 줄의 버튼은 2개까지다(텍스트 변환 또는 보기 + 내려받기). `다시 변환`은 텍스트 창 안에 둔다. 주차 일괄 버튼은 `아이콘 + 전체 N`으로 쓰고 전체 문구는 `aria-label`과 `title`에 둔다.
 - **같은 동작을 두 번 보여 주지 않는다.** 주차 일괄 버튼은 대상이 2개 이상일 때만 보인다.
 - 자주 쓰는 동작을 `⋯` 메뉴에 숨기지 않는다. 버튼이 많으면 다음 줄로 넘긴다.
 - 강의 줄의 버튼은 모바일과 PC 모두 제목 오른쪽 한 줄에 둔다.
@@ -47,6 +47,8 @@
 ## 3. 확인 방식
 
 PC와 휴대폰 모두 같은 가운데 창(`<dialog>` + `showModal()`)을 쓴다. 창에는 하는 일, 범위, 예상 시간, 필요한 경고를 보여 준다. 첫 포커스는 취소 버튼, Esc로 닫고 포커스는 원래 버튼으로 돌려준다.
+
+창 높이는 `100vh`가 아닌 `100dvh` 기준으로 제한한다(휴대폰 주소창). 760px 이하에서는 좌우 `--gutter`만 남기고 넓히며 안쪽 여백은 16px, 버튼은 한 줄을 나눠 채운다. 내용이 길면 본문만 안에서 스크롤하고 버튼 줄은 항상 보이게 둔다. 한글이 글자 단위로 끊기지 않도록 `break-keep`을 쓴다.
 
 | 구분 | 동작 | 방식 |
 |---|---|---|
@@ -116,7 +118,7 @@ button.innerHTML = `${icon("external")}LMS에서 제출`;
 - **위 카드(`.playback-hero`):** 지금 강의의 상태, 제목, 위치, 진행률을 보여 주고, 그 아래에 전체 진행률을 둔다. 전체 진행률은 강의가 2개 이상일 때만 보인다. 진행 막대는 지금 강의와 전체, 최대 2개다.
 - **재생 목록:** 강의가 2개 이상일 때만 별도 카드로 둔다. 순서, 시간, 마감, 상태만 쓰고 진행 막대는 넣지 않는다.
 - **숫자:** 0인 실패, 이미 완료, 완료는 쓰지 않는다.
-- **문제 없는 상태:** 재생이 정상이면 따로 말하지 않고, 확인이 필요할 때만 `.warning` 한 줄을 보인다.
+- **문제 없는 상태:** 재생이 정상이면 따로 말하지 않고, 확인이 필요할 때만 경고(`.alert.alert-error.alert-soft`) 한 줄을 보인다.
 - **설명 문구:** `창을 닫아도 서버에서 계속돼요` 한 줄만 보이고, 나머지는 `재생 방식 안내`에 접어 둔다. 5초 폴링으로 다시 그려도 펼침 상태와 포커스를 유지한다.
 - **지난 재생:** 별도 카드에 두고 상태는 줄 오른쪽에 색으로 표시한다.
 
@@ -178,14 +180,27 @@ app/web/src/tasks.tsx     하단 진행 패널
 app/web/src/app.ts        로그인·부팅·동기화·화면 전환(마크업은 index.html의 정적 HTML)
 app/web/src/screens/admin/ 관리자 화면(관리자만 import()로 받는다): index(머리·탭), overview, users, detail, feeds, shared
 app/web/src/*.ts          access(승인 대기), downloads·transcribe(내려받기·변환 엔진). extension.js만 JS다(테스트가 실제 확장 프로그램 페이지에 그대로 넣는다)
-app/web/src/styles/       app.css(진입점·Tailwind 테마), tokens.css(토큰), base.css(요소 기본 모양), components.css(공통 클래스), legacy.css(화면 전용으로 남은 규칙)
+app/web/src/styles/       app.css(진입점·Tailwind 테마), tokens.css(토큰), base.css(요소 기본 모양), daisy.css(daisyUI를 뚱이 모양으로 덮어쓰기), components.css(daisyUI에 없는 공통 클래스), legacy.css(화면 전용으로 남은 규칙)
 ```
 
 - **import 규칙:** 전역 변수를 쓰지 않는다. 필요한 이름은 import한다. `core.js`와 `extension.js`는 아무것도 import하지 않는다. 최상위에서 바로 실행되는 코드는 `core`·`ui`처럼 먼저 평가되는 모듈의 값만 쓴다(순환 import에서 초기화 전 값을 읽으면 TDZ 오류가 난다). 화면 모듈끼리의 호출은 함수 안에서만 한다.
 - **화면 추가:** `screens/이름.tsx`에 `viewX()`를 두고 `mountScreen("이름", <X />)`로 그린다. 다시 그리기는 같은 함수를 다시 부르면 된다(같은 컨테이너에 diff로 그려 포커스·펼침이 남는다). `app.ts`의 `renderView()` 표에 넣는다.
 - **정적 UI는 HTML에:** 첫 화면(시작·로그인·승인 대기)과 앱 뼈대(상단 바·메뉴)는 `index.html`의 정적 HTML이다. JS가 오기 전에 그려지므로 Preact로 옮기지 않는다.
 - **새 화면·컴포넌트:** Preact(TSX) + Tailwind 유틸리티로 만든다. 색·글자 크기·반경·간격은 토큰 이름만 쓴다(`bg-pink`, `text-ink-2`, `text-sm`, `rounded-card`, `min-h-touch`). Tailwind 기본 색 팔레트는 꺼 두었다. 기존 화면을 옮기면 그 화면의 `legacy.css` 규칙을 지운다.
-- **공통 클래스(`components.css`):** `btn`·`btn-*`, `panel`·`panel-body`·`panel-title`·`actions`, `warning`·`notice-inline`·`empty`, `check`·`toggle`, `skeleton-list`·`skeleton`. 정적 HTML·HTML 문자열·TSX가 같이 쓴다. 한 곳만 다르면 유틸리티를 덧붙인다(`class="btn btn-sm px-2.5"`): 유틸리티가 이 레이어보다 강하다. legacy.css에서 이 클래스를 덮어쓰지 않는다(components 레이어가 legacy보다 강해서 지금은 효과가 없다).
+- **공통 컴포넌트(daisyUI 5):** 정적 HTML·HTML 문자열·TSX가 같이 쓴다. 테마(`ttungi`)는 `app.css`의 `@plugin "daisyui/theme"`, 뚱이 모양(먹선, 분홍 주요 버튼 그림자, 44px 터치 영역, 16px 본문)은 `daisy.css`가 맞춘다.
+
+  | 용도 | 클래스 |
+  |---|---|
+  | 버튼 | `btn` + `btn-primary` · `btn-error btn-outline`(위험) · `btn-ghost` · `btn-soft` · `btn-link` + `btn-sm` · `btn-block` · `btn-square` |
+  | 카드 | `card`(흰 카드) · `card-body` · `card-title` · `card-actions` |
+  | 안내 | `alert alert-error alert-soft`(빨간 경고) · `alert alert-outline`(흰 안내) · `empty`(뚱이 빈 화면, `components.css`) |
+  | 입력 | `input` · `select` · `checkbox`(라벨은 `flex min-h-touch items-center gap-2`) · `toggle` · `progress progress-info` |
+  | 탭 | `tabs tabs-box` > `tab`(`aria-selected` 또는 `aria-current="page"`면 검정 바탕) |
+  | 대화상자 | `<dialog class="modal">` > `.modal-box`에 그린다 |
+  | 토스트 | `#toast.toast` > `alert`(위치는 `daisy.css`의 `#toast`) |
+  | 불러오는 중 | `skeleton-list`(`components.css`) > `skeleton` |
+
+  daisyUI는 utilities 레이어 안 하위 레이어에 들어가므로 legacy.css로는 덮어쓸 수 없다. 한 곳만 다르면 유틸리티를 덧붙인다(`class="btn btn-sm px-2.5"`): Tailwind 유틸리티가 daisyUI보다 강하다. 모든 곳의 모양을 바꿀 때는 `daisy.css`에 쓰되, daisyUI가 그 규칙을 두는 단계(기본 l1.l2.l3, 변형 l1.l2, 일부 변형·hover l1) 바로 뒤의 `ttungi` 레이어에 둔다. 관리자 표(`admin-table`)는 휴대폰에서 카드로 바뀌는 전용 모양이라 daisyUI `table`을 쓰지 않는다.
 - **테스트 손잡이:** 테스트는 모듈 안 값을 `window.__ssu`로만 본다. 확장 프로그램 응답은 `__ssu.ext.request`를 바꿔 끼운다. 새 값을 테스트에서 봐야 하면 `main.ts`의 `__ssu`에 더한다.
 - **명령:** `npm run dev`(5173, API는 8000으로 넘긴다) · `npm run build`(→ `app/web-dist`) · `npm run typecheck`. FastAPI는 `app/web-dist`를 서빙하고, 없으면 화면 자리에 빌드 안내(503)만 보인다. 배포 이미지는 Dockerfile의 `web` 단계에서 빌드하며 최종 이미지에는 Node가 없다.
 - **브라우저 테스트:** 빌드 결과(`app/web-dist`)를 쓴다. 먼저 `npm run build`를 돌린다.

@@ -1,4 +1,4 @@
-/* 공통 확인 창. index.html의 <dialog id="confirm-dialog"> 안에 그린다.
+/* 공통 확인 창. index.html의 <dialog id="confirm-dialog" class="modal"> 안 .modal-box에 그린다.
  *
  * confirmDialog({ title, body?, warnings?, confirmLabel, danger?, requireText?, requireLabel? }) -> Promise<boolean>
  *   모든 문자열은 글자로 들어간다(HTML 아님). 이미 다른 확인 창이 열려 있으면 열지 않고 false로 끝낸다.
@@ -30,17 +30,18 @@ function ConfirmContent({ opts, onConfirm }: { opts: ConfirmOptions; onConfirm: 
     <>
       <h2 id="confirm-title" class="text-lg font-bold">{title}</h2>
       {body.map((line) => <p class="text-sm text-ink-2">{line}</p>)}
-      {warnings.map((line) => <p class="warning">{line}</p>)}
+      {warnings.map((line) => <p class="alert alert-error alert-soft">{line}</p>)}
       {requireText !== undefined && (
         <label class="grid gap-1.5 text-sm">
           {requireLabel || "확인을 위해 입력하세요"}
-          <input type="text" autocomplete="off" inputMode="numeric" value={typed}
+          <input class="input" type="text" autocomplete="off" inputMode="numeric" value={typed}
             onInput={(e) => setTyped((e.target as HTMLInputElement).value)} />
         </label>
       )}
       <div class="flex flex-wrap justify-end gap-2">
-        <button type="button" class="btn btn-ghost" data-confirm-cancel onClick={close}>취소</button>
-        <button type="button" class={`btn ${danger ? "btn-danger" : "btn-primary"}`} disabled={blocked}
+        {/* 휴대폰에서는 두 버튼이 반씩 나눠 한 줄을 채운다 */}
+        <button type="button" class="btn btn-ghost max-phone:flex-1" data-confirm-cancel onClick={close}>취소</button>
+        <button type="button" class={`btn ${danger ? "btn-error btn-outline" : "btn-primary"} max-phone:flex-1`} disabled={blocked}
           onClick={() => { if (!blocked) { onConfirm(); close(); } }}>{confirmLabel}</button>
       </div>
     </>
@@ -55,11 +56,12 @@ export function confirmDialog(opts: ConfirmOptions): Promise<boolean> {
   let result = false;
   open = true;
   dlg.setAttribute("aria-labelledby", "confirm-title");
-  render(<ConfirmContent opts={opts} onConfirm={() => { result = true; }} />, dlg);
+  const box = dlg.querySelector<HTMLElement>(".modal-box")!;
+  render(<ConfirmContent opts={opts} onConfirm={() => { result = true; }} />, box);
   return new Promise((resolve) => {
     dlg.addEventListener("close", () => {
       open = false;
-      render(null, dlg);
+      render(null, box);
       const target = (opener?.isConnected && opener) || (openerId && document.getElementById(openerId)) || document.getElementById("view");
       target?.focus?.();
       resolve(result);

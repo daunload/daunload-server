@@ -318,12 +318,12 @@ async def test_reload_shows_saved_progress_and_stale_activity(page):
     await page.goto("http://dashboard.test/#playback")
     hero = page.locator("#view .playback-hero")
     await expect(hero).to_contain_text("9분 0초 / 30분 0초")
-    await expect(hero.locator(".warning")).to_have_count(0)  # 정상일 때는 따로 말하지 않는다
+    await expect(hero.locator(".alert-error")).to_have_count(0)  # 정상일 때는 따로 말하지 않는다
     job.update(progress_seconds=900, progress_updated_at=(datetime.now(UTC) - timedelta(minutes=2)).isoformat())
     await page.reload()
     await expect(hero.locator(".playback-percent")).to_have_text("50%")
-    await expect(hero.locator(".warning")).to_contain_text("재생 확인 필요")
-    await expect(hero.locator(".warning")).to_contain_text("마지막")
+    await expect(hero.locator(".alert-error")).to_contain_text("재생 확인 필요")
+    await expect(hero.locator(".alert-error")).to_contain_text("마지막")
     job.update(progress_updated_at=None)
     await page.reload()
     await expect(hero).to_contain_text("재생 위치를 확인하는 중이에요")

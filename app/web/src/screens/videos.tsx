@@ -182,7 +182,7 @@ function DownloadButton({ linkPath, at, onDone }: { linkPath: string; at?: strin
     if (ok) onDone();
   };
   return (
-    <button class={`btn btn-icon ${at ? "btn-ghost" : "btn-soft"}`} data-link={linkPath} title={downloadTip(at)} disabled={!!busy} onClick={click}>
+    <button class={`btn btn-square ${at ? "btn-ghost" : "btn-soft"}`} data-link={linkPath} title={downloadTip(at)} disabled={!!busy} onClick={click}>
       {busy ? <IconOnly name="loader" label={busy} /> : <IconOnly name={at ? "download-done" : "download"} label="내려받기" />}
     </button>
   );
@@ -213,7 +213,7 @@ function InstallGuide() {
       onToggle={(e) => { state.guideDismissed = !(e.currentTarget as HTMLDetailsElement).open; }}>
       <summary><span class="guide-title"><Icon name="puzzle" />{ready ? "크롬 확장프로그램 안내" : "크롬 확장프로그램을 설치해 주세요"}</span></summary>
       <div class="guide-body">
-        {state.extensionMissing && <p class="warning" role="alert">{state.extensionMissing}</p>}
+        {state.extensionMissing && <p class="alert alert-error alert-soft" role="alert">{state.extensionMissing}</p>}
         <ol class="install-steps">
           <li><strong>웹 스토어에서 설치</strong><span>‘Chrome에 추가’를 누르세요.</span>
             <a class="btn btn-primary mt-auto gap-1.5 self-start" href={EXTENSION_STORE_URL} target="_blank" rel="noopener">Chrome 웹 스토어 열기<Icon name="external" /></a></li>
@@ -329,7 +329,7 @@ function VideoList() {
                   <TranscribeButton v={v} courseId={courseId} />
                   {v.linkPath && !phone
                     ? <DownloadButton linkPath={v.linkPath} at={v.downloaded_at} onDone={done(v)} />
-                    : <button class="btn btn-icon btn-ghost" disabled><IconOnly name={v.downloaded_at ? "download-done" : "download"} label="내려받기" /></button>}
+                    : <button class="btn btn-square btn-ghost" disabled><IconOnly name={v.downloaded_at ? "download-done" : "download"} label="내려받기" /></button>}
                 </span>
               </li>
             ))}
@@ -392,7 +392,7 @@ function Videos({ loading }: { loading: boolean }) {
   return (
     <>
       <ViewHead title={TITLE}>
-        <label>과목<select id="video-course" value={String(state.videoCourse)}
+        <label>과목<select class="select" id="video-course" value={String(state.videoCourse)}
           onChange={(e) => { state.videoCourse = Number(e.currentTarget.value); state.videoList = null; state.materialList = null; viewVideos(); }}>
           {courses.map((c) => <option key={c.lms_course_id} value={String(c.lms_course_id)}>{c.name}</option>)}
           {pastCourses.length > 0 && (
@@ -400,17 +400,17 @@ function Videos({ loading }: { loading: boolean }) {
           )}
         </select></label>
       </ViewHead>
-      <div class="flex flex-wrap items-center gap-1.5" role="tablist">
-        <button class="min-h-touch cursor-pointer rounded-chip border-2 border-ink bg-surface px-3.5 font-sans text-md leading-normal font-semibold text-ink aria-selected:bg-ink aria-selected:text-white disabled:cursor-not-allowed disabled:opacity-45 max-phone:px-3" role="tab" data-tab="videos" aria-selected={state.videoTab === "videos"} onClick={() => setTab("videos")}>영상</button>
-        <button class="min-h-touch cursor-pointer rounded-chip border-2 border-ink bg-surface px-3.5 font-sans text-md leading-normal font-semibold text-ink aria-selected:bg-ink aria-selected:text-white disabled:cursor-not-allowed disabled:opacity-45 max-phone:px-3" role="tab" data-tab="materials" aria-selected={state.videoTab === "materials"} disabled={isPast}
+      <div class="tabs tabs-box items-center" role="tablist">
+        <button class="tab max-phone:px-3" role="tab" data-tab="videos" aria-selected={state.videoTab === "videos"} onClick={() => setTab("videos")}>영상</button>
+        <button class="tab max-phone:px-3" role="tab" data-tab="materials" aria-selected={state.videoTab === "materials"} disabled={isPast}
           aria-describedby={isPast ? "tabs-reason" : undefined} onClick={() => setTab("materials")}>수업자료</button>
-        <label class="check ml-auto text-sm text-ink-2"><input type="checkbox" id="not-downloaded" checked={state.notDownloadedOnly}
+        <label class="flex min-h-touch cursor-pointer items-center gap-2 font-normal text-ink ml-auto text-sm text-ink-2"><input type="checkbox" class="checkbox" id="not-downloaded" checked={state.notDownloadedOnly}
           onChange={(e) => { state.notDownloadedOnly = e.currentTarget.checked; renderCurrentTab(); }} /><span>안 받은 것만</span></label>
       </div>
       {isPast && <p class="tabs-reason" id="tabs-reason">지난 과목은 수업자료를 볼 수 없어요</p>}
-      {phone && <p class="notice-inline" role="note">{PHONE_NOTICE}</p>}
-      <details class="notice-inline notice-fold overflow-hidden p-0"><summary>개인 복습용이에요. 공유하지 마세요</summary><p>본인이 수강하는 강의와 자료를 개인 복습용으로 받는 기능입니다. 강의 영상과 자료는 교수와 학교의 저작물이므로 다른 사람에게 공유하거나 올리지 마세요. 파일은 서버에 저장하지 않고 학교에서 받는 대로 바로 전달합니다. 동기화 때 영상 주소를 저장해 두므로 시청기간이 끝난 영상도 받을 수 있지만, 학교 서버가 주소를 막거나 영상을 지우면 받을 수 없습니다.</p></details>
-      <div class="panel" id="video-list" aria-busy={ready ? undefined : "true"}>
+      {phone && <p class="alert alert-outline" role="note">{PHONE_NOTICE}</p>}
+      <details class="alert alert-outline notice-fold overflow-hidden p-0"><summary>개인 복습용이에요. 공유하지 마세요</summary><p>본인이 수강하는 강의와 자료를 개인 복습용으로 받는 기능입니다. 강의 영상과 자료는 교수와 학교의 저작물이므로 다른 사람에게 공유하거나 올리지 마세요. 파일은 서버에 저장하지 않고 학교에서 받는 대로 바로 전달합니다. 동기화 때 영상 주소를 저장해 두므로 시청기간이 끝난 영상도 받을 수 있지만, 학교 서버가 주소를 막거나 영상을 지우면 받을 수 없습니다.</p></details>
+      <div class="card" id="video-list" aria-busy={ready ? undefined : "true"}>
         {!ready
           ? <><p class="sr-only" role="status">LMS에서 목록을 불러오는 중</p><div class="skeleton-list" aria-hidden="true">{[0, 1, 2, 3].map((n) => <div key={n} class="skeleton" />)}</div></>
           : state.videoTab === "materials" ? <MaterialList /> : <VideoList />}

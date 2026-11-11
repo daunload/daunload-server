@@ -62,11 +62,11 @@ function Feed(cfg: FeedConfig) {
       <form class="admin-filters" role="search" aria-label={`${cfg.title} 조건`} ref={formRef}
         onSubmit={(e) => { e.preventDefault(); reset(); }}
         onChange={(e) => { const t = e.target as HTMLSelectElement; if (t.name !== "student_id") { cfg.onChange?.(t); reset(); } }}>
-        <label class="admin-search">학번<input type="search" name="student_id" maxLength={32} autocomplete="off" defaultValue={f.student_id}
+        <label class="admin-search">학번<input class="input" type="search" name="student_id" maxLength={32} autocomplete="off" defaultValue={f.student_id}
           onInput={() => { clearTimeout(adminUi.searchTimer); adminUi.searchTimer = setTimeout(() => { if (nav === adminUi.nav) reset(); }, 300); }} /></label>
         {cfg.extra?.()}
       </form>
-      <section class="panel admin-box" aria-labelledby={`admin-${name}-title`}>
+      <section class="card admin-box" aria-labelledby={`admin-${name}-title`}>
         <div class="admin-box-head"><h2 id={`admin-${name}-title`} tabIndex={-1} ref={titleRef}>{cfg.title} <span class="admin-count" role="status">
           {load.kind === "ok" ? `${adminNumber(load.data.total)}건` : ""}</span></h2></div>
         <div class="contents" ref={listRef}>
@@ -123,7 +123,7 @@ function CourseFilter({ studentId }: { studentId: string }) {
   const courses = studentId && load.kind === "ok" && state.me?.student_id === viewer ? load.data.items as Row[] : null;
   return (
     <>
-      <label>과목<select name="course" disabled={!courses} aria-describedby="admin-course-hint" value={f.course}>
+      <label>과목<select class="select" name="course" disabled={!courses} aria-describedby="admin-course-hint" value={f.course}>
         <option value="">전체</option>
         {(courses || []).map((c) => <option key={c.lms_course_id} value={String(c.lms_course_id)}>{c.name}</option>)}
       </select></label>

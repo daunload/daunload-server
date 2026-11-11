@@ -1,4 +1,5 @@
-/* 요소 기본 모양(base 레이어). 클래스 없이 쓴 body, 제목, 링크, 입력칸, 진행 막대가 이 모양을 따른다.
+/* 요소 기본 모양(base 레이어). 클래스 없이 쓴 body, 제목, 링크, 라벨이 이 모양을 따른다.
+ * 입력칸·선택칸·체크박스·진행 막대는 daisyUI 클래스(input, select, checkbox, toggle, progress)를 붙여 쓴다.
  * 컴포넌트·유틸리티·legacy 규칙이 모두 이보다 강하므로, 다른 모양이 필요하면 그쪽에서 덮어쓴다. */
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
@@ -22,21 +23,9 @@ a { color: var(--blue); text-decoration: none; }
 a:hover { text-decoration: underline; }
 [hidden] { display: none !important; }
 :focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
-button, a, label.check { touch-action: manipulation; }
+button, a, label:has(.checkbox) { touch-action: manipulation; }
 
 label { display: grid; gap: 6px; font-size: var(--text-sm); color: var(--ink-2); font-weight: 500; }
-input, select {
-  max-width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px;
-  font: 400 var(--text-md)/1.4 var(--font); color: var(--ink);
-  background: var(--surface); border: 2px solid var(--ink); border-radius: var(--r-btn);
-}
-input:focus, select:focus { outline: none; border-color: var(--blue); background: var(--surface); box-shadow: 0 0 0 2px var(--blue); }
-input::placeholder { color: var(--ink-3); }
-
-progress { appearance: none; width: 100%; height: 12px; border: 2px solid var(--ink); border-radius: 6px; overflow: hidden; background: var(--fill); }
-progress::-webkit-progress-bar { height: 10px; background: var(--fill); }
-progress::-webkit-progress-value { background: var(--blue); border-radius: 3px; }
-progress::-moz-progress-bar { background: var(--blue); }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
