@@ -295,7 +295,7 @@ async def test_full_flow_sync_batch_and_notifications(env):
     played = []
 
     class FakePlayer:
-        async def play(self, session, video, *, on_progress=None):
+        async def play(self, session, video, *, on_progress=None, on_media=None):
             played.append(video.title)
             if on_progress:
                 await on_progress(video, 600, 600)

@@ -280,3 +280,25 @@ class Transcript(Base):
     duration: Mapped[float | None] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+
+class VideoUrl(Base):
+    """재생 워커가 영상을 틀 때 실제로 쓰인 영상 주소. 기록·조회 전용이다.
+
+    같은 영상(content_id)은 사용자·과목이 달라도 한 줄만 둔다. 다시 재생을 시도하면 attempts·last_* 만 바뀐다.
+    """
+
+    __tablename__ = "video_urls"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    content_id: Mapped[str] = mapped_column(String(64), unique=True)
+    media_url: Mapped[str] = mapped_column(Text)
+    lms_course_id: Mapped[int] = mapped_column(Integer)  # 처음 기록한 과목·항목
+    module_item_id: Mapped[int] = mapped_column(Integer)
+    course_name: Mapped[str] = mapped_column(String(255))
+    title: Mapped[str] = mapped_column(String(500))
+    first_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    last_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    attempts: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    first_seen_at: Mapped[datetime] = mapped_column(default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)

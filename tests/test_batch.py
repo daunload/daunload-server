@@ -100,7 +100,7 @@ class FakePlayer:
         self.behaviors = behaviors or {}  # module_item_id -> [동작...] (예외 또는 "nocomplete")
         self.played: list[str] = []
 
-    async def play(self, session, video, *, on_progress=None):
+    async def play(self, session, video, *, on_progress=None, on_media=None):
         self.played.append(video.title)
         queue = self.behaviors.get(video.module_item_id, [])
         action = queue.pop(0) if queue else "ok"
@@ -202,7 +202,7 @@ async def test_cancel_during_playback_stops_current_item():
     stopped = asyncio.Event()
 
     class SlowPlayer(FakePlayer):
-        async def play(self, session, video, *, on_progress=None):
+        async def play(self, session, video, *, on_progress=None, on_media=None):
             self.played.append(video.title)
             try:
                 await asyncio.sleep(3600)

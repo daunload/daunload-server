@@ -221,7 +221,7 @@ async def test_admin_shell_mobile_and_access(dashboard, tmp_path):
     await expect(view.locator(".admin-kpi")).to_have_count(4)
     await page.screenshot(path=tmp_path / "admin-desktop.png", full_page=True)
     await page.emulate_media(reduced_motion="reduce")
-    for tab in ("users", "activity", "problems", "overview"):
+    for tab in ("users", "activity", "problems", "videos", "saved", "overview"):
         await page.goto(f"http://dashboard.test/#admin/{tab}")
         await expect(view.locator(".admin-tabs [aria-current='page']")).to_have_attribute("href", f"#admin/{tab}")
         for width, height in ((375, 812), (768, 1024), (1024, 768), (1440, 900), (812, 375)):

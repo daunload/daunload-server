@@ -7,13 +7,14 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy import and_, exists, func, not_, or_, select, union
+from sqlalchemy.orm import aliased
 
 from app.api.deps import AdminUser, Db, JobQueue, is_admin
 from app.config import get_settings
 from app.db.base import utcnow
 from app.db.models import (AssignmentRow, CourseRow, DownloadRecord, LmsCredential, NotificationChannel,
                            NotificationLog, PlaybackBatch, PlaybackJob, SavedVideo, TodoRow, Transcript, User,
-                           UserDailyActivity)
+                           UserDailyActivity, VideoUrl)
 from app.services.access import Action, decide_access
 from app.services.activity import local_day
 from app.services.admin_data import (activity_union, as_utc, clean_error, failed_at, failed_job_filter,
@@ -676,6 +677,130 @@ async def user_playback(
         jobs[row["batch_id"]].append({**row, "error": clean_error(row["error"])})
     return {"total": total, "items": [
         {**b, "error": clean_error(b["error"]), "jobs": jobs.get(b["id"], [])} for b in batches]}
+
+
+class AdminSavedVideoRowOut(BaseModel):
+    id: int
+    student_id: str
+    lms_course_id: int
+    course_name: str
+    module_title: str
+    title: str
+    content_id: str
+    media_url: str | None
+    file_name: str
+    duration: float | None
+    size: int | None
+    resolve_error: str | None
+    resolved_at: datetime | None
+    resolve_failed_at: datetime | None
+    created_at: datetime
+    holders: int  # 같은 영상(content_id)을 저장해 둔 줄 수 = 사용자 수
+
+
+class AdminSavedVideosSummaryOut(BaseModel):
+    rows: int
+    videos: int  # 서로 다른 content_id
+    users: int
+
+
+class AdminSavedVideosOut(BaseModel):
+    total: int
+    counts: dict[str, int]  # saved / pending / failed (상태 조건 없이 센 값)
+    summary: AdminSavedVideosSummaryOut
+    items: list[AdminSavedVideoRowOut]
+
+
+def _saved_status(status: str):
+    if status == "saved":
+        return SavedVideo.media_url.is_not(None)
+    if status == "failed":
+        return and_(SavedVideo.media_url.is_(None), SavedVideo.resolve_error.is_not(None))
+    return and_(SavedVideo.media_url.is_(None), SavedVideo.resolve_error.is_(None))
+
+
+@router.get("/saved-videos", response_model=AdminSavedVideosOut)
+async def all_saved_videos(
+    admin: AdminUser, db: Db, response: Response,
+    q: str = Query(default="", max_length=100),
+    student_id: str | None = Query(default=None, max_length=32),
+    status: Literal["all", "saved", "pending", "failed"] = "all",
+    offset: Offset = 0, limit: Limit = 20,
+):
+    """전체 사용자의 saved_videos. 같은 영상도 사용자마다 한 줄이라 holders로 몇 명이 가졌는지 보여 준다."""
+    response.headers["Cache-Control"] = "no-store"
+    where = []
+    if q.strip():
+        where.append(or_(*(col.contains(q.strip(), autoescape=True)
+                           for col in (SavedVideo.title, SavedVideo.course_name, SavedVideo.content_id))))
+    if student_id and student_id.strip():
+        where.append(User.student_id == student_id.strip())
+    base = select(SavedVideo.id).join(User, User.id == SavedVideo.user_id).where(*where)
+
+    counts = {}
+    for key in ("saved", "pending", "failed"):
+        counts[key] = await db.scalar(select(func.count()).select_from(base.where(_saved_status(key)).subquery()))
+    summary = (await db.execute(
+        select(func.count(), func.count(func.distinct(SavedVideo.content_id)), func.count(func.distinct(SavedVideo.user_id)))
+        .select_from(SavedVideo).join(User, User.id == SavedVideo.user_id).where(*where)
+    )).one()
+
+    if status != "all":
+        where.append(_saved_status(status))
+    holders = (select(SavedVideo.content_id.label("cid"), func.count().label("n"))
+               .group_by(SavedVideo.content_id).subquery())
+    total = await db.scalar(select(func.count()).select_from(SavedVideo).join(User, User.id == SavedVideo.user_id).where(*where))
+    rows = (await db.execute(
+        select(SavedVideo.id, User.student_id, SavedVideo.lms_course_id, SavedVideo.course_name, SavedVideo.module_title,
+               SavedVideo.title, SavedVideo.content_id, SavedVideo.media_url, SavedVideo.file_name, SavedVideo.duration,
+               SavedVideo.size, SavedVideo.resolve_error, SavedVideo.resolved_at, SavedVideo.resolve_failed_at,
+               SavedVideo.created_at, holders.c.n.label("holders"))
+        .join(User, User.id == SavedVideo.user_id).join(holders, holders.c.cid == SavedVideo.content_id)
+        .where(*where).order_by(SavedVideo.created_at.desc(), SavedVideo.id.desc()).offset(offset).limit(limit)
+    )).mappings().all()
+    return AdminSavedVideosOut(
+        total=total, counts=counts,
+        summary=AdminSavedVideosSummaryOut(rows=summary[0], videos=summary[1], users=summary[2]),
+        items=[AdminSavedVideoRowOut(**{**row, "resolve_error": clean_error(row["resolve_error"])}) for row in rows],
+    )
+
+
+class AdminVideoUrlOut(BaseModel):
+    content_id: str
+    media_url: str
+    lms_course_id: int
+    module_item_id: int
+    course_name: str
+    title: str
+    first_student_id: str | None  # 탈퇴 등으로 사용자가 지워졌으면 None
+    last_student_id: str | None
+    attempts: int
+    first_seen_at: datetime
+    last_seen_at: datetime
+
+
+@router.get("/video-urls", response_model=_page_out(AdminVideoUrlOut))
+async def video_urls(
+    admin: AdminUser, db: Db, response: Response,
+    q: str = Query(default="", max_length=100),
+    offset: Offset = 0, limit: Limit = 20,
+):
+    """재생 워커가 실제로 튼 영상 주소(영상마다 한 줄). q는 제목·과목·content_id의 일부."""
+    response.headers["Cache-Control"] = "no-store"
+    where = []
+    if q.strip():
+        where.append(or_(*(col.contains(q.strip(), autoescape=True)
+                           for col in (VideoUrl.title, VideoUrl.course_name, VideoUrl.content_id))))
+    total = await db.scalar(select(func.count()).select_from(VideoUrl).where(*where))
+    first, last = aliased(User), aliased(User)
+    rows = (await db.execute(
+        select(VideoUrl.content_id, VideoUrl.media_url, VideoUrl.lms_course_id, VideoUrl.module_item_id,
+               VideoUrl.course_name, VideoUrl.title, VideoUrl.attempts, VideoUrl.first_seen_at, VideoUrl.last_seen_at,
+               first.student_id.label("first_student_id"), last.student_id.label("last_student_id"))
+        .outerjoin(first, first.id == VideoUrl.first_user_id).outerjoin(last, last.id == VideoUrl.last_user_id)
+        .where(*where).order_by(VideoUrl.last_seen_at.desc(), VideoUrl.id.desc()).offset(offset).limit(limit)
+    )).mappings().all()
+    return {"total": total, "items": rows}
 
 
 class AdminAccessRequestOut(BaseModel):

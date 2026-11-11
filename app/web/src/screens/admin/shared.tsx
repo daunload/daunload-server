@@ -15,6 +15,8 @@ export const ADMIN_TABS = [
   { key: "users", label: "사용자" },
   { key: "activity", label: "활동" },
   { key: "problems", label: "문제" },
+  { key: "videos", label: "영상 주소" },
+  { key: "saved", label: "저장 영상" },
 ];
 export const ADMIN_PERIODS = [7, 30, 90];
 export const ADMIN_METRICS: Record<string, string> = { playback_done: "재생 완료", logins: "로그인", downloads: "다운로드" };
@@ -46,7 +48,7 @@ export const ADMIN_PLAYBACK_STATUS: Record<string, string> = {
 
 /* ---------- 화면 조건 ----------
  * nav: 화면을 새로 열 때마다 오른다(기다리던 검색 타이머가 다른 화면에서 실행되지 않게 한다).
- * users·activity·problems: 탭 조건(상세에 다녀와도 남는다). detail: 지금 보는 사용자 한 명의 요약과 탭별 조건(viewer가 다르면 버린다).
+ * users·activity·problems·videos·saved: 탭 조건(상세에 다녀와도 남는다). detail: 지금 보는 사용자 한 명의 요약과 탭별 조건(viewer가 다르면 버린다).
  */
 export const adminUi = {
   nav: 0, days: 7, metric: "playback_done", problemCount: null as number | null, problemCountFor: null as string | null,
@@ -55,6 +57,8 @@ export const adminUi = {
   detail: null as null | { viewer: string; id: string; summary: Row | null; tabs: Record<string, Row> },
   activity: { kind: "all", student_id: "", offset: 0 },
   problems: { kind: "all", student_id: "", course: "", offset: 0 },
+  videos: { q: "", offset: 0 },
+  saved: { q: "", student_id: "", status: "all", offset: 0 },
 };
 
 /* ---------- 불러오기 ---------- */

@@ -152,7 +152,7 @@ class BatchResult:
 
 
 class Player(Protocol):
-    async def play(self, session, video: VideoTodo, *, on_progress=None): ...
+    async def play(self, session, video: VideoTodo, *, on_progress=None, on_media=None): ...
 
 
 @dataclass
@@ -160,6 +160,7 @@ class BatchHooks:
     on_item_start: Callable[[int, VideoTodo], Awaitable[None]] | None = None
     on_item_done: Callable[[ItemOutcome], Awaitable[None]] | None = None
     on_progress: Callable[[VideoTodo, float, float], Awaitable[None]] | None = None
+    on_media: Callable[[VideoTodo, str, str], Awaitable[None]] | None = None  # (영상, content_id, 영상 주소)
 
 
 class BatchRunner:
@@ -276,7 +277,8 @@ class BatchRunner:
 
     async def _play_unless_cancelled(self, video: VideoTodo, cancel: asyncio.Event | None) -> bool:
         """재생이 끝나면 True, 도중에 취소되면 재생을 멈추고(브라우저 컨텍스트 정리) False."""
-        play = asyncio.ensure_future(self.player.play(self.client.session, video, on_progress=self.hooks.on_progress))
+        play = asyncio.ensure_future(self.player.play(
+            self.client.session, video, on_progress=self.hooks.on_progress, on_media=self.hooks.on_media))
         if cancel is None:
             await play
             return True

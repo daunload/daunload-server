@@ -21,6 +21,7 @@ from app.services.access import user_has_access
 from app.services.lms_access import lms_client_for
 from app.services.notify import notify_user
 from app.services.sync import video_from_row
+from app.services.video_urls import record_video_url
 from app.services.week import week_bounds
 
 log = logging.getLogger(__name__)
@@ -294,7 +295,13 @@ def _db_hooks(batch_id: int) -> BatchHooks:
                 await db.commit()
                 last_saved[key] = now
 
-    return BatchHooks(on_item_start=on_item_start, on_item_done=on_item_done, on_progress=on_progress)
+    async def on_media(video: VideoTodo, content_id: str, media_url: str) -> None:
+        async with sm() as db:
+            user_id = await db.scalar(select(PlaybackBatch.user_id).where(PlaybackBatch.id == batch_id))
+            if user_id is not None:
+                await record_video_url(db, user_id, video, content_id, media_url)
+
+    return BatchHooks(on_item_start=on_item_start, on_item_done=on_item_done, on_progress=on_progress, on_media=on_media)
 
 
 async def _watch_cancel(batch_id: int, cancel: asyncio.Event, poll: float) -> None:

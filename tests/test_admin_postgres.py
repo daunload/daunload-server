@@ -296,3 +296,40 @@ async def test_concurrent_decisions_on_same_pending_user(database, monkeypatch):
         assert row.access_status == {"approve": "approved", "reject": "rejected"}[winner]
         assert row.access_decided_by == "20201234" and row.access_decided_at is not None
         assert row.access_reject_count == (1 if winner == "reject" else 0)
+
+
+async def test_video_urls_upsert_and_admin_list_on_postgres(database, monkeypatch):
+    from datetime import UTC, datetime
+
+    from app.db.models import VideoUrl
+    from app.lms.todo import VideoTodo
+    from app.services.video_urls import record_video_url
+
+    admin_id = await _seed()
+    monkeypatch.setattr(get_settings(), "admin_student_ids", ["20201234"])
+    video = VideoTodo(kind="video", course_id=1, course_name="과목", module_id=1, module_title="1주차", module_position=1,
+                      module_item_id=1, item_position=1, item_id=1, title="영상", duration=60, view_url="https://x",
+                      due_at=None, deadline=datetime.now(UTC), unlock_at=None)
+    url = "https://ssuin-object.commonscdn.com/a.mp4"
+
+    async def record(user_id):
+        async with sessionmaker()() as db:
+            await record_video_url(db, user_id, video, "c1", url)
+
+    await asyncio.gather(*(record(admin_id) for _ in range(5)))  # 동시에 같은 영상: 한 줄로 합친다
+    async with sessionmaker()() as db:
+        rows = (await db.scalars(select(VideoUrl))).all()
+    assert len(rows) == 1 and rows[0].attempts == 5
+
+    @asynccontextmanager
+    async def lifespan(app):
+        yield
+
+    app = create_app(lifespan)
+    app.state.queue = SimpleNamespace()
+    headers = {"Authorization": "Bearer " + create_access_token(admin_id)}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as api:
+        body = (await api.get("/admin/video-urls?q=영", headers=headers)).json()
+        saved = (await api.get("/admin/saved-videos?status=failed&q=s&student_id=20209999", headers=headers)).json()
+    assert body["total"] == 1 and body["items"][0]["first_student_id"] == "20201234"
+    assert saved["total"] == 1 and saved["items"][0]["holders"] == 1 and saved["summary"]["users"] == 1

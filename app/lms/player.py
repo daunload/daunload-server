@@ -17,13 +17,14 @@ import time
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from playwright.async_api import Browser, BrowserContext, Dialog, Frame, Page, async_playwright
 
 from app.config import Settings, get_settings
 from app.lms.auth import CANVAS_BASE_URL, LmsSession
 from app.lms.errors import PlaybackError, SessionExpired, VideoNotFound
+from app.lms.media import CONTENT_PHP, MediaError, check_media_host
 from app.lms.todo import VideoTodo
 
 log = logging.getLogger(__name__)
@@ -92,7 +93,8 @@ _VIDEO_JS = """
     if (v.paused && !v.ended) { const p = v.play(); if (p && p.catch) p.catch(() => {}); }
   }
   return {t: v.currentTime || 0, d: isFinite(v.duration) ? v.duration : 0,
-          paused: v.paused, ended: v.ended, rate: v.playbackRate, ready: v.readyState};
+          paused: v.paused, ended: v.ended, rate: v.playbackRate, ready: v.readyState,
+          src: v.currentSrc || v.src || ''};
 }
 """
 
@@ -105,6 +107,7 @@ class VideoState:
     ended: bool
     rate: float
     ready: int
+    src: str = ""
 
 
 @dataclass
@@ -117,6 +120,58 @@ class PlaybackResult:
 
 
 ProgressCallback = Callable[[VideoTodo, float, float], Awaitable[None]]
+# (영상, content_id, 영상 주소). 재생을 한 번 시도할 때마다 주소를 처음 알아낸 순간 한 번 부른다.
+MediaCallback = Callable[[VideoTodo, str, str], Awaitable[None]]
+
+
+def lecture_media_url(url: str) -> str | None:
+    """강의 영상 파일 주소면 그대로, 아니면 None. 학교·CDN의 https mp4만 받고 Commons 프리로더는 뺀다."""
+    path = urlsplit(url).path
+    if not path.endswith(".mp4") or path.endswith("/uniplayer/preloader.mp4"):
+        return None
+    try:
+        return check_media_host(url)
+    except MediaError:
+        return None
+
+
+class MediaWatch:
+    """재생 페이지의 요청에서 content_id와 영상 주소를 모은다.
+
+    content_id는 플레이어가 부르는 content.php?content_id=…에서, 주소는 <video>.currentSrc를 먼저 보고
+    스트리밍(blob:) 등으로 알 수 없으면 200/206으로 응답한 mp4 요청에서 얻는다.
+    """
+
+    def __init__(self, video: VideoTodo, callback: MediaCallback | None) -> None:
+        self.video, self.callback = video, callback
+        self.content_id: str | None = None
+        self.network_url: str | None = None
+        self.reported = False
+
+    def on_request(self, request) -> None:
+        if self.content_id is None and request.url.split("?", 1)[0] == CONTENT_PHP:
+            cid = parse_qs(urlsplit(request.url).query).get("content_id", [""])[0]
+            if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", cid):
+                self.content_id = cid
+
+    def on_response(self, response) -> None:
+        if self.network_url is None and response.status in (200, 206):
+            self.network_url = lecture_media_url(response.url)
+
+    def media_url(self, current_src: str) -> str | None:
+        return lecture_media_url(current_src) or self.network_url
+
+    async def report(self, current_src: str) -> None:
+        if self.reported or self.callback is None or self.content_id is None:
+            return
+        url = self.media_url(current_src)
+        if url is None:
+            return
+        self.reported = True
+        try:
+            await self.callback(self.video, self.content_id, url)
+        except Exception:  # 기록 실패로 재생을 멈추지 않는다
+            log.exception("영상 주소 기록 실패: %s", self.video.title)
 
 
 @asynccontextmanager
@@ -175,6 +230,7 @@ class VideoPlayer:
         video: VideoTodo,
         *,
         on_progress: ProgressCallback | None = None,
+        on_media: MediaCallback | None = None,
     ) -> PlaybackResult:
         if not video.view_url:
             raise PlaybackError(f"재생 주소가 없습니다: {video.title}")
@@ -182,11 +238,16 @@ class VideoPlayer:
         try:
             page = await context.new_page()
             page.on("dialog", _accept_dialog)
-            return await self._play_on_page(page, video, on_progress)
+            media = MediaWatch(video, on_media)
+            page.on("request", media.on_request)
+            page.on("response", media.on_response)
+            return await self._play_on_page(page, video, on_progress, media)
         finally:
             await context.close()
 
-    async def _play_on_page(self, page: Page, video: VideoTodo, on_progress: ProgressCallback | None) -> PlaybackResult:
+    async def _play_on_page(
+        self, page: Page, video: VideoTodo, on_progress: ProgressCallback | None, media: MediaWatch | None = None,
+    ) -> PlaybackResult:
         s = self.settings
         started = time.monotonic()
         hard_limit = started + video.duration * 1.5 + 600
@@ -217,6 +278,8 @@ class VideoPlayer:
                 frame = await self._start_video(page)
                 continue
 
+            if media:
+                await media.report(state.src)
             if on_progress:
                 await on_progress(video, state.t, state.d or video.duration)
 

@@ -1,5 +1,5 @@
 /* 관리자 화면(#admin). 관리자만 쓰므로 app.ts가 처음 열 때 import()로 받는다(별도 파일).
- * 탭 상태는 주소에 둔다: #admin/overview, #admin/users, #admin/users/{학번}[/{상세 탭}], #admin/activity, #admin/problems
+ * 탭 상태는 주소에 둔다: #admin/overview, #admin/users, #admin/users/{학번}[/{상세 탭}], #admin/activity, #admin/problems, #admin/videos, #admin/saved
  * 서버 문자열은 JSX가 글자로 넣는다(HTML로 해석하지 않는다).
  */
 import { useState } from "preact/hooks";
@@ -13,6 +13,8 @@ import { Activity, Problems } from "./feeds";
 import { Overview } from "./overview";
 import { ADMIN_PERIODS, ADMIN_TABS, adminNumber, adminUi } from "./shared";
 import { Users } from "./users";
+import { SavedVideos } from "./saved-videos";
+import { VideoUrls } from "./video-urls";
 
 /** 관리자 화면을 새로 연다. path는 state.adminPath(`["users", "20201234"]` 등). */
 export function viewAdmin(path: string[] = state.adminPath): void {
@@ -107,7 +109,9 @@ function Admin({ path, nav }: { path: string[]; nav: number }) {
           : detail ? <UserDetail id={path[1]} tabKey={path[2]} again={again} onNotFound={() => setNotFound(true)} />
             : tab === "users" ? <Users again={again} />
               : tab === "activity" ? <Activity again={again} period={period} />
-                : <Problems again={again} period={period} />}
+                : tab === "videos" ? <VideoUrls again={again} />
+                  : tab === "saved" ? <SavedVideos again={again} />
+                  : <Problems again={again} period={period} />}
       </div>
     </div>
   );

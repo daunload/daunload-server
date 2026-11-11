@@ -51,6 +51,9 @@ def as_admin(data, **over):
     data["/admin/users"] = {"total": 0, "users": []}
     data["/admin/activities"] = {"total": 0, "counts": {"playback": 0, "download": 0, "transcript": 0}, "activities": []}
     data["/admin/problems"] = {"total": 0, "counts": {"playback": 0, "batch": 0, "lms": 0, "resolve": 0}, "problems": []}
+    data["/admin/video-urls"] = {"total": 0, "items": []}
+    data["/admin/saved-videos"] = {"total": 0, "counts": {"saved": 0, "pending": 0, "failed": 0},
+                                   "summary": {"rows": 0, "videos": 0, "users": 0}, "items": []}
 
 
 async def test_admin_tabs_routes_and_back(dashboard):  # noqa: F811
@@ -295,6 +298,87 @@ async def test_overview_no_sideways_scroll(dashboard, tmp_path):  # noqa: F811
         await page.locator("#view .admin-chart summary").click()
         assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), width
         await page.screenshot(path=tmp_path / f"overview-{width}.png", full_page=True)
+
+
+async def test_video_urls_tab(dashboard, tmp_path):  # noqa: F811
+    page, data = dashboard
+    as_admin(data)
+    now = datetime.now(UTC).isoformat()
+    url = "https://ssuin-object.commonscdn.com/" + "contents/very/long/path/" * 6 + "lecture.mp4"
+    data["/admin/video-urls"] = {"total": 1, "items": [{
+        "content_id": "abc123", "media_url": url, "lms_course_id": 1, "module_item_id": 10,
+        "course_name": "자료구조", "title": "3강 <img src=x onerror=alert(1)>", "attempts": 3,
+        "first_student_id": "20231234", "last_student_id": None, "first_seen_at": now, "last_seen_at": now}]}
+    await page.goto(BASE + "#admin/overview")
+    tabs = page.locator("#view nav.admin-tabs")
+    await tabs.get_by_role("link", name="영상 주소").click()
+    await expect(page).to_have_url(BASE + "#admin/videos")
+    await expect(tabs.get_by_role("link", name="영상 주소")).to_have_attribute("aria-current", "page")
+    view = page.locator("#view")
+    await expect(view.locator(".admin-video-urls tbody tr")).to_have_count(1)
+    await expect(view.locator(".admin-video-urls")).to_contain_text("3강 <img src=x onerror=alert(1)>")
+    await expect(view.locator(".admin-video-urls")).to_contain_text(url)
+    await expect(view.locator(".admin-video-urls")).to_contain_text("3회")
+    await expect(view.locator(".admin-video-urls")).to_contain_text("마지막 삭제됨")
+    await expect(view.locator(".admin-video-urls").get_by_role("link", name="20231234")).to_be_visible()
+    await expect(view.locator("#admin-reload")).to_be_visible()  # 기간 조건은 없다
+    await expect(view.locator("#admin-days")).to_have_count(0)
+
+    async with page.expect_request(lambda r: "/admin/video-urls" in r.url and parse_qs(urlparse(r.url).query).get("q") == ["자료"]):
+        await view.get_by_role("searchbox", name="제목·과목 검색").fill("자료")
+    for width in (375, 768, 1024, 1440):
+        await page.set_viewport_size({"width": width, "height": 900})
+        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), width
+        await page.screenshot(path=tmp_path / f"video-urls-{width}.png", full_page=True)
+
+    data["/admin/video-urls"] = {"total": 0, "items": []}
+    await page.goto(BASE + "#admin/overview")
+    await page.goto(BASE + "#admin/videos")
+    await expect(view).to_contain_text("조건에 맞는 영상 주소가 없습니다")  # 검색어는 탭 조건으로 남는다
+
+
+async def test_saved_videos_tab(dashboard, tmp_path):  # noqa: F811
+    page, data = dashboard
+    as_admin(data)
+    now = datetime.now(UTC).isoformat()
+    url = "https://ssuin-object.commonscdn.com/" + "contents/very/long/path/" * 6 + "lecture.mp4"
+
+    def item(n, sid, **kw):
+        return {"id": n, "student_id": sid, "lms_course_id": 1, "course_name": "자료구조", "module_title": "3주차",
+                "title": f"{n}강 <b>x</b>", "content_id": f"c{n}", "media_url": None, "file_name": "a.mp4",
+                "duration": 1800, "size": 2_100_000_000, "resolve_error": None, "resolved_at": None,
+                "resolve_failed_at": None, "created_at": now, "holders": 1, **kw}
+    data["/admin/saved-videos"] = {
+        "total": 3, "counts": {"saved": 1, "pending": 1, "failed": 1},
+        "summary": {"rows": 1080, "videos": 300, "users": 8},
+        "items": [item(1, "20231234", media_url=url, resolved_at=now, holders=5),
+                  item(2, "20220456", resolve_error="내려받을 수 없는 콘텐츠 형식입니다 (everlec)."),
+                  item(3, "20220456")]}
+    await page.goto(BASE + "#admin/overview")
+    tabs = page.locator("#view nav.admin-tabs")
+    await tabs.get_by_role("link", name="저장 영상").click()
+    await expect(page).to_have_url(BASE + "#admin/saved")
+    view = page.locator("#view")
+    table = view.locator(".admin-saved-videos")
+    await expect(table.locator("tbody tr")).to_have_count(3)
+    await expect(view).to_contain_text("1,080줄 · 서로 다른 영상 300개 · 사용자 8명")
+    await expect(view).to_contain_text("중복 780줄")
+    await expect(table).to_contain_text("1강 <b>x</b>")
+    await expect(table).to_contain_text("5명")
+    await expect(table).to_contain_text(url)
+    await expect(table).to_contain_text("everlec")
+    await expect(table).to_contain_text("2.1GB")
+    await expect(view.locator("[data-kind='all']")).to_have_text("전체 3")
+
+    async with page.expect_request(lambda r: "/admin/saved-videos" in r.url and parse_qs(urlparse(r.url).query).get("status") == ["failed"]):
+        await view.locator("[data-kind='failed']").click()
+    await expect(view.locator("[data-kind='failed']")).to_have_attribute("aria-pressed", "true")
+    async with page.expect_request(lambda r: "/admin/saved-videos" in r.url and parse_qs(urlparse(r.url).query).get("student_id") == ["2023"]):
+        await view.get_by_role("searchbox", name="학번").fill("2023")
+    for width in (375, 768, 1024, 1440):
+        await page.set_viewport_size({"width": width, "height": 900})
+        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), width
+        await page.screenshot(path=tmp_path / f"saved-{width}.png", full_page=True)
 
 
 # ---------------- 사용자 목록과 상세 (Task 7) ----------------
