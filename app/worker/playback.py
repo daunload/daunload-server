@@ -96,6 +96,8 @@ async def process_next(player_factory) -> int | None:
 
 LAUNCH_BACKOFF = (30, 300)  # Chrome을 못 띄우면 30초부터 두 배씩, 최대 5분 기다린다
 ADMIN_ALERT_INTERVAL = 3600
+# 큐가 비었을 때 다음 묶음을 찾는 간격. 새 재생이 이만큼 늦게 시작될 수 있다(재생 중에는 영상 간격만 쉰다).
+IDLE_POLL_SECONDS = 3
 
 
 class Loop:
@@ -127,7 +129,7 @@ class Loop:
         self.backoff = 0.0
         if batch_id is None:
             await self.manager.close_if_idle()  # 큐가 비었을 때만 닫는다
-            return 1
+            return IDLE_POLL_SECONDS
         self.manager.release()
         await self.manager.recycle_if_old()  # 영상과 영상 사이에서만 새로 띄운다
         return sum(self.settings.playback_gap_seconds) / 2

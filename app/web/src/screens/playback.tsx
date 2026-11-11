@@ -395,7 +395,43 @@ export async function cancelActivePlayback(): Promise<void> {
 
 /* ---------- 폴링 ---------- */
 
-let pollTimer: ReturnType<typeof setInterval> | null = null;
+// 재생 중이면 5초마다 진행률을 받는다. 대기 중이면 차례가 오기까지 남은 시간의 절반(5~30초)만 기다린다.
+// 탭이 가려져 있으면 쉬고, 다시 보이면 바로 한 번 받는다. 서버 대기열 계산은 모든 사용자 몫을 다시 하므로
+// 아무도 보지 않는 탭이 5초마다 부르지 않게 한다.
+const POLL_RUNNING_MS = 5000;
+const POLL_QUEUED_MAX_MS = 30000;
+let pollTimer: ReturnType<typeof setTimeout> | null = null;
+let polling = false;
+let pollInFlight = false;
+
+export function nextPollDelay(b: Pick<Batch, "status" | "estimated_wait_seconds"> | null): number {
+  if (!b || b.status !== "queued" || b.estimated_wait_seconds == null) return POLL_RUNNING_MS;
+  return Math.min(POLL_QUEUED_MAX_MS, Math.max(POLL_RUNNING_MS, (b.estimated_wait_seconds * 1000) / 2));
+}
+
+function schedulePoll(ms: number): void {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(pollOnce, ms);
+}
+
+async function pollOnce(): Promise<void> {
+  pollTimer = null;
+  if (!polling || pollInFlight) return;
+  if (!state.active) return stopPolling();
+  if (document.hidden) return;  // visibilitychange가 다시 깨운다
+  pollInFlight = true;
+  try {
+    state.active = await api<BatchDetail>(`/playback/batches/${state.active.id}`);
+    if (!["queued", "running"].includes(state.active.status)) await finishActive();
+    redrawPlayback();
+  } catch { /* 일시적 오류는 다음 주기에 다시 시도 */ }
+  finally { pollInFlight = false; }
+  if (polling && state.active) schedulePoll(nextPollDelay(state.active));
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && polling && !pollInFlight) void pollOnce();
+});
 
 function redrawPlayback(): void {
   if (state.view === "playback") viewPlayback();
@@ -405,19 +441,14 @@ function redrawPlayback(): void {
 
 export function startPolling(): void {
   renderTaskPanel();
-  if (pollTimer) return;
-  pollTimer = setInterval(async () => {
-    if (!state.active) return stopPolling();
-    try {
-      state.active = await api<BatchDetail>(`/playback/batches/${state.active.id}`);
-      if (!["queued", "running"].includes(state.active.status)) await finishActive();
-      redrawPlayback();
-    } catch { /* 일시적 오류는 다음 주기에 다시 시도 */ }
-  }, 5000);
+  if (polling) return;
+  polling = true;
+  schedulePoll(nextPollDelay(state.active));
 }
 
 export function stopPolling(): void {
-  if (pollTimer) clearInterval(pollTimer);
+  polling = false;
+  if (pollTimer) clearTimeout(pollTimer);
   pollTimer = null;
 }
 

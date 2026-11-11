@@ -220,3 +220,31 @@ async def test_expired_request_automatically_recovers_once(env, token_auth, monk
         if learningx:
             assert route.calls[-1].request.headers['Authorization'] == 'Bearer FRESH'
     assert renewals == ['20201234']
+
+
+async def test_healthy_use_does_not_rewrite_credentials(env, token_auth):
+    """정상 상태에서 쓰기만 하면 저장하지 않는다. 버전이 그대로라 동시에 돌던 긴 작업의 세션 갱신이 살아남는다."""
+    api, _ = env
+    h = await _signup(api)
+    async with db_base.sessionmaker()() as db:
+        before = (await db.get(LmsCredential, 1)).credential_version
+        async with lms_client_for(db, 1):
+            pass
+        cred = await db.scalar(select(LmsCredential).where(LmsCredential.user_id == 1)
+                               .execution_options(populate_existing=True))
+        assert cred.credential_version == before and cred.status == 'ok'
+
+
+async def test_error_state_is_cleared_after_successful_use(env, token_auth):
+    api, _ = env
+    h = await _signup(api)
+    async with db_base.sessionmaker()() as db:
+        await db.execute(update(LmsCredential).where(LmsCredential.user_id == 1)
+                         .values(status='error', last_error='boom'))
+        await db.commit()
+        db.expire_all()
+        async with lms_client_for(db, 1):
+            pass
+        cred = await db.scalar(select(LmsCredential).where(LmsCredential.user_id == 1)
+                               .execution_options(populate_existing=True))
+        assert cred.status == 'ok' and cred.last_error is None and cred.last_error_at is None

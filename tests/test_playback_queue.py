@@ -305,7 +305,7 @@ async def test_loop_closes_idle_browser_only_when_queue_empty(env, fake_lms):
     assert await loop.step() == 20
     assert await loop.step() == 20
     assert manager.idle_checks == 0 and manager.released == 2 and manager.recycles == 2
-    assert await loop.step() == 1
+    assert await loop.step() == worker.IDLE_POLL_SECONDS
     assert manager.idle_checks == 1
 
 
@@ -325,3 +325,44 @@ async def test_loop_backs_off_and_alerts_once_per_hour(env, fake_lms):
     _, jobs = await _statuses()
     assert [j.status for j in jobs] == ["done", "queued"]
     assert loop.backoff == 0
+
+
+async def test_queue_estimate_cache_reuses_until_ttl(env, monkeypatch):
+    from app.services.playback import QueueEstimateCache
+
+    calls = []
+
+    async def fake(db):
+        calls.append(1)
+        return {len(calls): {}}
+
+    monkeypatch.setattr(playback, "queue_estimates", fake)
+    now = [0.0]
+    cache = QueueEstimateCache(ttl=3, clock=lambda: now[0])
+    first = await cache.get(None)
+    now[0] = 2.9
+    assert await cache.get(None) is first and len(calls) == 1
+    now[0] = 3.0
+    assert await cache.get(None) == {2: {}}
+    cache.invalidate()
+    assert await cache.get(None) == {3: {}}
+
+
+async def test_new_batch_appears_in_queue_immediately_despite_cache(env, monkeypatch):
+    api, _ = env
+    headers = await _signup(api)
+    await enqueue(await add_user("other"))
+    assert (await api.get("/playback/batches?limit=10", headers=headers)).status_code == 200  # 캐시를 채운다
+
+    async def pending(*args, **kwargs):
+        return [video(1)]
+
+    monkeypatch.setattr(playback, "pending_videos_from_db", pending)
+    created = await api.post("/playback/batches", json={"scope": "all"}, headers=headers)
+    assert created.status_code == 201, created.text
+    assert created.json()["queue_position"] == 2
+    detail = (await api.get(f"/playback/batches/{created.json()['id']}", headers=headers)).json()
+    assert detail["queue_position"] == 2 and detail["jobs"][0]["expected_end"]
+    # 취소도 바로 반영된다
+    cancelled = await api.delete(f"/playback/batches/{created.json()['id']}", headers=headers)
+    assert cancelled.json()["status"] == "cancelled" and cancelled.json()["queue_position"] is None

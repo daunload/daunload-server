@@ -108,7 +108,10 @@ async def lms_client_for(db: AsyncSession, user_id: int) -> AsyncIterator[LmsCli
         if cred.status == "invalid" or not cred.session_enc:
             await client.relogin()
         yield client
-        values.update(status="ok", last_error=None, last_error_at=None)
+        # 이미 정상 상태였으면 쓰지 않는다. 매번 쓰면 버전이 올라가서, 동시에 돌던 긴 작업(재생)이
+        # 끝날 때 갱신한 세션을 저장하지 못하고 버리게 된다.
+        if cred.status != "ok" or cred.last_error is not None or cred.last_error_at is not None:
+            values.update(status="ok", last_error=None, last_error_at=None)
     except InvalidCredentials:
         values.update(status="invalid", session_enc=None, last_error=RELOGIN_MESSAGE, last_error_at=utcnow())
         raise

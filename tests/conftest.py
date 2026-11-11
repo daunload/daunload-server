@@ -32,3 +32,13 @@ def approve_test_users():
     event.listen(User, "init", default_approved)
     yield
     event.remove(User, "init", default_approved)
+
+
+@pytest.fixture(autouse=True)
+def fresh_queue_estimates():
+    """API의 대기열 예상 캐시는 프로세스 전역이다. 테스트마다 DB가 새로 생기므로 비우고 시작한다."""
+    from app.services.playback import queue_estimate_cache
+
+    queue_estimate_cache.invalidate()
+    yield
+    queue_estimate_cache.invalidate()

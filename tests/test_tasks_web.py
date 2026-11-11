@@ -1,5 +1,6 @@
 """하단 진행 패널: 재생과 텍스트 변환을 한곳에서 보고 멈추며, 실패는 남겨 둔다 (가짜 API, 실제 Chrome)."""
 
+import asyncio
 import re
 from datetime import UTC, datetime, timedelta
 
@@ -407,3 +408,40 @@ async def test_logout_clears_bulk_and_transcribe_tasks(dashboard):
     assert await page.evaluate("[__ssu.tx.queue.length, __ssu.tx.finished.length, __ssu.state.bulk]") == [0, 0, None]
     await page.evaluate("__ssu.state.token = 'again'; __ssu.renderTaskPanel()")
     await expect(page.locator("#task-panel")).to_be_hidden()
+
+
+async def _polls(page, action):
+    """action 동안 진행 상황 조회(GET /playback/batches/7)가 몇 번 나갔는지 센다."""
+    seen = []
+    handler = lambda r: seen.append(1) if r.method == "GET" and r.url.endswith("/playback/batches/7") else None  # noqa: E731
+    page.on("request", handler)
+    await action()
+    await asyncio.sleep(0.5)  # 가짜 시계로 낸 요청의 응답을 실제로 기다린다
+    page.remove_listener("request", handler)
+    return len(seen)
+
+
+async def _set_hidden(page, hidden):
+    await page.evaluate("""(h) => {
+        Object.defineProperty(document, 'hidden', {configurable: true, get: () => h});
+        document.dispatchEvent(new Event('visibilitychange'));
+    }""", hidden)
+
+
+async def test_polling_slows_while_queued_and_pauses_when_hidden(page):
+    batch = _active(page)
+    batch.update(status="queued", estimated_wait_seconds=600, queue_position=3)
+    await page.clock.install()
+    await page.goto("http://dashboard.test/")
+    await page.wait_for_function("__ssu.state.active !== null")
+    # 대기 중(차례까지 10분)이면 30초마다만 묻는다.
+    assert await _polls(page, lambda: page.clock.run_for(25_000)) == 0
+    assert await _polls(page, lambda: page.clock.run_for(6_000)) == 1
+    # 탭이 가려지면 쉰다.
+    await _set_hidden(page, True)
+    assert await _polls(page, lambda: page.clock.run_for(120_000)) == 0
+    # 다시 보이면 바로 한 번 묻고, 재생이 시작됐으면 5초 주기로 돌아간다.
+    batch.update(status="running", estimated_wait_seconds=0)
+    assert await _polls(page, lambda: _set_hidden(page, False)) == 1
+    assert await _polls(page, lambda: page.clock.run_for(5_100)) == 1
+    assert await _polls(page, lambda: page.clock.run_for(5_100)) == 1

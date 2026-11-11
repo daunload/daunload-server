@@ -132,7 +132,7 @@ def _video_from_json(data: dict) -> VideoTodo:
 
 
 async def run_batch(
-    batch_id: int, player, settings: Settings | None = None, cancel_poll_seconds: float = 1,
+    batch_id: int, player, settings: Settings | None = None, cancel_poll_seconds: float = 3,
     *, one_item: bool = False,
 ) -> str:
     """묶음을 실행하고 최종 상태를 반환한다. player는 VideoPlayer(또는 같은 인터페이스)."""
@@ -372,7 +372,11 @@ async def queue_estimates(db: AsyncSession, proposed: list[VideoTodo] | None = N
         PlaybackBatch.status.in_(ACTIVE_STATUSES), ~PlaybackBatch.cancel_requested,
     ).order_by(PlaybackBatch.queue_at, PlaybackBatch.id))).all())
     batches.sort(key=lambda b: b.status != "running")  # 재생 중 영상은 먼저 끝낸다.
-    jobs = list((await db.scalars(select(PlaybackJob).where(
+    # 계산에 쓰는 컬럼만 읽는다(영상 JSON은 크고 여기서 쓰지 않는다).
+    jobs = list((await db.execute(select(
+        PlaybackJob.batch_id, PlaybackJob.position, PlaybackJob.duration, PlaybackJob.deadline,
+        PlaybackJob.progress_seconds, PlaybackJob.status,
+    ).where(
         PlaybackJob.batch_id.in_([b.id for b in batches]),
         PlaybackJob.status.in_(("queued", "playing")),
     ).order_by(PlaybackJob.position))).all())
@@ -412,3 +416,30 @@ async def queue_estimates(db: AsyncSession, proposed: list[VideoTodo] | None = N
         if grouped[key]:
             order.append(key)
     return result
+
+
+class QueueEstimateCache:
+    """API용 대기열 예상 캐시. 대기열 전체를 다시 계산하는 일을 모든 사용자가 몇 초마다 반복하지 않게 한다.
+
+    결과는 사용자와 무관하게 같으므로 프로세스 하나에서 공유한다. 이 프로세스에서 묶음을 만들거나 취소하면
+    바로 비운다. 워커가 바꾼 상태(진행률·순서)는 최대 ttl초 늦게 보인다.
+    """
+
+    def __init__(self, ttl: float = 3.0, clock=time.monotonic) -> None:
+        self.ttl, self.clock = ttl, clock
+        self._value: dict[int, dict] | None = None
+        self._at = 0.0
+
+    async def get(self, db: AsyncSession) -> dict[int, dict]:
+        # 만료 직후 동시에 온 요청은 각자 계산할 수 있다. 몇 번 겹치는 정도라 잠금은 두지 않는다
+        # (모듈 전역 asyncio.Lock은 이벤트 루프에 묶여 테스트·재시작에서 문제가 된다).
+        if self._value is None or self.clock() - self._at >= self.ttl:
+            value = await queue_estimates(db)
+            self._value, self._at = value, self.clock()
+        return self._value
+
+    def invalidate(self) -> None:
+        self._value = None
+
+
+queue_estimate_cache = QueueEstimateCache()

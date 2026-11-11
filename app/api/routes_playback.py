@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
+from sqlalchemy.orm import defer
 
 from app.api.deps import CurrentUser, Db
 from app.api.schemas import BatchDetailOut, BatchIn, BatchOut, JobOut, PlanItemOut, PlanOut
@@ -49,6 +50,7 @@ async def _create(db, user_id: int, scope: str, videos, course_id=None, module_i
     except playback.ActiveBatchExists as e:
         raise HTTPException(409, str(e)) from e
     # DB 커밋 자체가 큐 등록이다. Redis 장애와 무관하게 워커가 읽는다.
+    playback.queue_estimate_cache.invalidate()  # 방금 넣은 묶음이 바로 대기 순서에 보이게 한다
     return await _batch_out(db, batch)
 
 
@@ -73,7 +75,7 @@ async def list_batches(user: CurrentUser, db: Db, limit: int = Query(default=20,
         .order_by(PlaybackBatch.id.desc()).limit(limit)
     )
     batches = (await db.scalars(stmt)).all()
-    estimates = await playback.queue_estimates(db)
+    estimates = await playback.queue_estimate_cache.get(db)
     return [await _batch_out(db, b, estimates) for b in batches]
 
 
@@ -88,9 +90,10 @@ async def _own_batch(db, user_id: int, batch_id: int) -> PlaybackBatch:
 async def get_batch(batch_id: int, user: CurrentUser, db: Db):
     batch = await _own_batch(db, user.id, batch_id)
     jobs = (await db.scalars(
-        select(PlaybackJob).where(PlaybackJob.batch_id == batch_id).order_by(PlaybackJob.position)
+        select(PlaybackJob).options(defer(PlaybackJob.video))  # 응답에 쓰지 않는 영상 JSON은 읽지 않는다
+        .where(PlaybackJob.batch_id == batch_id).order_by(PlaybackJob.position)
     )).all()
-    estimates = await playback.queue_estimates(db)
+    estimates = await playback.queue_estimate_cache.get(db)
     info = estimates.get(batch.id, {})
     return BatchDetailOut.model_validate({
         **(await _batch_out(db, batch, estimates)).model_dump(),
@@ -104,10 +107,11 @@ async def cancel_batch(batch_id: int, user: CurrentUser, db: Db):
     batch = await playback.cancel_batch(db, batch_id, user.id)
     if batch is None:
         raise HTTPException(404, "묶음을 찾을 수 없습니다.")
+    playback.queue_estimate_cache.invalidate()
     return await _batch_out(db, batch)
 
 
 async def _batch_out(db, batch, estimates=None) -> BatchOut:
-    estimates = await playback.queue_estimates(db) if estimates is None else estimates
+    estimates = await playback.queue_estimate_cache.get(db) if estimates is None else estimates
     info = {k: v for k, v in estimates.get(batch.id, {}).items() if k != "job_estimates"}
     return BatchOut.model_validate({**BatchOut.model_validate(batch).model_dump(), **info})
