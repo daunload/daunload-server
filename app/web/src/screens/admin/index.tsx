@@ -1,5 +1,5 @@
 /* 관리자 화면(#admin). 관리자만 쓰므로 app.ts가 처음 열 때 import()로 받는다(별도 파일).
- * 탭 상태는 주소에 둔다: #admin/overview, #admin/users, #admin/users/{학번}[/{상세 탭}], #admin/activity, #admin/problems, #admin/videos, #admin/saved
+ * 탭 상태는 주소에 둔다: #admin/overview, #admin/users, #admin/users/{학번}[/{상세 탭}], #admin/activity, #admin/problems, #admin/videos, #admin/saved[/{과목 ID}]
  * 서버 문자열은 JSX가 글자로 넣는다(HTML로 해석하지 않는다).
  */
 import { useState } from "preact/hooks";
@@ -110,7 +110,7 @@ function Admin({ path, nav }: { path: string[]; nav: number }) {
             : tab === "users" ? <Users again={again} />
               : tab === "activity" ? <Activity again={again} period={period} />
                 : tab === "videos" ? <VideoUrls again={again} />
-                  : tab === "saved" ? <SavedVideos again={again} />
+                  : tab === "saved" ? <SavedVideos again={again} courseId={path[1]} />
                   : <Problems again={again} period={period} />}
       </div>
     </div>

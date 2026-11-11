@@ -150,8 +150,10 @@ uv run pytest -m "not browser"
 
 - 강의 영상 내려받기는 soongsil-lms-downloader의 방식(content.php → mp4)을 옮겼다. 개인 복습용이며, 교수의 다운로드 허용 여부를
   알려 주는 값이 LMS·Commons 어디에도 없어 구분하지 못한다. `readystream` 형식은 확인하지 못해 목록에서 제외했다.
-- 동기화할 때 열린 영상의 mp4 주소를 `saved_videos`에 저장해 두고(한 번에 최대 20개씩), 시청기간이 끝나거나 지난 학기 과목이 되어도
-  본인이 그 주소로 받을 수 있게 한다(`/saved-videos`). 영상 파일은 저장하지 않는다. 지금 CDN은 Referer만 확인하지만,
+- 동기화할 때 열린 영상의 mp4 주소를 저장해 두고(한 번에 최대 20개씩), 시청기간이 끝나거나 지난 학기 과목이 되어도
+  본인이 그 주소로 받을 수 있게 한다(`/saved-videos`). 영상 정보는 과목의 영상마다 한 줄(`saved_video_items`)이라 같은 과목을
+  듣는 사용자들이 함께 쓰고, 사용자마다는 볼 수 있었던 영상 연결(`saved_videos`)만 둔다. 같은 영상(content_id)의 주소를 이미 찾았으면
+  학교 서버를 다시 부르지 않는다. 영상 파일은 저장하지 않는다. 지금 CDN은 Referer만 확인하지만,
   학교가 주소에 서명을 붙이거나 파일을 지우면 저장된 주소는 쓸 수 없게 된다(410으로 알린다).
 
 - Commons 플레이어의 실제 DOM은 실계정으로만 볼 수 있다. `player.py`의 `PLAY_SELECTORS`/`CONFIRM_SELECTORS`는

@@ -4,7 +4,7 @@ from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import JSON, BigInteger, Boolean, Float, ForeignKey, Integer, String, Text, UniqueConstraint, Index, false, text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, utcnow
 
@@ -219,22 +219,24 @@ class NotificationLog(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
-class SavedVideo(Base):
-    """시청기간 안에 찾아 둔 강의 영상 주소. 기간이 끝나 LMS에서 조회할 수 없게 된 뒤에도 본인이 내려받는 데 쓴다."""
+class SavedVideoItem(Base):
+    """시청기간 안에 찾아 둔 강의 영상(과목의 모듈 항목마다 한 줄). 같은 과목을 듣는 사용자들이 함께 쓴다.
 
-    __tablename__ = "saved_videos"
-    __table_args__ = (UniqueConstraint("user_id", "lms_course_id", "module_item_id"),)
+    기간이 끝나 LMS에서 조회할 수 없게 된 뒤에도 연결된 사용자가 내려받는 데 쓴다. 누가 볼 수 있는지는 SavedVideo가 정한다.
+    """
+
+    __tablename__ = "saved_video_items"
+    __table_args__ = (UniqueConstraint("lms_course_id", "module_item_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     lms_course_id: Mapped[int] = mapped_column(Integer)
-    course_name: Mapped[str] = mapped_column(String(255))
     module_item_id: Mapped[int] = mapped_column(Integer)
+    content_id: Mapped[str] = mapped_column(String(64), index=True)
+    course_name: Mapped[str] = mapped_column(String(255))
     module_title: Mapped[str] = mapped_column(String(255))
     module_position: Mapped[int] = mapped_column(Integer, default=0)
     item_position: Mapped[int] = mapped_column(Integer, default=0)
     title: Mapped[str] = mapped_column(String(500))
-    content_id: Mapped[str] = mapped_column(String(64))
     media_url: Mapped[str | None] = mapped_column(Text)  # 아직 찾지 못했으면 None
     file_name: Mapped[str] = mapped_column(String(500))
     duration: Mapped[float | None] = mapped_column(Float)
@@ -243,6 +245,23 @@ class SavedVideo(Base):
     resolved_at: Mapped[datetime | None]
     resolve_failed_at: Mapped[datetime | None]  # 주소를 찾지 못한 시각
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class SavedVideo(Base):
+    """사용자가 시청기간 안에 볼 수 있었던 저장 영상(사용자 ↔ SavedVideoItem 연결).
+
+    지난 영상 목록, 시청기간 뒤 본인 다운로드, 텍스트 변환 권한 확인이 이 줄을 본다. 영상 정보는 item에 한 번만 둔다.
+    """
+
+    __tablename__ = "saved_videos"
+    __table_args__ = (UniqueConstraint("user_id", "item_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("saved_video_items.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+    item: Mapped[SavedVideoItem] = relationship(lazy="joined", innerjoin=True)
 
 
 class DownloadRecord(Base):

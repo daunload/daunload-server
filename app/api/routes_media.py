@@ -20,7 +20,7 @@ from starlette.background import BackgroundTask
 
 from app.api.deps import CurrentUser, Db, access_denied
 from app.db.base import sessionmaker
-from app.db.models import CourseRow, SavedVideo
+from app.db.models import CourseRow, SavedVideo, SavedVideoItem
 from app.config import get_settings
 from app.lms import auth
 from app.lms.errors import InvalidCredentials, LmsError
@@ -104,9 +104,10 @@ async def direct_video(course_id: int, module_item_id: int, user: CurrentUser, d
 @router.post("/saved-videos/{saved_id}/direct-download", response_model=DirectDownloadOut)
 async def direct_saved_video(saved_id: int, user: CurrentUser, db: Db, response: Response):
     response.headers["Cache-Control"] = "no-store"
-    row = await db.get(SavedVideo, saved_id)
-    if row is None or row.user_id != user.id:
+    link = await db.get(SavedVideo, saved_id)
+    if link is None or link.user_id != user.id:
         raise HTTPException(404, "저장된 영상이 아닙니다.")
+    row = link.item
     if not row.media_url:
         raise HTTPException(409, "아직 영상 주소를 저장하지 못했습니다. 동기화 뒤 다시 시도하세요.")
     try:
@@ -243,27 +244,30 @@ async def create_material_link(course_id: int, key: str, user: CurrentUser, db: 
 @router.get("/saved-videos", response_model=list[SavedVideoOut])
 async def list_saved_videos(user: CurrentUser, db: Db, course_id: int | None = None):
     """동기화 때 저장해 둔 강의 영상(지난 학기·시청기간이 끝난 영상 포함)."""
-    stmt = select(SavedVideo).where(SavedVideo.user_id == user.id)
+    item = SavedVideoItem
+    stmt = select(SavedVideo).join(SavedVideo.item).where(SavedVideo.user_id == user.id)
     if course_id is not None:
-        stmt = stmt.where(SavedVideo.lms_course_id == course_id)
-    stmt = stmt.order_by(SavedVideo.course_name, SavedVideo.lms_course_id, SavedVideo.module_position, SavedVideo.item_position)
+        stmt = stmt.where(item.lms_course_id == course_id)
+    stmt = stmt.order_by(item.course_name, item.lms_course_id, item.module_position, item.item_position)
     done = await downloaded_map(db, user.id, course_id)
     tmap = await transcript_map(db, user.id, course_id)
-    skip = {"saved", "downloaded_at", "transcript_id"}
+    skip = {"id", "saved", "downloaded_at", "transcript_id"}
     return [
-        SavedVideoOut(**{k: getattr(r, k) for k in SavedVideoOut.model_fields if k not in skip}, saved=r.media_url is not None,
-                      downloaded_at=done.get((r.lms_course_id, video_key(r.module_item_id))),
-                      transcript_id=tmap.get((r.lms_course_id, r.module_item_id)))
-        for r in (await db.scalars(stmt)).all()
+        SavedVideoOut(**{k: getattr(link.item, k) for k in SavedVideoOut.model_fields if k not in skip}, id=link.id,
+                      saved=link.item.media_url is not None,
+                      downloaded_at=done.get((link.item.lms_course_id, video_key(link.item.module_item_id))),
+                      transcript_id=tmap.get((link.item.lms_course_id, link.item.module_item_id)))
+        for link in (await db.scalars(stmt)).unique().all()
     ]
 
 
 @router.post("/saved-videos/{saved_id}/download-link", response_model=LinkOut)
 async def create_saved_link(saved_id: int, user: CurrentUser, db: Db, request: Request):
     _require_video_relay()
-    row = await db.get(SavedVideo, saved_id)
-    if row is None or row.user_id != user.id:
+    link = await db.get(SavedVideo, saved_id)
+    if link is None or link.user_id != user.id:
         raise HTTPException(404, "저장된 영상이 아닙니다.")
+    row = link.item
     if row.media_url is None:
         raise HTTPException(409, row.resolve_error or "아직 영상 주소를 저장하지 못했습니다. 다음 동기화 뒤에 다시 시도하세요.")
     token = create_download_token(user.id, {"media_url": row.media_url, "file_name": row.file_name})

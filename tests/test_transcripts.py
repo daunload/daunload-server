@@ -1,7 +1,7 @@
 import respx
 
 from app.db import base as db_base
-from app.db.models import SavedVideo
+from app.services.saved_videos import link_saved_video
 from tests.test_api import _signup, env  # noqa: F401
 from tests.test_materials_api import _with_course
 
@@ -47,8 +47,8 @@ async def test_save_for_saved_video_of_past_course(env):
     api, _ = env
     h = await _with_course(api)
     async with db_base.sessionmaker()() as db:
-        db.add(SavedVideo(user_id=1, lms_course_id=11111, course_name="지난 과목", module_item_id=5, module_title="1주차",
-                          title="옛 강의", content_id="x", media_url="https://ssuin-object.commonscdn.com/a.mp4", file_name="a.mp4"))
+        await link_saved_video(db, 1, lms_course_id=11111, course_name="지난 과목", module_item_id=5, module_title="1주차",
+                          title="옛 강의", content_id="x", media_url="https://ssuin-object.commonscdn.com/a.mp4", file_name="a.mp4")
         await db.commit()
     assert (await api.put("/courses/11111/videos/5/transcript", headers=h, json=BODY)).status_code == 200
     assert (await api.put("/courses/11111/videos/6/transcript", headers=h, json=BODY)).status_code == 404

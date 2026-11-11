@@ -3,9 +3,10 @@ import respx
 from sqlalchemy import select
 
 from app.db import base as db_base
-from app.db.models import DownloadRecord, SavedVideo
+from app.db.models import DownloadRecord
 from app.lms.media import CONTENT_PHP
 from app.security import create_download_token
+from app.services.saved_videos import link_saved_video
 from tests.test_api import env  # noqa: F401
 from tests.test_media import CDN, VIDEO_XML, _with_course
 
@@ -50,8 +51,8 @@ async def test_saved_direct_download_without_network_and_rejects_invalid_receipt
     api, _ = env
     headers = await _with_course(api)
     async with db_base.sessionmaker()() as db:
-        db.add(SavedVideo(user_id=1, lms_course_id=45446, course_name='리눅스', module_item_id=11,
-                          module_title='1주차', title='1강', content_id='m11', media_url=f'{CDN}/a.mp4', file_name='a.mp4'))
+        await link_saved_video(db, 1, lms_course_id=45446, course_name='리눅스', module_item_id=11,
+                          module_title='1주차', title='1강', content_id='m11', media_url=f'{CDN}/a.mp4', file_name='a.mp4')
         await db.commit()
     result = await api.post('/saved-videos/1/direct-download', headers=headers)
     assert result.status_code == 200 and result.json()['url'] == f'{CDN}/a.mp4'

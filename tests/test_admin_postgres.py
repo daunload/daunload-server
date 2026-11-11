@@ -17,12 +17,13 @@ from sqlalchemy import select, text
 from app.config import get_settings
 from app.db.base import Base, init_engine, sessionmaker
 from app.db.models import (AssignmentRow, CourseRow, DownloadRecord, LmsCredential, NotificationChannel,
-                           NotificationLog, PlaybackBatch, PlaybackJob, SavedVideo, TodoRow, Transcript,
+                           NotificationLog, PlaybackBatch, PlaybackJob, TodoRow, Transcript,
                            User, UserDailyActivity, utcnow)
 from app.main import create_app
 from app.security import create_access_token
 from app.services.access import decide_access
 from app.services.activity import bump_daily, local_day
+from app.services.saved_videos import link_saved_video
 
 pytestmark = pytest.mark.skipif(not os.getenv("QUEUE_TEST_DATABASE_URL"), reason="requires isolated PostgreSQL test service")
 
@@ -83,12 +84,12 @@ async def _seed():
             DownloadRecord(user_id=user.id, lms_course_id=1, item_key="v1", kind="video", title="d", count=3),
             Transcript(user_id=user.id, lms_course_id=1, module_item_id=1, course_name="과목", title="t",
                        text="PRIVATE", model="m"),
-            SavedVideo(user_id=user.id, lms_course_id=1, course_name="과목", module_item_id=1, module_title="m",
-                       title="s", content_id="c", file_name="f.mp4", resolve_error="형식 오류", resolve_failed_at=now),
             NotificationChannel(user_id=user.id, kind="discord", target_enc="PRIVATE"),
             NotificationLog(user_id=user.id, key="k"),
             UserDailyActivity(user_id=user.id, day=local_day() - timedelta(days=1), logins=1, downloads=2),
         ])
+        await link_saved_video(db, user.id, lms_course_id=1, course_name="과목", module_item_id=1, module_title="m",
+                               title="s", content_id="c", file_name="f.mp4", resolve_error="형식 오류", resolve_failed_at=now)
         await db.commit()
         return admin.id
 
@@ -331,5 +332,34 @@ async def test_video_urls_upsert_and_admin_list_on_postgres(database, monkeypatc
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as api:
         body = (await api.get("/admin/video-urls?q=영", headers=headers)).json()
         saved = (await api.get("/admin/saved-videos?status=failed&q=s&student_id=20209999", headers=headers)).json()
+        by_course = (await api.get("/admin/saved-videos/courses?student_id=20209999", headers=headers)).json()
+        in_course = (await api.get("/admin/saved-videos?lms_course_id=1&limit=100", headers=headers)).json()
     assert body["total"] == 1 and body["items"][0]["first_student_id"] == "20201234"
     assert saved["total"] == 1 and saved["items"][0]["holders"] == 1 and saved["summary"]["users"] == 1
+    assert [(c["lms_course_id"], c["items"], c["failed"], c["users"]) for c in by_course["courses"]] == [(1, 1, 1, 1)]
+    assert in_course["total"] == 1
+
+
+async def test_concurrent_classmate_syncs_share_saved_items_on_postgres(database):
+    from sqlalchemy import func
+
+    from app.db.models import SavedVideo, SavedVideoItem
+    from app.lms.models import Course
+    from app.services.saved_videos import ResolveBudget, save_course_videos
+    from tests.test_media import _modules
+
+    async with sessionmaker()() as db:
+        users = [User(student_id=f"2020000{i}", consent_at=utcnow()) for i in range(4)]
+        db.add_all(users)
+        await db.commit()
+        ids = [u.id for u in users]
+
+    async def sync(user_id):
+        async with sessionmaker()() as db, httpx.AsyncClient() as http:
+            await save_course_videos(db, http, user_id, Course(id=45446, name="리눅스"), _modules(), ResolveBudget(left=0))
+            await db.commit()
+
+    await asyncio.gather(*(sync(i) for i in ids))
+    async with sessionmaker()() as db:
+        assert await db.scalar(select(func.count()).select_from(SavedVideoItem)) == 2
+        assert await db.scalar(select(func.count()).select_from(SavedVideo)) == 8

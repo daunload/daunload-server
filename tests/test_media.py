@@ -284,3 +284,43 @@ async def test_saved_link_requires_resolved_url(env):
     saved = (await api.get("/saved-videos", headers=h)).json()
     assert not saved[0]["saved"] and saved[0]["resolve_error"] is None  # 일시 오류는 다음 동기화에서 다시
     assert (await api.post(f"/saved-videos/{saved[0]['id']}/download-link", headers=h)).status_code == 409
+
+
+@respx.mock
+async def test_classmates_share_one_saved_item(env):
+    """같은 과목을 듣는 두 사람: 영상 정보는 한 줄, 사용자 연결은 두 줄. 학교 서버는 영상마다 한 번만 부른다."""
+    from sqlalchemy import func, select
+
+    from app.db.models import SavedVideo, SavedVideoItem
+    api, _ = env
+    h1 = await _signup(api)
+    h2 = await _signup(api, "20209999")
+    php = _php({"abc123": VIDEO_XML, "987654": VIDEO_XML})
+    await _save(user_id=1)
+    await _save(user_id=2)
+    await _save(user_id=2)  # 다시 동기화해도 늘지 않는다
+    assert php.call_count == 2
+    async with db_base.sessionmaker()() as db:
+        assert await db.scalar(select(func.count()).select_from(SavedVideoItem)) == 2
+        assert await db.scalar(select(func.count()).select_from(SavedVideo)) == 4
+    mine, theirs = [(await api.get("/saved-videos", headers=h)).json() for h in (h1, h2)]
+    assert [v["module_item_id"] for v in mine] == [v["module_item_id"] for v in theirs] == [11, 13]
+    assert {v["id"] for v in mine}.isdisjoint({v["id"] for v in theirs})  # 다운로드 번호는 사람마다 다르다
+    assert all(v["saved"] for v in mine + theirs)
+    assert (await api.post(f"/saved-videos/{theirs[0]['id']}/direct-download", headers=h1)).status_code == 404
+
+
+@respx.mock
+async def test_same_content_in_other_course_reuses_url(env):
+    """분반처럼 다른 과목에 같은 영상(content_id)이 있으면 이미 찾은 주소를 그대로 쓴다."""
+    from app.services.saved_videos import ResolveBudget, save_course_videos
+    api, _ = env
+    h = await _signup(api)
+    php = _php({"abc123": VIDEO_XML, "987654": VIDEO_XML})
+    await _save()
+    async with db_base.sessionmaker()() as db, httpx.AsyncClient() as http:
+        await save_course_videos(db, http, 1, Course(id=99999, name="리눅스 2분반"), _modules(), ResolveBudget(left=0))
+        await db.commit()
+    assert php.call_count == 2  # 예산이 0이어도 다른 분반의 주소를 받아 채운다
+    saved = (await api.get("/saved-videos", headers=h)).json()
+    assert len(saved) == 4 and all(v["saved"] for v in saved)

@@ -53,7 +53,7 @@ def as_admin(data, **over):
     data["/admin/problems"] = {"total": 0, "counts": {"playback": 0, "batch": 0, "lms": 0, "resolve": 0}, "problems": []}
     data["/admin/video-urls"] = {"total": 0, "items": []}
     data["/admin/saved-videos"] = {"total": 0, "counts": {"saved": 0, "pending": 0, "failed": 0},
-                                   "summary": {"rows": 0, "videos": 0, "users": 0}, "items": []}
+                                   "summary": {"items": 0, "videos": 0, "users": 0, "links": 0}, "items": []}
 
 
 async def test_admin_tabs_routes_and_back(dashboard):  # noqa: F811
@@ -342,43 +342,72 @@ async def test_saved_videos_tab(dashboard, tmp_path):  # noqa: F811
     as_admin(data)
     now = datetime.now(UTC).isoformat()
     url = "https://ssuin-object.commonscdn.com/" + "contents/very/long/path/" * 6 + "lecture.mp4"
+    summary = {"items": 300, "videos": 298, "users": 8, "links": 1080}
+    data["/admin/saved-videos/courses"] = {"summary": summary, "courses": [
+        {"lms_course_id": 7, "course_name": "운영체제 <i>x</i>", "items": 40, "saved": 38, "pending": 0, "failed": 2,
+         "users": 3, "last_at": now},
+        {"lms_course_id": 1, "course_name": "자료구조", "items": 3, "saved": 1, "pending": 1, "failed": 1, "users": 8, "last_at": now}]}
 
-    def item(n, sid, **kw):
-        return {"id": n, "student_id": sid, "lms_course_id": 1, "course_name": "자료구조", "module_title": "3주차",
-                "title": f"{n}강 <b>x</b>", "content_id": f"c{n}", "media_url": None, "file_name": "a.mp4",
-                "duration": 1800, "size": 2_100_000_000, "resolve_error": None, "resolved_at": None,
-                "resolve_failed_at": None, "created_at": now, "holders": 1, **kw}
+    def item(n, week, students, **kw):
+        return {"id": n, "students": students, "holders": len(students), "lms_course_id": 1, "module_item_id": n,
+                "course_name": "자료구조", "module_title": f"{week}주차", "title": f"{n}강 <b>x</b>", "content_id": f"c{n}",
+                "media_url": None, "file_name": "a.mp4", "duration": 1800, "size": 2_100_000_000, "resolve_error": None,
+                "resolved_at": None, "resolve_failed_at": None, "created_at": now, **kw}
     data["/admin/saved-videos"] = {
-        "total": 3, "counts": {"saved": 1, "pending": 1, "failed": 1},
-        "summary": {"rows": 1080, "videos": 300, "users": 8},
-        "items": [item(1, "20231234", media_url=url, resolved_at=now, holders=5),
-                  item(2, "20220456", resolve_error="내려받을 수 없는 콘텐츠 형식입니다 (everlec)."),
-                  item(3, "20220456")]}
+        "total": 3, "counts": {"saved": 1, "pending": 1, "failed": 1}, "summary": {**summary, "items": 3, "videos": 3},
+        "items": [item(1, 1, ["20231234", "20220456"], media_url=url, resolved_at=now, holders=12),
+                  item(2, 1, ["20220456"], resolve_error="내려받을 수 없는 콘텐츠 형식입니다 (everlec)."),
+                  item(3, 2, [])]}
     await page.goto(BASE + "#admin/overview")
     tabs = page.locator("#view nav.admin-tabs")
     await tabs.get_by_role("link", name="저장 영상").click()
     await expect(page).to_have_url(BASE + "#admin/saved")
     view = page.locator("#view")
-    table = view.locator(".admin-saved-videos")
-    await expect(table.locator("tbody tr")).to_have_count(3)
-    await expect(view).to_contain_text("1,080줄 · 서로 다른 영상 300개 · 사용자 8명")
-    await expect(view).to_contain_text("중복 780줄")
+    courses = view.locator(".admin-saved-courses")
+    await expect(courses.locator("tbody tr")).to_have_count(2)
+    await expect(view).to_contain_text("영상 300개 · 사용자 8명 · 사용자 연결 1,080개")
+    await expect(courses).to_contain_text("운영체제 <i>x</i>")
+    await expect(courses).to_contain_text("확보 실패 2")
+    await expect(courses.locator("tbody tr").first).not_to_contain_text("확보 전")  # 0건 상태는 숨긴다
+    for width in (375, 768, 1024, 1440):
+        await page.set_viewport_size({"width": width, "height": 900})
+        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), ("courses", width)
+        await page.screenshot(path=tmp_path / f"saved-courses-{width}.png", full_page=True)
+    await page.set_viewport_size({"width": 1280, "height": 900})
+
+    # 줄 아무 곳이나 눌러도 그 과목으로 간다
+    async with page.expect_request(lambda r: "/admin/saved-videos?" in r.url and parse_qs(urlparse(r.url).query).get("lms_course_id") == ["1"]):
+        await courses.locator("tbody tr").nth(1).locator("td").nth(1).click()
+    await expect(page).to_have_url(BASE + "#admin/saved/1")
+    await expect(tabs.get_by_role("link", name="저장 영상")).to_have_attribute("aria-current", "page")
+    await expect(view.get_by_role("heading", name=re.compile("^자료구조"))).to_be_visible()
+    weeks = view.locator(".admin-saved-week")
+    await expect(weeks).to_have_count(2)
+    await expect(weeks.nth(0).get_by_role("heading")).to_have_text("1주차 2개")
+    await expect(weeks.nth(1).get_by_role("heading")).to_have_text("2주차 1개")
+    table = weeks.nth(0)
     await expect(table).to_contain_text("1강 <b>x</b>")
-    await expect(table).to_contain_text("5명")
+    await expect(table).to_contain_text("12명")
+    await expect(table).to_contain_text("20231234, 20220456 외 10명")
     await expect(table).to_contain_text(url)
     await expect(table).to_contain_text("everlec")
     await expect(table).to_contain_text("2.1GB")
-    await expect(view.locator("[data-kind='all']")).to_have_text("전체 3")
+    await expect(weeks.nth(1)).to_contain_text("연결 없음")
 
-    async with page.expect_request(lambda r: "/admin/saved-videos" in r.url and parse_qs(urlparse(r.url).query).get("status") == ["failed"]):
+    async with page.expect_request(lambda r: "/admin/saved-videos?" in r.url and parse_qs(urlparse(r.url).query).get("status") == ["failed"]):
         await view.locator("[data-kind='failed']").click()
     await expect(view.locator("[data-kind='failed']")).to_have_attribute("aria-pressed", "true")
-    async with page.expect_request(lambda r: "/admin/saved-videos" in r.url and parse_qs(urlparse(r.url).query).get("student_id") == ["2023"]):
-        await view.get_by_role("searchbox", name="학번").fill("2023")
     for width in (375, 768, 1024, 1440):
         await page.set_viewport_size({"width": width, "height": 900})
-        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), width
-        await page.screenshot(path=tmp_path / f"saved-{width}.png", full_page=True)
+        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), ("course", width)
+        await page.screenshot(path=tmp_path / f"saved-course-{width}.png", full_page=True)
+
+    await view.get_by_role("link", name="과목 목록").click()
+    await expect(page).to_have_url(BASE + "#admin/saved")
+    async with page.expect_request(lambda r: "/admin/saved-videos/courses" in r.url and parse_qs(urlparse(r.url).query).get("student_id") == ["2023"]):
+        await view.get_by_role("searchbox", name="학번").fill("2023")
+    await page.goto(BASE + "#admin/saved/abc")
+    await expect(view).to_contain_text("과목을 찾을 수 없습니다")
 
 
 # ---------------- 사용자 목록과 상세 (Task 7) ----------------

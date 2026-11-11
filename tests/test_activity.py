@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from app.db import base as db_base
 from app.db.base import utcnow
-from app.db.models import LmsCredential, SavedVideo, UserDailyActivity
+from app.db.models import LmsCredential, SavedVideoItem, UserDailyActivity
 from app.lms.auth import LmsSession
 from app.services.activity import bump_daily, local_day, prune_daily
 from tests.test_api import _signup, env  # noqa: F401  (env는 fixture)
@@ -141,7 +141,7 @@ async def test_resolve_error_time_set_and_cleared(env):
 
     async def row(item_id):
         async with db_base.sessionmaker()() as db:
-            return await db.scalar(select(SavedVideo).where(SavedVideo.module_item_id == item_id))
+            return await db.scalar(select(SavedVideoItem).where(SavedVideoItem.module_item_id == item_id))
 
     assert (await row(13)).resolve_failed_at is not None
     ok = await row(11)

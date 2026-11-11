@@ -11,9 +11,10 @@ from starlette.routing import Mount
 
 from app.config import get_settings
 from app.db import base as db_base
-from app.db.models import LmsCredential, NotificationChannel, PlaybackBatch, SavedVideo, User
+from app.db.models import LmsCredential, NotificationChannel, PlaybackBatch, User
 from app.security import create_download_token, encrypt
 from app.services.access import access_retry_at, has_access
+from app.services.saved_videos import link_saved_video
 from tests.test_api import _signup, env  # noqa: F401
 
 ACCESS_REQUIRED = {"code": "ACCESS_REQUIRED", "message": "관리자 승인이 필요합니다."}
@@ -183,9 +184,9 @@ async def test_signed_links_check_owner_access(env):
     h = await _signup(api)
     await _set_status("20201234", "approved")
     async with db_base.sessionmaker()() as db:
-        db.add(SavedVideo(user_id=1, lms_course_id=45446, course_name="리눅스", module_item_id=11, module_title="1주차",
+        await link_saved_video(db, 1, lms_course_id=45446, course_name="리눅스", module_item_id=11, module_title="1주차",
                           title="1강", content_id="m11", media_url="https://ssuin-object.commonscdn.com/a.mp4",
-                          file_name="a.mp4"))
+                          file_name="a.mp4")
         await db.commit()
     download = (await api.post("/saved-videos/1/download-link", headers=h)).json()["url"]
     await _set_status("20201234", "revoked")

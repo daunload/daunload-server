@@ -6,14 +6,14 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
-from sqlalchemy import and_, exists, func, not_, or_, select, union
+from sqlalchemy import and_, case, exists, func, not_, or_, select, union
 from sqlalchemy.orm import aliased
 
 from app.api.deps import AdminUser, Db, JobQueue, is_admin
 from app.config import get_settings
 from app.db.base import utcnow
 from app.db.models import (AssignmentRow, CourseRow, DownloadRecord, LmsCredential, NotificationChannel,
-                           NotificationLog, PlaybackBatch, PlaybackJob, SavedVideo, TodoRow, Transcript, User,
+                           NotificationLog, PlaybackBatch, PlaybackJob, SavedVideo, SavedVideoItem, TodoRow, Transcript, User,
                            UserDailyActivity, VideoUrl)
 from app.services.access import Action, decide_access
 from app.services.activity import local_day
@@ -602,12 +602,15 @@ async def user_saved_videos(student_id: str, admin: AdminUser, db: Db, response:
     response.headers["Cache-Control"] = "no-store"
     user = await _target_user(db, student_id)
     # media_url은 읽지 않고 존재 여부만 계산한다.
-    total, rows = await _paged(
-        db, SavedVideo, (SavedVideo.title, SavedVideo.course_name, SavedVideo.module_title, SavedVideo.file_name,
-                         SavedVideo.duration, SavedVideo.size, SavedVideo.media_url.is_not(None).label("has_media_url"),
-                         SavedVideo.resolve_error, SavedVideo.resolved_at, SavedVideo.resolve_failed_at),
-        user.id, (SavedVideo.course_name, SavedVideo.module_position, SavedVideo.item_position, SavedVideo.id),
-        offset, limit)
+    item = SavedVideoItem
+    cond = (SavedVideo.user_id == user.id,)
+    total = await db.scalar(select(func.count()).select_from(SavedVideo).where(*cond))
+    rows = (await db.execute(
+        select(item.title, item.course_name, item.module_title, item.file_name, item.duration, item.size,
+               item.media_url.is_not(None).label("has_media_url"), item.resolve_error, item.resolved_at, item.resolve_failed_at)
+        .select_from(SavedVideo).join(item, item.id == SavedVideo.item_id).where(*cond)
+        .order_by(item.course_name, item.module_position, item.item_position, SavedVideo.id).offset(offset).limit(limit)
+    )).mappings().all()
     return {"total": total, "items": [{**row, "resolve_error": clean_error(row["resolve_error"])} for row in rows]}
 
 
@@ -681,8 +684,8 @@ async def user_playback(
 
 class AdminSavedVideoRowOut(BaseModel):
     id: int
-    student_id: str
     lms_course_id: int
+    module_item_id: int
     course_name: str
     module_title: str
     title: str
@@ -695,13 +698,15 @@ class AdminSavedVideoRowOut(BaseModel):
     resolved_at: datetime | None
     resolve_failed_at: datetime | None
     created_at: datetime
-    holders: int  # 같은 영상(content_id)을 저장해 둔 줄 수 = 사용자 수
+    holders: int  # 이 영상에 연결된 사용자 수
+    students: list[str]  # 연결된 사용자 학번(앞에서부터 최대 HOLDER_IDS명)
 
 
 class AdminSavedVideosSummaryOut(BaseModel):
-    rows: int
+    items: int  # 저장 영상(과목의 모듈 항목) 수
     videos: int  # 서로 다른 content_id
     users: int
+    links: int  # 사용자 ↔ 영상 연결 수
 
 
 class AdminSavedVideosOut(BaseModel):
@@ -711,12 +716,81 @@ class AdminSavedVideosOut(BaseModel):
     items: list[AdminSavedVideoRowOut]
 
 
+HOLDER_IDS = 10
+
+
 def _saved_status(status: str):
+    item = SavedVideoItem
     if status == "saved":
-        return SavedVideo.media_url.is_not(None)
+        return item.media_url.is_not(None)
     if status == "failed":
-        return and_(SavedVideo.media_url.is_(None), SavedVideo.resolve_error.is_not(None))
-    return and_(SavedVideo.media_url.is_(None), SavedVideo.resolve_error.is_(None))
+        return and_(item.media_url.is_(None), item.resolve_error.is_not(None))
+    return and_(item.media_url.is_(None), item.resolve_error.is_(None))
+
+
+def _saved_filters(q: str, student_id: str | None) -> list:
+    item = SavedVideoItem
+    where = []
+    if q.strip():
+        where.append(or_(*(col.contains(q.strip(), autoescape=True) for col in (item.title, item.course_name, item.content_id))))
+    if student_id and student_id.strip():
+        where.append(exists().where(SavedVideo.item_id == item.id, SavedVideo.user_id == User.id,
+                                    User.student_id == student_id.strip()))
+    return where
+
+
+async def _saved_summary(db, where) -> AdminSavedVideosSummaryOut:
+    filtered = select(SavedVideoItem.id, SavedVideoItem.content_id).where(*where).subquery()
+    n_items, n_videos = (await db.execute(select(func.count(), func.count(func.distinct(filtered.c.content_id))))).one()
+    n_links, n_users = (await db.execute(
+        select(func.count(), func.count(func.distinct(SavedVideo.user_id))).where(SavedVideo.item_id.in_(select(filtered.c.id)))
+    )).one()
+    return AdminSavedVideosSummaryOut(items=n_items, videos=n_videos, users=n_users, links=n_links)
+
+
+class AdminSavedCourseOut(BaseModel):
+    lms_course_id: int
+    course_name: str
+    items: int
+    saved: int
+    pending: int
+    failed: int
+    users: int
+    last_at: datetime  # 이 과목에 영상이 마지막으로 저장된 시각
+
+
+class AdminSavedCoursesOut(BaseModel):
+    summary: AdminSavedVideosSummaryOut
+    courses: list[AdminSavedCourseOut]
+
+
+@router.get("/saved-videos/courses", response_model=AdminSavedCoursesOut)
+async def saved_video_courses(
+    admin: AdminUser, db: Db, response: Response,
+    q: str = Query(default="", max_length=100),
+    student_id: str | None = Query(default=None, max_length=32),
+):
+    """저장 영상을 과목별로 묶은 건수(조건에 맞는 영상이 있는 과목만). 과목 수는 많지 않아 페이지를 나누지 않는다."""
+    response.headers["Cache-Control"] = "no-store"
+    item = SavedVideoItem
+    where = _saved_filters(q, student_id)
+
+    def n(status):
+        return func.sum(case((_saved_status(status), 1), else_=0))
+    rows = (await db.execute(
+        select(item.lms_course_id, func.max(item.course_name).label("course_name"), func.count().label("items"),
+               n("saved").label("saved"), n("pending").label("pending"), n("failed").label("failed"),
+               func.max(item.created_at).label("last_at"))
+        .where(*where).group_by(item.lms_course_id).order_by(func.max(item.course_name), item.lms_course_id)
+    )).mappings().all()
+    users = dict((await db.execute(
+        select(item.lms_course_id, func.count(func.distinct(SavedVideo.user_id)))
+        .join(SavedVideo, SavedVideo.item_id == item.id).where(*where).group_by(item.lms_course_id)
+    )).all())
+    return AdminSavedCoursesOut(
+        summary=await _saved_summary(db, where),
+        courses=[AdminSavedCourseOut(**{**row, "users": users.get(row["lms_course_id"], 0)}) for row in rows],
+    )
 
 
 @router.get("/saved-videos", response_model=AdminSavedVideosOut)
@@ -725,43 +799,45 @@ async def all_saved_videos(
     q: str = Query(default="", max_length=100),
     student_id: str | None = Query(default=None, max_length=32),
     status: Literal["all", "saved", "pending", "failed"] = "all",
+    lms_course_id: int | None = None,
     offset: Offset = 0, limit: Limit = 20,
 ):
-    """전체 사용자의 saved_videos. 같은 영상도 사용자마다 한 줄이라 holders로 몇 명이 가졌는지 보여 준다."""
+    """저장 영상(영상마다 한 줄)과 연결된 사용자. student_id면 그 사용자에게 연결된 영상만.
+    lms_course_id를 주면 그 과목의 영상을 LMS 순서(주차 → 항목)로, 아니면 최근 저장 순으로 준다."""
     response.headers["Cache-Control"] = "no-store"
-    where = []
-    if q.strip():
-        where.append(or_(*(col.contains(q.strip(), autoescape=True)
-                           for col in (SavedVideo.title, SavedVideo.course_name, SavedVideo.content_id))))
-    if student_id and student_id.strip():
-        where.append(User.student_id == student_id.strip())
-    base = select(SavedVideo.id).join(User, User.id == SavedVideo.user_id).where(*where)
-
-    counts = {}
-    for key in ("saved", "pending", "failed"):
-        counts[key] = await db.scalar(select(func.count()).select_from(base.where(_saved_status(key)).subquery()))
-    summary = (await db.execute(
-        select(func.count(), func.count(func.distinct(SavedVideo.content_id)), func.count(func.distinct(SavedVideo.user_id)))
-        .select_from(SavedVideo).join(User, User.id == SavedVideo.user_id).where(*where)
-    )).one()
+    item = SavedVideoItem
+    where = _saved_filters(q, student_id)
+    if lms_course_id is not None:
+        where.append(item.lms_course_id == lms_course_id)
+    counts = {key: int(await db.scalar(select(func.count()).select_from(item).where(*where, _saved_status(key))) or 0)
+              for key in ("saved", "pending", "failed")}
+    summary = await _saved_summary(db, where)
 
     if status != "all":
         where.append(_saved_status(status))
-    holders = (select(SavedVideo.content_id.label("cid"), func.count().label("n"))
-               .group_by(SavedVideo.content_id).subquery())
-    total = await db.scalar(select(func.count()).select_from(SavedVideo).join(User, User.id == SavedVideo.user_id).where(*where))
+    holders = select(SavedVideo.item_id, func.count().label("n")).group_by(SavedVideo.item_id).subquery()
+    order = ((item.module_position, item.item_position, item.id) if lms_course_id is not None
+             else (item.created_at.desc(), item.id.desc()))
+    total = await db.scalar(select(func.count()).select_from(item).where(*where))
     rows = (await db.execute(
-        select(SavedVideo.id, User.student_id, SavedVideo.lms_course_id, SavedVideo.course_name, SavedVideo.module_title,
-               SavedVideo.title, SavedVideo.content_id, SavedVideo.media_url, SavedVideo.file_name, SavedVideo.duration,
-               SavedVideo.size, SavedVideo.resolve_error, SavedVideo.resolved_at, SavedVideo.resolve_failed_at,
-               SavedVideo.created_at, holders.c.n.label("holders"))
-        .join(User, User.id == SavedVideo.user_id).join(holders, holders.c.cid == SavedVideo.content_id)
-        .where(*where).order_by(SavedVideo.created_at.desc(), SavedVideo.id.desc()).offset(offset).limit(limit)
+        select(item.id, item.lms_course_id, item.module_item_id, item.course_name, item.module_title, item.title,
+               item.content_id, item.media_url, item.file_name, item.duration, item.size, item.resolve_error,
+               item.resolved_at, item.resolve_failed_at, item.created_at, func.coalesce(holders.c.n, 0).label("holders"))
+        .outerjoin(holders, holders.c.item_id == item.id)
+        .where(*where).order_by(*order).offset(offset).limit(limit)
     )).mappings().all()
+    students: dict[int, list[str]] = defaultdict(list)
+    for item_id, sid in (await db.execute(
+        select(SavedVideo.item_id, User.student_id).join(User, User.id == SavedVideo.user_id)
+        .where(SavedVideo.item_id.in_([r["id"] for r in rows])).order_by(SavedVideo.id)
+    )).all():
+        if len(students[item_id]) < HOLDER_IDS:
+            students[item_id].append(sid)
     return AdminSavedVideosOut(
         total=total, counts=counts,
-        summary=AdminSavedVideosSummaryOut(rows=summary[0], videos=summary[1], users=summary[2]),
-        items=[AdminSavedVideoRowOut(**{**row, "resolve_error": clean_error(row["resolve_error"])}) for row in rows],
+        summary=summary,
+        items=[AdminSavedVideoRowOut(**{**row, "resolve_error": clean_error(row["resolve_error"])}, students=students[row["id"]])
+               for row in rows],
     )
 
 

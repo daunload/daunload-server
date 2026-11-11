@@ -4,9 +4,10 @@ from zoneinfo import ZoneInfo
 from app.config import get_settings
 from app.db import base as db_base
 from app.db.models import (AssignmentRow, CourseRow, DownloadRecord, LmsCredential, NotificationChannel,
-                           NotificationLog, PlaybackBatch, PlaybackJob, SavedVideo, TodoRow, Transcript,
+                           NotificationLog, PlaybackBatch, PlaybackJob, TodoRow, Transcript,
                            User, UserDailyActivity)
 from app.services.activity import local_day
+from app.services.saved_videos import link_saved_video
 from app.services.admin_data import clean_error, period_start
 from tests.test_api import _signup, env  # noqa: F401
 
@@ -189,11 +190,10 @@ async def test_problems_lms_ignores_period_and_resolve_respects_it(env, monkeypa
     async with db_base.sessionmaker()() as db:
         await _set_lms(db, status="invalid", last_error="인증 실패", last_error_at=old)
 
-        def video(n, failed_at):
-            return SavedVideo(user_id=2, lms_course_id=1, course_name="과목", module_item_id=n, module_title="m",
-                              title=f"저장{n}", content_id="c", file_name="f", resolve_error="못 찾음",
-                              resolve_failed_at=failed_at)
-        db.add_all([video(1, now - timedelta(days=1)), video(2, old), video(3, None)])
+        for n, failed_at in ((1, now - timedelta(days=1)), (2, old), (3, None)):
+            await link_saved_video(db, 2, lms_course_id=1, course_name="과목", module_item_id=n, module_title="m",
+                                   title=f"저장{n}", content_id="c", file_name="f", resolve_error="못 찾음",
+                                   resolve_failed_at=failed_at)
         await db.commit()
     body = (await api.get("/admin/problems", headers=admin)).json()
     assert body["counts"] == {"playback": 0, "batch": 0, "lms": 1, "resolve": 1}
@@ -391,15 +391,15 @@ async def test_user_detail_never_exposes_private_fields(env, monkeypatch):
                        text="PRIVATE", segments=[{"start": 0, "end": 1, "text": "PRIVATE"}], model="m"),
             NotificationChannel(user_id=2, kind="discord", target_enc="PRIVATE"),
             NotificationLog(user_id=2, key="deadline:1"),
-            SavedVideo(user_id=2, lms_course_id=1, course_name="c", module_item_id=1, module_title="m", title="s",
-                       content_id="c", file_name="f", media_url="https://cdn.test/PRIVATE.mp4",
-                       resolve_error="https://cdn.test/PRIVATE?x=PRIVATE"),
             AssignmentRow(user_id=2, lms_course_id=1, course_name="c", assignment_id=1, title="a", kind="assignment",
                           submission_state="submitted", score=99, points_possible=100),
             TodoRow(user_id=2, lms_course_id=1, course_name="c", kind="video", lms_item_id=1, title="v", deadline=None),
             CourseRow(user_id=2, lms_course_id=1, name="c"),
             DownloadRecord(user_id=2, lms_course_id=1, item_key="v1", kind="video", title="d"),
         ])
+        await link_saved_video(db, 2, lms_course_id=1, course_name="c", module_item_id=1, module_title="m", title="s",
+                               content_id="c", file_name="f", media_url="https://cdn.test/PRIVATE.mp4",
+                               resolve_error="https://cdn.test/PRIVATE?x=PRIVATE")
         await db.commit()
     for name in DETAIL:
         r = await api.get(f"/admin/users/20209999/{name}", headers=admin)
@@ -494,10 +494,9 @@ async def test_playback_course_filter_matches_jobs_in_all_and_auto_batches(env, 
 async def test_saved_videos_report_only_whether_address_exists(env, monkeypatch):
     api, admin, _ = await _admin(env, monkeypatch)
     async with db_base.sessionmaker()() as db:
-        def video(n, **kw):
-            return SavedVideo(user_id=2, lms_course_id=1, course_name="c", module_item_id=n, module_title="1주차",
-                              title=f"s{n}", content_id="c", file_name="f.mp4", **kw)
-        db.add_all([video(1, media_url="https://cdn.test/PRIVATE.mp4"), video(2, resolve_error="실패 https://x.test/a?b")])
+        for n, kw in ((1, {"media_url": "https://cdn.test/PRIVATE.mp4"}), (2, {"resolve_error": "실패 https://x.test/a?b"})):
+            await link_saved_video(db, 2, lms_course_id=1, course_name="c", module_item_id=n, module_title="1주차",
+                                   title=f"s{n}", content_id="c", file_name="f.mp4", **kw)
         await db.commit()
     r = await api.get("/admin/users/20209999/saved-videos", headers=admin)
     items = {i["title"]: i for i in r.json()["items"]}

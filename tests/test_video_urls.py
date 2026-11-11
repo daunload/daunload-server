@@ -142,40 +142,71 @@ async def test_admin_video_urls_list(env, monkeypatch):  # noqa: F811
 
 
 async def test_admin_all_saved_videos(env, monkeypatch):  # noqa: F811
-    from app.db.models import SavedVideo
+    from app.services.saved_videos import link_saved_video
 
     api, admin, other = await _admin(env, monkeypatch)
     assert (await api.get("/admin/saved-videos")).status_code == 401
     assert (await api.get("/admin/saved-videos", headers=other)).status_code == 403
 
-    def row(user_id, item, cid, **kw):
-        return SavedVideo(user_id=user_id, lms_course_id=1, course_name="자료구조", module_item_id=item, module_title="3주차",
-                          title=kw.pop("title", f"영상{item}"), content_id=cid, file_name="a.mp4", **kw)
+    def item(n, cid, **kw):
+        return dict(lms_course_id=1, course_name="자료구조", module_item_id=n, module_title="3주차",
+                    title=kw.pop("title", f"영상{n}"), content_id=cid, file_name="a.mp4", **kw)
     async with db_base.sessionmaker()() as db:
-        db.add_all([
-            row(1, 1, "c1", media_url=MP4, resolved_at=datetime.now(UTC)),
-            row(2, 1, "c1", media_url=MP4, resolved_at=datetime.now(UTC)),  # 같은 영상, 다른 사용자
-            row(2, 2, "c2", resolve_error="형식 오류 https://cdn.test/a?token=S", resolve_failed_at=datetime.now(UTC)),
-            row(2, 3, "c3", title="100%_특수"),
-        ])
+        now = datetime.now(UTC)
+        await link_saved_video(db, 1, **item(1, "c1", media_url=MP4, resolved_at=now))
+        await link_saved_video(db, 2, **item(1, "c1"))  # 같은 영상, 다른 사용자: 정보는 한 줄
+        await link_saved_video(db, 2, **item(2, "c2", resolve_error="형식 오류 https://cdn.test/a?token=S", resolve_failed_at=now))
+        await link_saved_video(db, 2, **item(3, "c3", title="100%_특수"))
+        await link_saved_video(db, 2, **{**item(9, "c1", media_url=MP4), "lms_course_id": 2})  # 다른 분반의 같은 영상
         await db.commit()
 
     body = (await api.get("/admin/saved-videos", headers=admin)).json()
     assert body["total"] == 4
     assert body["counts"] == {"saved": 2, "pending": 1, "failed": 1}
-    assert body["summary"] == {"rows": 4, "videos": 3, "users": 2}
-    by_cid = {i["content_id"]: i for i in body["items"] if i["student_id"] == "20209999"}
-    assert by_cid["c1"]["holders"] == 2 and by_cid["c2"]["holders"] == 1
-    assert by_cid["c1"]["media_url"] == MP4
-    assert by_cid["c2"]["resolve_error"] == "형식 오류 https://cdn.test"  # 오류 속 주소는 줄인다
+    assert body["summary"] == {"items": 4, "videos": 3, "users": 2, "links": 5}
+    by_item = {(i["lms_course_id"], i["module_item_id"]): i for i in body["items"]}
+    assert by_item[(1, 1)]["holders"] == 2 and by_item[(1, 1)]["students"] == ["20201234", "20209999"]
+    assert by_item[(1, 1)]["media_url"] == MP4
+    assert by_item[(1, 2)]["resolve_error"] == "형식 오류 https://cdn.test"  # 오류 속 주소는 줄인다
 
     failed = (await api.get("/admin/saved-videos?status=failed", headers=admin)).json()
     assert [i["content_id"] for i in failed["items"]] == ["c2"] and failed["total"] == 1
     assert failed["counts"]["saved"] == 2  # 상태 버튼의 건수는 상태 조건과 무관하다
     mine = (await api.get("/admin/saved-videos?student_id=20201234", headers=admin)).json()
-    assert mine["total"] == 1 and mine["summary"] == {"rows": 1, "videos": 1, "users": 1}
-    assert mine["items"][0]["holders"] == 2  # 같은 영상을 가진 사람은 전체 기준
+    assert mine["total"] == 1 and mine["summary"] == {"items": 1, "videos": 1, "users": 2, "links": 2}
     assert (await api.get("/admin/saved-videos?q=100%_", headers=admin)).json()["total"] == 1
     paged = (await api.get("/admin/saved-videos?limit=1&offset=3", headers=admin)).json()
     assert paged["total"] == 4 and len(paged["items"]) == 1
     assert (await api.get("/admin/saved-videos?status=bad", headers=admin)).status_code == 422
+
+
+async def test_admin_saved_videos_by_course(env, monkeypatch):  # noqa: F811
+    from app.services.saved_videos import link_saved_video
+
+    api, admin, _ = await _admin(env, monkeypatch)
+
+    def item(course, name, n, week, pos, **kw):
+        return dict(lms_course_id=course, course_name=name, module_item_id=n, module_title=f"{week}주차",
+                    module_position=week, item_position=pos, title=f"영상{n}", content_id=f"c{n}", file_name="a.mp4", **kw)
+    async with db_base.sessionmaker()() as db:
+        await link_saved_video(db, 1, **item(1, "자료구조", 3, 2, 1, media_url=MP4))
+        await link_saved_video(db, 1, **item(1, "자료구조", 1, 1, 2))
+        await link_saved_video(db, 2, **item(1, "자료구조", 2, 1, 1, resolve_error="형식 오류"))
+        await link_saved_video(db, 2, **item(1, "자료구조", 1, 1, 2))
+        await link_saved_video(db, 2, **item(7, "운영체제", 9, 1, 1, media_url=MP4))
+        await db.commit()
+
+    body = (await api.get("/admin/saved-videos/courses", headers=admin)).json()
+    assert body["summary"] == {"items": 4, "videos": 4, "users": 2, "links": 5}
+    courses = [(c["course_name"], c["items"], c["saved"], c["pending"], c["failed"], c["users"]) for c in body["courses"]]
+    assert courses == [("운영체제", 1, 1, 0, 0, 1), ("자료구조", 3, 1, 1, 1, 2)]  # 과목 이름순
+    mine = (await api.get("/admin/saved-videos/courses?student_id=20201234", headers=admin)).json()
+    assert [(c["course_name"], c["items"]) for c in mine["courses"]] == [("자료구조", 2)]
+    assert (await api.get("/admin/saved-videos/courses?q=영상9", headers=admin)).json()["courses"][0]["course_name"] == "운영체제"
+
+    one = (await api.get("/admin/saved-videos?lms_course_id=1&limit=100", headers=admin)).json()
+    assert [i["module_item_id"] for i in one["items"]] == [2, 1, 3]  # 주차 → 항목 순서
+    assert one["total"] == 3 and one["counts"] == {"saved": 1, "pending": 1, "failed": 1}
+    assert one["summary"]["items"] == 3
+    assert (await api.get("/admin/saved-videos?lms_course_id=1&status=saved", headers=admin)).json()["total"] == 1
+    assert (await api.get("/admin/saved-videos/courses")).status_code == 401

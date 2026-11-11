@@ -10,7 +10,7 @@ from sqlalchemy import Integer, String, and_, cast, func, literal, null, select,
 
 from app.config import get_settings
 from app.db.models import (CourseRow, DownloadRecord, LmsCredential, PlaybackBatch, PlaybackJob,
-                           SavedVideo, Transcript, User)
+                           SavedVideo, SavedVideoItem, Transcript, User)
 from app.services.activity import local_day
 
 ERROR_LIMIT = 2000
@@ -108,8 +108,8 @@ def problem_union(start: datetime):
     )).select_from(LmsCredential).join(User, User.id == LmsCredential.user_id).where(
         LmsCredential.status != "ok")
     resolve = select(*cols(
-        "resolve", SavedVideo.id, SavedVideo.resolve_failed_at, User.student_id, SavedVideo.lms_course_id,
-        SavedVideo.course_name, SavedVideo.title, SavedVideo.resolve_error, literal(0),
-    )).select_from(SavedVideo).join(User, User.id == SavedVideo.user_id).where(
-        SavedVideo.resolve_failed_at >= start)
+        "resolve", SavedVideo.id, SavedVideoItem.resolve_failed_at, User.student_id, SavedVideoItem.lms_course_id,
+        SavedVideoItem.course_name, SavedVideoItem.title, SavedVideoItem.resolve_error, literal(0),
+    )).select_from(SavedVideo).join(SavedVideoItem, SavedVideoItem.id == SavedVideo.item_id).join(
+        User, User.id == SavedVideo.user_id).where(SavedVideoItem.resolve_failed_at >= start)
     return union_all(playback, batch, lms, resolve).subquery()

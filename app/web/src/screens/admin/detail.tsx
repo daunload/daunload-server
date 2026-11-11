@@ -6,6 +6,7 @@ import { viewHash } from "../../app";
 import { KIND, fmtDuration, fmtSize, state } from "../../core";
 import { Attendance } from "../courses";
 import {
+  BackIcon,
   ADMIN_BATCH_SCOPE, ADMIN_BATCH_STATUS, ADMIN_CHANNEL, ADMIN_PERIODS, ADMIN_PLAYBACK_STATUS, AccessButtons, AccessTag, Day,
   EmptyText, ErrorBox, JobTag, KindSeg, LmsTag, Loaded, Pager, type Row, Skeleton, Table, Tag, Time, activityLabel, adminNumber,
   adminUi, adminUserPath, courseTitle, useAdmin, useRefocusKind,
@@ -320,10 +321,6 @@ const TAB_VIEWS: Record<string, (p: TabProps) => ComponentChildren> = {
 };
 
 /* ---------- 화면 ---------- */
-
-const BackIcon = () => (
-  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 5l-7 7 7 7" /></svg>
-);
 
 export function UserDetail({ id, tabKey, again, onNotFound }: { id: string; tabKey?: string; again: number; onNotFound: () => void }) {
   let tab = tabKey || "timeline";

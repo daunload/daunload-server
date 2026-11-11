@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from app.api.deps import CurrentUser, Db
 from app.db.base import utcnow
-from app.db.models import CourseRow, SavedVideo, Transcript
+from app.db.models import CourseRow, SavedVideo, SavedVideoItem, Transcript
 
 router = APIRouter(tags=["transcripts"])
 
@@ -56,8 +56,8 @@ async def _can_write(db, user_id: int, course_id: int, module_item_id: int) -> b
     """수강 중인 과목이거나, 저장해 둔 영상(지난 학기 포함)이면 쓸 수 있다."""
     if await db.scalar(select(CourseRow.id).where(CourseRow.user_id == user_id, CourseRow.lms_course_id == course_id)):
         return True
-    return bool(await db.scalar(select(SavedVideo.id).where(
-        SavedVideo.user_id == user_id, SavedVideo.lms_course_id == course_id, SavedVideo.module_item_id == module_item_id)))
+    return bool(await db.scalar(select(SavedVideo.id).join(SavedVideoItem, SavedVideoItem.id == SavedVideo.item_id).where(
+        SavedVideo.user_id == user_id, SavedVideoItem.lms_course_id == course_id, SavedVideoItem.module_item_id == module_item_id)))
 
 
 @router.put("/courses/{course_id}/videos/{module_item_id}/transcript", response_model=TranscriptSummary)

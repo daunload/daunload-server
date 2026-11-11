@@ -58,7 +58,7 @@ export const adminUi = {
   activity: { kind: "all", student_id: "", offset: 0 },
   problems: { kind: "all", student_id: "", course: "", offset: 0 },
   videos: { q: "", offset: 0 },
-  saved: { q: "", student_id: "", status: "all", offset: 0 },
+  saved: { q: "", student_id: "", status: "all", offset: 0, course: "" },
 };
 
 /* ---------- 불러오기 ---------- */
@@ -109,6 +109,11 @@ export function Day({ iso }: { iso?: string | null }) {
   const d = new Date(iso);
   return <time dateTime={iso}>{d.getFullYear()}/{pad(d.getMonth() + 1)}/{pad(d.getDate())}</time>;
 }
+
+/** 목록으로 돌아가는 링크(.admin-back)의 화살표. */
+export const BackIcon = () => (
+  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 5l-7 7 7 7" /></svg>
+);
 
 export function UserLink({ id }: { id: string }) {
   return <a href={`#admin/users/${encodeURIComponent(id)}`}>{id}</a>;
