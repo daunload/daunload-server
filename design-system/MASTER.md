@@ -4,7 +4,7 @@
 
 설계 배경: `docs/superpowers/specs/2026-11-05-web-design-system-design.md`
 
-## 1. 토큰 (`app/web/src/styles/legacy.css`의 `:root`, Tailwind 테마는 `app.css`)
+## 1. 토큰 (`app/web/src/styles/tokens.css`의 `:root`, Tailwind 테마는 `app.css`)
 
 | 토큰 | 값 | 용도 |
 |---|---|---|
@@ -29,16 +29,16 @@
 
 | 종류 | 클래스 | 용도 | 모양 |
 |---|---|---|---|
-| 주요 동작 | `.btn.primary` | 화면에서 가장 중요한 일 하나 | 분홍 배경, 먹선 그림자 |
+| 주요 동작 | `.btn.btn-primary` | 화면에서 가장 중요한 일 하나 | 분홍 배경, 먹선 그림자 |
 | 일반 동작 | `.btn` | 사이트 안에서 바로 실행 | 흰 배경, 먹선 테두리, 필요하면 아이콘 |
 | 사이트 밖으로 이동 | `.btn` + 새 탭 아이콘 | 새 탭 열기 (예: LMS에서 제출) | 일반 모양 + 새 탭 아이콘 |
-| 위험한 동작 | `.btn.danger` | 삭제, 재생 중지 | 빨간 글자와 테두리, 가운데 창으로 확인 |
+| 위험한 동작 | `.btn.btn-danger` | 삭제, 재생 중지 | 빨간 글자와 테두리, 가운데 창으로 확인 |
 
-보조 클래스: `.btn.soft`(얇은 연한 테두리), `.btn.ghost`(테두리 없는 보조), `.btn.link`(글자 링크), `.btn.small`(좁은 곳), `.btn.block`(전체 너비). 모두 터치 영역은 44px이다. `.btn`은 `white-space: normal`이라 긴 문구는 줄바꿈된다.
+보조 클래스: `.btn-soft`(얇은 연한 테두리), `.btn-ghost`(테두리 없는 보조), `.btn-link`(글자 링크), `.btn-sm`(좁은 곳), `.btn-block`(전체 너비), `.btn-icon`(44px 정사각 아이콘 버튼). 눌림 상태(`aria-pressed="true"`)는 검정 바탕이다. 모두 터치 영역은 44px이다. `.btn`은 `white-space: normal`이라 긴 문구는 줄바꿈된다.
 
 - 한 화면의 주요 동작은 하나만 둔다.
-- **반복되는 목록은 약하게 그린다.** 강의 줄에서 아직 받지 않은 `내려받기`만 `.btn.soft`이고, 받은 뒤의 `내려받기`, 비활성 버튼, 텍스트 변환 버튼은 `.btn.ghost`다. 주차 머리줄의 일괄 버튼은 `.btn.link`다.
-- **강의·자료 줄의 동작은 44px 아이콘 버튼으로 둔다(`.row-actions .btn`).** 내용은 `iconOnly(이름, 라벨)`로 만들어 접근 가능한 이름을 유지하고, 터치 화면을 위해 뜻은 목록 위 `.icon-legend`에 한 번만 적는다. 수강 상태도 아이콘(`VIDEO_STATUS`)이며 모양이 달라 색에만 기대지 않는다. 한 줄의 버튼은 2개까지다(텍스트 변환 또는 보기 + 내려받기). `다시 변환`은 텍스트 창 안에 둔다. 주차 일괄 버튼은 `아이콘 + 전체 N`으로 쓰고 전체 문구는 `aria-label`과 `title`에 둔다.
+- **반복되는 목록은 약하게 그린다.** 강의 줄에서 아직 받지 않은 `내려받기`만 `.btn-soft`이고, 받은 뒤의 `내려받기`, 비활성 버튼, 텍스트 변환 버튼은 `.btn-ghost`다. 주차 머리줄의 일괄 버튼은 `.btn-link`다.
+- **강의·자료 줄의 동작은 44px 아이콘 버튼으로 둔다(`.btn-icon`).** 내용은 `iconOnly(이름, 라벨)`로 만들어 접근 가능한 이름을 유지하고, 터치 화면을 위해 뜻은 목록 위 `.icon-legend`에 한 번만 적는다. 수강 상태도 아이콘(`VIDEO_STATUS`)이며 모양이 달라 색에만 기대지 않는다. 한 줄의 버튼은 2개까지다(텍스트 변환 또는 보기 + 내려받기). `다시 변환`은 텍스트 창 안에 둔다. 주차 일괄 버튼은 `아이콘 + 전체 N`으로 쓰고 전체 문구는 `aria-label`과 `title`에 둔다.
 - **같은 동작을 두 번 보여 주지 않는다.** 주차 일괄 버튼은 대상이 2개 이상일 때만 보인다.
 - 자주 쓰는 동작을 `⋯` 메뉴에 숨기지 않는다. 버튼이 많으면 다음 줄로 넘긴다.
 - 강의 줄의 버튼은 모바일과 PC 모두 제목 오른쪽 한 줄에 둔다.
@@ -178,13 +178,14 @@ app/web/src/tasks.tsx     하단 진행 패널
 app/web/src/app.ts        로그인·부팅·동기화·화면 전환(마크업은 index.html의 정적 HTML)
 app/web/src/screens/admin/ 관리자 화면(관리자만 import()로 받는다): index(머리·탭), overview, users, detail, feeds, shared
 app/web/src/*.ts          access(승인 대기), downloads·transcribe(내려받기·변환 엔진). extension.js만 JS다(테스트가 실제 확장 프로그램 페이지에 그대로 넣는다)
-app/web/src/styles/       app.css(Tailwind 테마 = 토큰), legacy.css(기존 화면 스타일)
+app/web/src/styles/       app.css(진입점·Tailwind 테마), tokens.css(토큰), base.css(요소 기본 모양), components.css(공통 클래스), legacy.css(화면 전용으로 남은 규칙)
 ```
 
 - **import 규칙:** 전역 변수를 쓰지 않는다. 필요한 이름은 import한다. `core.js`와 `extension.js`는 아무것도 import하지 않는다. 최상위에서 바로 실행되는 코드는 `core`·`ui`처럼 먼저 평가되는 모듈의 값만 쓴다(순환 import에서 초기화 전 값을 읽으면 TDZ 오류가 난다). 화면 모듈끼리의 호출은 함수 안에서만 한다.
 - **화면 추가:** `screens/이름.tsx`에 `viewX()`를 두고 `mountScreen("이름", <X />)`로 그린다. 다시 그리기는 같은 함수를 다시 부르면 된다(같은 컨테이너에 diff로 그려 포커스·펼침이 남는다). `app.ts`의 `renderView()` 표에 넣는다.
 - **정적 UI는 HTML에:** 첫 화면(시작·로그인·승인 대기)과 앱 뼈대(상단 바·메뉴)는 `index.html`의 정적 HTML이다. JS가 오기 전에 그려지므로 Preact로 옮기지 않는다.
 - **새 화면·컴포넌트:** Preact(TSX) + Tailwind 유틸리티로 만든다. 색·글자 크기·반경·간격은 토큰 이름만 쓴다(`bg-pink`, `text-ink-2`, `text-sm`, `rounded-card`, `min-h-touch`). Tailwind 기본 색 팔레트는 꺼 두었다. 기존 화면을 옮기면 그 화면의 `legacy.css` 규칙을 지운다.
+- **공통 클래스(`components.css`):** `btn`·`btn-*`, `panel`·`panel-body`·`panel-title`·`actions`, `warning`·`notice-inline`·`empty`, `check`·`toggle`, `skeleton-list`·`skeleton`. 정적 HTML·HTML 문자열·TSX가 같이 쓴다. 한 곳만 다르면 유틸리티를 덧붙인다(`class="btn btn-sm px-2.5"`): 유틸리티가 이 레이어보다 강하다. legacy.css에서 이 클래스를 덮어쓰지 않는다(components 레이어가 legacy보다 강해서 지금은 효과가 없다).
 - **테스트 손잡이:** 테스트는 모듈 안 값을 `window.__ssu`로만 본다. 확장 프로그램 응답은 `__ssu.ext.request`를 바꿔 끼운다. 새 값을 테스트에서 봐야 하면 `main.ts`의 `__ssu`에 더한다.
 - **명령:** `npm run dev`(5173, API는 8000으로 넘긴다) · `npm run build`(→ `app/web-dist`) · `npm run typecheck`. FastAPI는 `app/web-dist`를 서빙하고, 없으면 화면 자리에 빌드 안내(503)만 보인다. 배포 이미지는 Dockerfile의 `web` 단계에서 빌드하며 최종 이미지에는 Node가 없다.
 - **브라우저 테스트:** 빌드 결과(`app/web-dist`)를 쓴다. 먼저 `npm run build`를 돌린다.

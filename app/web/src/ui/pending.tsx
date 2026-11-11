@@ -2,7 +2,7 @@
  * HTML 문자열 화면의 withPending(btn, label, fn)과 같은 모양이다.
  *
  *   const [busy, run] = usePending();
- *   <PendingButton class="btn small" busy={busy} onClick={() => run(() => api(...))}>테스트 메시지 보내기</PendingButton>
+ *   <PendingButton class="btn btn-sm" busy={busy} onClick={() => run(() => api(...))}>테스트 메시지 보내기</PendingButton>
  */
 import type { ComponentChildren, JSX } from "preact";
 import { useState } from "preact/hooks";

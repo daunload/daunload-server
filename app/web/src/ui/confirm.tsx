@@ -39,8 +39,8 @@ function ConfirmContent({ opts, onConfirm }: { opts: ConfirmOptions; onConfirm: 
         </label>
       )}
       <div class="flex flex-wrap justify-end gap-2">
-        <button type="button" class="btn ghost" data-confirm-cancel onClick={close}>취소</button>
-        <button type="button" class={`btn ${danger ? "danger" : "primary"}`} disabled={blocked}
+        <button type="button" class="btn btn-ghost" data-confirm-cancel onClick={close}>취소</button>
+        <button type="button" class={`btn ${danger ? "btn-danger" : "btn-primary"}`} disabled={blocked}
           onClick={() => { if (!blocked) { onConfirm(); close(); } }}>{confirmLabel}</button>
       </div>
     </>

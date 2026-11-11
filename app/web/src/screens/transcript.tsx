@@ -24,11 +24,11 @@ export function TranscribeButton({ v, courseId }: { v: TxSource; courseId: numbe
   const st = v.mediaPath ? txStatusOf(courseId, v.module_item_id) : null;
   if (st) {
     const label = st === "running" ? "변환 중" : "대기 중";
-    return <button class="btn small ghost" data-tx={v.module_item_id} title={label} disabled><IconOnly name={st === "running" ? "loader" : "clock"} label={label} /></button>;
+    return <button class="btn btn-icon btn-ghost" data-tx={v.module_item_id} title={label} disabled><IconOnly name={st === "running" ? "loader" : "clock"} label={label} /></button>;
   }
   if (v.transcript_id) {
     return (
-      <button class="btn small ghost" data-tx-open={v.transcript_id} title="텍스트 보기"
+      <button class="btn btn-icon btn-ghost" data-tx-open={v.transcript_id} title="텍스트 보기"
         onClick={() => openTranscript(v.transcript_id!, v.mediaPath ? toJob(v, courseId) : null)}>
         <IconOnly name="text-view" label="텍스트 보기" />
       </button>
@@ -36,7 +36,7 @@ export function TranscribeButton({ v, courseId }: { v: TxSource; courseId: numbe
   }
   if (!v.mediaPath) return null;
   return (
-    <button class="btn small ghost" data-tx={v.module_item_id} title="텍스트로 변환"
+    <button class="btn btn-icon btn-ghost" data-tx={v.module_item_id} title="텍스트로 변환"
       onClick={() => { enqueueTranscription([toJob(v, courseId)]); renderVideoList(); }}>
       <IconOnly name="text-convert" label="텍스트로 변환" />
     </button>
@@ -49,7 +49,7 @@ export function TranscribeGroupButton({ items, title, courseId }: { items: TxSou
   if (todo.length < 2) return null;
   const label = `전체 텍스트로 변환 (${todo.length})`;
   return (
-    <button class="btn small link" data-tx-group={String(items[0].module_id)} aria-label={`${title} ${label}`} title={label}
+    <button class="btn btn-link gap-1 px-2 font-semibold whitespace-nowrap" data-tx-group={String(items[0].module_id)} aria-label={`${title} ${label}`} title={label}
       onClick={() => { enqueueTranscription(todo.map((v) => toJob(v, courseId))); renderVideoList(); }}>
       <Icon name="text-convert" />전체 {todo.length}
     </button>
@@ -106,12 +106,12 @@ function TranscriptView({ t, redoJob }: { t: Transcript; redoJob: TxJob | null }
       <div class="dialog-head"><strong>{t.title}</strong><span class="meta">{t.course_name} · {t.model}</span></div>
       <label class="check"><input type="checkbox" id="tx-time" checked={withTime} onChange={(e) => setWithTime(e.currentTarget.checked)} /><span>시간 표시</span></label>
       <pre id="tx-text" class="transcript-text">{text}</pre>
-      <div class="row dialog-actions">
-        <button class="btn small" id="tx-copy" onClick={copy}>복사</button>
-        <button class="btn small" id="tx-save" onClick={save}>.txt로 받기</button>
-        {redoJob && <button class="btn small" id="tx-redo" onClick={redo}>다시 변환</button>}
-        <PendingButton class="btn small danger" id="tx-delete" busy={deleting} onClick={remove}>삭제</PendingButton>
-        <button class="btn small primary ml-auto" id="tx-close" onClick={close}>닫기</button>
+      <div class="dialog-actions flex flex-wrap items-center gap-1.5">
+        <button class="btn btn-sm" id="tx-copy" onClick={copy}>복사</button>
+        <button class="btn btn-sm" id="tx-save" onClick={save}>.txt로 받기</button>
+        {redoJob && <button class="btn btn-sm" id="tx-redo" onClick={redo}>다시 변환</button>}
+        <PendingButton class="btn btn-sm btn-danger" id="tx-delete" busy={deleting} onClick={remove}>삭제</PendingButton>
+        <button class="btn btn-sm btn-primary ml-auto" id="tx-close" onClick={close}>닫기</button>
       </div>
     </>
   );

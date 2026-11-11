@@ -55,7 +55,7 @@ function playbackTask(a: BatchDetail): TaskItem {
     note: a.cancel_requested ? "중지하는 중이에요"
       : [wait, "창을 닫아도 서버에서 계속돼요"].filter(Boolean).join(" · "),
     failed: false,
-    actions: a.cancel_requested ? [] : [{ label: "재생 중지", cls: "btn small danger", run: cancelActivePlayback }],
+    actions: a.cancel_requested ? [] : [{ label: "재생 중지", cls: "btn btn-sm btn-danger", run: cancelActivePlayback }],
   };
 }
 
@@ -77,7 +77,7 @@ function transcribeTask(): TaskItem {
     pct,
     note,
     failed: false,
-    actions: job ? [{ label: "변환 중지", cls: "btn small", run: cancelTranscription }] : [],
+    actions: job ? [{ label: "변환 중지", cls: "btn btn-sm", run: cancelTranscription }] : [],
   };
 }
 
@@ -90,7 +90,7 @@ function bulkTask(b: BulkStat): TaskItem {
     pct: b.total ? Math.round((done / b.total) * 100) : 0,
     note: b.direct ? "이 탭과 다운로드 창을 열어 두세요" : "이 탭을 열어 두세요",
     failed: false,
-    actions: [{ label: "다운로드 중지", cls: "btn small", run: stopBulkDownload }],
+    actions: [{ label: "다운로드 중지", cls: "btn btn-sm", run: stopBulkDownload }],
   };
 }
 
@@ -104,8 +104,8 @@ function failedBulkTask(b: BulkStat): TaskItem {
     failed: true,
     detail: b.errors,
     actions: [
-      { label: "다시 시도", cls: "btn small", run: () => runBulkDownload(b.failedItems) },
-      { label: "닫기", cls: "btn small ghost", run: () => { state.bulk = null; renderTaskPanel(); } },
+      { label: "다시 시도", cls: "btn btn-sm", run: () => runBulkDownload(b.failedItems) },
+      { label: "닫기", cls: "btn btn-sm btn-ghost", run: () => { state.bulk = null; renderTaskPanel(); } },
     ],
   };
 }
@@ -120,8 +120,8 @@ function failedBatchTask(b: Batch): TaskItem {
     failed: true,
     detail: b.error || "",
     actions: [
-      { label: "실패 사유 보기", cls: "btn small", run: () => { taskUi.expanded = false; renderTaskPanel(); navigate("playback"); } },
-      { label: "닫기", cls: "btn small ghost", run: () => dismissFailure(b.id) },
+      { label: "실패 사유 보기", cls: "btn btn-sm", run: () => { taskUi.expanded = false; renderTaskPanel(); navigate("playback"); } },
+      { label: "닫기", cls: "btn btn-sm btn-ghost", run: () => dismissFailure(b.id) },
     ],
   };
 }
@@ -136,8 +136,8 @@ function failedTranscribeTask(f: TxJob): TaskItem {
     failed: true,
     detail: f.error || "",
     actions: [
-      { label: "다시 시도", cls: "btn small", run: () => enqueueTranscription([f]) },
-      { label: "닫기", cls: "btn small ghost", run: () => { tx.finished = tx.finished.filter((x) => x !== f); renderTaskPanel(); } },
+      { label: "다시 시도", cls: "btn btn-sm", run: () => enqueueTranscription([f]) },
+      { label: "닫기", cls: "btn btn-sm btn-ghost", run: () => { tx.finished = tx.finished.filter((x) => x !== f); renderTaskPanel(); } },
     ],
   };
 }

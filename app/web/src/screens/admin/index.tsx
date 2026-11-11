@@ -76,7 +76,7 @@ function PeriodActions({ onPeriod, onReload }: { onPeriod: () => void; onReload:
 }
 
 function ReloadButton({ onReload }: { onReload: () => void }) {
-  return <button class="btn small" type="button" id="admin-reload" onClick={onReload}><Icon name="refresh" />다시 불러오기</button>;
+  return <button class="btn btn-sm" type="button" id="admin-reload" onClick={onReload}><Icon name="refresh" />다시 불러오기</button>;
 }
 
 function Admin({ path, nav }: { path: string[]; nav: number }) {

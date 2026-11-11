@@ -1,0 +1,49 @@
+/* 디자인 토큰. Tailwind 테마(app.css의 @theme)가 이 변수를 가리키고, CSS 파일들도 var(--ink)처럼 그대로 쓴다. */
+:root {
+  --bg: #c4e8ea;
+  --surface: #ffffff;
+  --fill: #e6f4f4;
+  --fill-hover: #d5ebec;
+  --ink: #1a1a18;
+  --ink-2: #3b4747;
+  --ink-3: #4a5757;
+  --line: #b0d3d6;
+  --blue: #0b5f7a;
+  --blue-press: #084a60;
+  --blue-soft: #dcf0f3;
+  --red: #c4301c;
+  --red-soft: #fdebe7;
+  --amber: #a85b00;
+  --amber-soft: #fff1dc;
+  --green: #0b7a50;
+  --green-soft: #e2f5ec;
+  --video: #23408e;
+  --assignment: #6a3fc8;
+  --quiz: #00706f;
+  --pink: #ff9aa2;
+  --pink-press: #fb838d;
+  --pink-soft: #ffe5e3;
+  --caption: #7a4fb5;
+  --r-card: 14px;
+  --r-btn: 10px;
+  --r-chip: 7px;
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --touch: 44px;
+  --gutter: 16px;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 9 7 7 7-7'/%3E%3C/svg%3E");
+  --ad-inset: 0px;
+  --z-nav: 10;
+  --z-top: 15;
+  --z-skip: 30;
+  --z-panel: 35;
+  --z-toast: 40;
+  --font: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", system-ui, sans-serif;
+  --display: "Black Han Sans", var(--font);
+}
+@media (max-width: 760px) {
+  :root { --gutter: 12px; }
+}

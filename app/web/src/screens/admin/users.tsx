@@ -57,7 +57,7 @@ export function Users({ again }: { again: number }) {
       </form>
       <div class="admin-seg admin-access-filter" role="group" aria-label="권한">
         {[["", "전체"], ...Object.entries(ADMIN_ACCESS).map(([k, a]) => [k, a.label])].map(([k, label]) => (
-          <button key={k} class="btn small" type="button" data-access-filter={k} aria-pressed={f.access === k}
+          <button key={k} class="btn btn-sm px-2.5" type="button" data-access-filter={k} aria-pressed={f.access === k}
             onClick={() => { f.access = k; f.offset = 0; redraw((n) => n + 1); }}>{label}</button>
         ))}
       </div>

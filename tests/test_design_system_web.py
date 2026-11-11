@@ -90,7 +90,7 @@ async def test_mobile_edges_line_up(dashboard):
     await page.set_viewport_size({"width": 375, "height": 812})
     await page.goto("http://dashboard.test/#videos")
     await expect(page.locator("#video-list li.video-row")).to_have_count(2)
-    lefts = await page.evaluate("""['.topbar .home-link', '#current-view', '.tabs', '.notice-fold', '#video-list']
+    lefts = await page.evaluate("""['.topbar .home-link', '#current-view', '[role=tablist]', '.notice-fold', '#video-list']
       .map(s => Math.round(document.querySelector(s).getBoundingClientRect().left))""")
     assert set(lefts) == {12}, lefts
 

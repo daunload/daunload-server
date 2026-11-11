@@ -169,9 +169,9 @@ export function Pager({ total, offset, limit, onPage }: { total: number; offset:
   const end = Math.min(total, offset + limit);
   return (
     <nav class="admin-pager" aria-label="페이지 이동">
-      <button class="btn small" type="button" disabled={offset <= 0} onClick={() => onPage(Math.max(0, offset - limit))}>이전</button>
+      <button class="btn btn-sm" type="button" disabled={offset <= 0} onClick={() => onPage(Math.max(0, offset - limit))}>이전</button>
       <span>{total ? `${offset + 1}–${end} / ${adminNumber(total)}건` : "0건"}</span>
-      <button class="btn small" type="button" disabled={end >= total} onClick={() => onPage(offset + limit)}>다음</button>
+      <button class="btn btn-sm" type="button" disabled={end >= total} onClick={() => onPage(offset + limit)}>다음</button>
     </nav>
   );
 }
@@ -189,7 +189,7 @@ export function ErrorBox({ message, retry }: { message: string; retry?: () => vo
   return (
     <div class="admin-error">
       <p role="alert"><strong>불러오지 못했어요</strong> {message}</p>
-      {retry && <button class="btn small" type="button" onClick={retry}>다시 시도</button>}
+      {retry && <button class="btn btn-sm" type="button" onClick={retry}>다시 시도</button>}
     </div>
   );
 }
@@ -248,13 +248,13 @@ export function AccessButtons({ id, status, isAdmin, reload }: { id: string; sta
     reload();
   };
   const btn = (action: string, label: string, cls: string) => (
-    <PendingButton key={action} class={`btn small${cls}`} type="button" data-access={action} data-id={id}
+    <PendingButton key={action} class={`btn btn-sm${cls}`} type="button" data-access={action} data-id={id}
       busy={busy === action} disabled={busy !== null} onClick={() => act(action)}>{label}</PendingButton>
   );
   return (
     <div class="admin-acts">
-      {status === "pending" ? [btn("approve", "승인", " primary"), btn("reject", "거절", " danger")]
-        : status === "approved" ? btn("revoke", "권한 회수", " danger")
+      {status === "pending" ? [btn("approve", "승인", " btn-primary"), btn("reject", "거절", " btn-danger")]
+        : status === "approved" ? btn("revoke", "권한 회수", " btn-danger")
           : btn("approve", "바로 승인", "")}
     </div>
   );
@@ -270,7 +270,7 @@ export function KindSeg({ kinds, counts, current, label, onPick }: {
   return (
     <div class="admin-seg" role="group" aria-label={label}>
       {Object.entries(kinds).map(([k, name]) => (
-        <button key={k} class="btn small" type="button" data-kind={k} aria-pressed={k === current} onClick={() => { if (k !== current) onPick(k); }}>
+        <button key={k} class="btn btn-sm px-2.5" type="button" data-kind={k} aria-pressed={k === current} onClick={() => { if (k !== current) onPick(k); }}>
           {name} {adminNumber(k === "all" ? all : counts[k] || 0)}
         </button>
       ))}

@@ -156,7 +156,7 @@ async def test_running_transcription_row(dashboard):
     await expect(sheet).to_contain_text(RUNNING_NOTE)
     # 변환 중지는 확인 창 없는 일반 버튼
     stop = sheet.get_by_role("button", name="변환 중지")
-    await expect(stop).not_to_have_class(re.compile(r"\bdanger\b"))
+    await expect(stop).not_to_have_class(re.compile(r"\bbtn-danger\b"))
     await page.evaluate("__ssu.tx.worker = null")
     await stop.click()
     await expect(page.locator("#confirm-dialog")).not_to_be_visible()

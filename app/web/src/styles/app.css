@@ -1,14 +1,19 @@
-/* 스타일 진입점.
- * - 디자인 토큰은 legacy.css의 :root에 있다(색, 글자 크기, 반경, 터치 영역, z-index). Tailwind 테마는 그 변수를 그대로 가리킨다.
- * - Tailwind의 기본 색·글자 크기는 끄고 토큰만 쓴다: 새 컴포넌트는 bg-pink, text-ink, text-sm, rounded-card, min-h-touch 같은 유틸리티를 쓴다.
- * - legacy.css(아직 옮기지 않은 화면과 공통 .btn 등)는 legacy 레이어에 넣어 유틸리티보다 항상 약하게 둔다.
- *   그래서 컴포넌트의 유틸리티가 legacy의 h1·p·input 같은 전역 규칙을 이긴다. 화면을 옮기면 그 화면의 legacy 규칙을 지운다.
- * - Preflight(기본 스타일 초기화)는 아직 넣지 않는다. legacy.css로 그린 화면의 모양이 바뀌지 않게 한다.
+/* 스타일 진입점. 레이어는 약한 것부터 theme → base → legacy → components → utilities 순이다.
+ * - tokens.css: 디자인 토큰(:root의 색, 글자 크기, 반경, 터치 영역, z-index). 아래 @theme이 그 변수를 가리킨다.
+ * - base.css: 요소 기본 모양(body, h1~h3, a, label, input, select, progress, 포커스 테두리).
+ * - components.css: 여러 화면이 함께 쓰는 클래스(btn, panel, warning, empty, check, toggle, skeleton …).
+ * - legacy.css: 아직 화면 전용으로 남은 규칙(상단·메뉴, 로그인, 목록 줄, 진행 패널, 관리자 표 …). 새 규칙은 여기에 더하지 않는다.
+ * - 유틸리티가 가장 강하다: 컴포넌트에서 bg-pink, text-ink, text-sm, rounded-card, min-h-touch처럼 토큰 이름으로 쓴다.
+ *   Tailwind의 기본 색·글자 크기·화면 폭은 끄고 이 토큰만 쓴다.
+ * - Preflight(기본 스타일 초기화)는 넣지 않는다. base.css가 그 역할을 한다.
  */
 @layer theme, base, legacy, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
-@import "tailwindcss/utilities.css" layer(utilities);
+@import "./tokens.css" layer(base);
+@import "./base.css" layer(base);
 @import "./legacy.css" layer(legacy);
+@import "./components.css" layer(components);
+@import "tailwindcss/utilities.css" layer(utilities);
 
 /* Tailwind가 클래스 이름을 찾을 파일(Vite 루트 기준). */
 @source "../../index.html";

@@ -125,7 +125,7 @@ async def test_home_shows_every_lecture_and_assignment_at_a_glance(page, tmp_pat
     # 탭·요약 카드·7일 일정표 없이 주요 버튼 하나만 둔다
     await expect(page.get_by_role("tab")).to_have_count(0)
     await expect(page.locator("#stats, .overview, .rail-wrap")).to_have_count(0)
-    await expect(page.locator(".btn.primary:visible")).to_have_count(1)
+    await expect(page.locator(".btn-primary:visible")).to_have_count(1)
     await page.screenshot(path=tmp_path / "home.png", full_page=True)
     for width in (1280, 768, 390, 320):
         await page.set_viewport_size({"width": width, "height": 844})
@@ -179,7 +179,7 @@ async def test_all_done(page):
     page.data["/week"]["assignments"] = []
     await page.goto("http://dashboard.test/")
     await expect(page.get_by_role("heading", name="이번 주 할 일을 모두 끝냈어요. 누워도 됨")).to_be_visible()
-    await expect(page.locator("#week-panel .btn.primary")).to_have_count(0)
+    await expect(page.locator("#week-panel .btn-primary")).to_have_count(0)
 
 
 async def test_lectures_due_later_are_not_called_done(page):
@@ -188,7 +188,7 @@ async def test_lectures_due_later_are_not_called_done(page):
     await page.goto("http://dashboard.test/")
     await expect(page.get_by_role("heading", name="할 일이 2개 남았어요")).to_be_visible()
     await expect(page.locator("#week-panel")).not_to_contain_text("누워도 됨")
-    await expect(page.locator("#week-panel .btn.primary")).to_have_text("강의 2개 모두 재생")
+    await expect(page.locator("#week-panel .btn-primary")).to_have_text("강의 2개 모두 재생")
 
 
 async def test_assignment_due_later_is_not_called_done(page):
@@ -197,7 +197,7 @@ async def test_assignment_due_later_is_not_called_done(page):
     await page.goto("http://dashboard.test/")
     await expect(page.get_by_role("heading", name="할 일이 1개 남았어요")).to_be_visible()
     await expect(page.locator("#week-panel")).not_to_contain_text("누워도 됨")
-    await expect(page.locator("#week-panel .btn.primary")).to_have_text(re.compile("기말 보고서 LMS에서 제출"))
+    await expect(page.locator("#week-panel .btn-primary")).to_have_text(re.compile("기말 보고서 LMS에서 제출"))
 
 
 async def test_late_submission_is_listed_first(page):

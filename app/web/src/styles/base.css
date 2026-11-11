@@ -1,0 +1,43 @@
+/* 요소 기본 모양(base 레이어). 클래스 없이 쓴 body, 제목, 링크, 입력칸, 진행 막대가 이 모양을 따른다.
+ * 컴포넌트·유틸리티·legacy 규칙이 모두 이보다 강하므로, 다른 모양이 필요하면 그쪽에서 덮어쓴다. */
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  color: var(--ink);
+  font: 400 var(--text-md)/1.5 var(--font);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+  /* 배경: 옅은 꽃무늬 */
+  background-color: var(--bg);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='360' height='300'%3E%3Cg fill='%23afdde0'%3E%3Cellipse cx='90' cy='62' rx='17' ry='30' transform='rotate(0 90 100)'/%3E%3Cellipse cx='90' cy='62' rx='17' ry='30' transform='rotate(60 90 100)'/%3E%3Cellipse cx='90' cy='62' rx='17' ry='30' transform='rotate(120 90 100)'/%3E%3Cellipse cx='90' cy='62' rx='17' ry='30' transform='rotate(180 90 100)'/%3E%3Cellipse cx='90' cy='62' rx='17' ry='30' transform='rotate(240 90 100)'/%3E%3Cellipse cx='90' cy='62' rx='17' ry='30' transform='rotate(300 90 100)'/%3E%3Ccircle cx='90' cy='100' r='14'/%3E%3Cellipse cx='270' cy='212' rx='11' ry='20' transform='rotate(0 270 238)'/%3E%3Cellipse cx='270' cy='212' rx='11' ry='20' transform='rotate(60 270 238)'/%3E%3Cellipse cx='270' cy='212' rx='11' ry='20' transform='rotate(120 270 238)'/%3E%3Cellipse cx='270' cy='212' rx='11' ry='20' transform='rotate(180 270 238)'/%3E%3Cellipse cx='270' cy='212' rx='11' ry='20' transform='rotate(240 270 238)'/%3E%3Cellipse cx='270' cy='212' rx='11' ry='20' transform='rotate(300 270 238)'/%3E%3Ccircle cx='270' cy='238' r='9'/%3E%3C/g%3E%3C/svg%3E");
+}
+h1, h2, h3 { margin: 0; line-height: 1.35; letter-spacing: -0.02em; }
+h1 { font-size: var(--text-xl); font-weight: 700; }
+h2 { font-size: var(--text-lg); font-weight: 700; }
+h3 { font-size: var(--text-md); font-weight: 600; }
+p { margin: 0; }
+a { color: var(--blue); text-decoration: none; }
+a:hover { text-decoration: underline; }
+[hidden] { display: none !important; }
+:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+button, a, label.check { touch-action: manipulation; }
+
+label { display: grid; gap: 6px; font-size: var(--text-sm); color: var(--ink-2); font-weight: 500; }
+input, select {
+  max-width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px;
+  font: 400 var(--text-md)/1.4 var(--font); color: var(--ink);
+  background: var(--surface); border: 2px solid var(--ink); border-radius: var(--r-btn);
+}
+input:focus, select:focus { outline: none; border-color: var(--blue); background: var(--surface); box-shadow: 0 0 0 2px var(--blue); }
+input::placeholder { color: var(--ink-3); }
+
+progress { appearance: none; width: 100%; height: 12px; border: 2px solid var(--ink); border-radius: 6px; overflow: hidden; background: var(--fill); }
+progress::-webkit-progress-bar { height: 10px; background: var(--fill); }
+progress::-webkit-progress-value { background: var(--blue); border-radius: 3px; }
+progress::-moz-progress-bar { background: var(--blue); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}

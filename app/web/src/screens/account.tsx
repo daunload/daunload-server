@@ -56,13 +56,13 @@ function TokenForm({ c }: { c: Credentials | null }) {
       <input id="personal-token" type="password" required maxLength={4096} autocomplete="off" spellcheck={false}
         aria-describedby="personal-token-help personal-token-error" value={value} disabled={busy !== null}
         onInput={(e) => setValue(e.currentTarget.value)} />
-      <p id="personal-token-error" class="error small-text" role="alert" tabIndex={-1} ref={errorRef}>{error}</p>
+      <p id="personal-token-error" class="text-sm text-red empty:hidden" role="alert" tabIndex={-1} ref={errorRef}>{error}</p>
       <div class="actions">
-        <PendingButton class="btn primary" type="submit" busy={busy !== null} busyLabel={busy === "DELETE" ? "제거 중…" : "학교 연결 확인 중…"}>
+        <PendingButton class="btn btn-primary" type="submit" busy={busy !== null} busyLabel={busy === "DELETE" ? "제거 중…" : "학교 연결 확인 중…"}>
           {registered ? "토큰 교체" : "토큰 등록"}
         </PendingButton>
         {registered && (
-          <button class="btn ghost" type="button" id="remove-personal-token" disabled={busy !== null} onClick={() => update("DELETE")}>저장된 토큰 제거</button>
+          <button class="btn btn-ghost" type="button" id="remove-personal-token" disabled={busy !== null} onClick={() => update("DELETE")}>저장된 토큰 제거</button>
         )}
       </div>
     </form>
@@ -86,7 +86,7 @@ function DeleteAccount() {
       toast("계정과 저장된 정보를 모두 지웠습니다");
     } catch (err) { toast((err as Error).message, true); }
   };
-  return <div><PendingButton class="btn danger" id="delete-me" busy={busy} onClick={remove}>계정 삭제</PendingButton></div>;
+  return <div><PendingButton class="btn btn-danger" id="delete-me" busy={busy} onClick={remove}>계정 삭제</PendingButton></div>;
 }
 
 function Account() {
@@ -97,22 +97,22 @@ function Account() {
       <Panel><PanelBody>
         <div class="summary-line"><span><b>{state.me?.student_id || ""}</b>학번</span>
           {c && <span><b>{STATUS_NAME[c.status] || c.status}</b>LMS 연결</span>}</div>
-        {c && <p class="muted small-text">마지막 LMS 로그인 {date(c.last_login_at, "없음")}, 다음 자동 동기화 {date(c.next_sync_at, "예정 없음")}</p>}
-        {c?.last_error && <p class="error">{c.last_error}</p>}
-        <p class="small-text">학습 연결이 만료되면 등록한 개인 토큰, 학교 로그인 정보 순으로 복구합니다. 모두 만료되면 다시 로그인하거나 새 토큰을 등록하세요. 학교 비밀번호는 저장하지 않습니다.</p>
+        {c && <p class="text-sm text-ink-3">마지막 LMS 로그인 {date(c.last_login_at, "없음")}, 다음 자동 동기화 {date(c.next_sync_at, "예정 없음")}</p>}
+        {c?.last_error && <p class="text-sm text-red empty:hidden">{c.last_error}</p>}
+        <p class="text-sm">학습 연결이 만료되면 등록한 개인 토큰, 학교 로그인 정보 순으로 복구합니다. 모두 만료되면 다시 로그인하거나 새 토큰을 등록하세요. 학교 비밀번호는 저장하지 않습니다.</p>
       </PanelBody></Panel>
       <Panel><PanelBody>
         <h3>개인 액세스 토큰</h3>
-        <p class="small-text">{tokenStatus(c)}{c?.personal_token_registered_at ? ` 등록일 ${fmtDate(new Date(c.personal_token_registered_at))}` : ""}</p>
-        <p class="muted small-text" id="personal-token-help">
+        <p class="text-sm">{tokenStatus(c)}{c?.personal_token_registered_at ? ` 등록일 ${fmtDate(new Date(c.personal_token_registered_at))}` : ""}</p>
+        <p class="text-sm text-ink-3" id="personal-token-help">
           <a href="https://canvas.ssu.ac.kr/profile/settings" target="_blank" rel="noopener noreferrer">Canvas 설정에서 토큰 발급</a> 후 붙여넣으세요. 토큰은 서버에 암호화해 보관합니다. 만료·폐기 시 새 토큰이 필요합니다.
         </p>
         <TokenForm c={c} />
-        <p class="muted small-text">여기서 제거해도 학교의 토큰과 현재 학습 세션은 유지됩니다. 토큰 자체를 폐기하려면 Canvas 설정에서 삭제하세요.</p>
+        <p class="text-sm text-ink-3">여기서 제거해도 학교의 토큰과 현재 학습 세션은 유지됩니다. 토큰 자체를 폐기하려면 Canvas 설정에서 삭제하세요.</p>
       </PanelBody></Panel>
       <Panel><PanelBody>
         <h3>계정 삭제</h3>
-        <p class="muted small-text">저장된 학교 로그인 세션과 동기화한 과목·할 일, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다.</p>
+        <p class="text-sm text-ink-3">저장된 학교 로그인 세션과 동기화한 과목·할 일, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다.</p>
         <DeleteAccount />
       </PanelBody></Panel>
     </>

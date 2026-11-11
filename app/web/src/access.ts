@@ -77,7 +77,7 @@ function renderAccess(): void {
   request.hidden = status === "pending";
   request.disabled = !!waiting;
   request.textContent = status === "rejected" ? "다시 요청하기" : "권한 요청 보내기";
-  request.classList.toggle("primary", status !== "rejected");
+  request.classList.toggle("btn-primary", status !== "rejected");
   $("#access-box").dataset.status = status;
   $("#access-box").focus();
 }

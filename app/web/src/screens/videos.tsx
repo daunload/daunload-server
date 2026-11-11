@@ -182,7 +182,7 @@ function DownloadButton({ linkPath, at, onDone }: { linkPath: string; at?: strin
     if (ok) onDone();
   };
   return (
-    <button class={`btn small ${at ? "ghost" : "soft"}`} data-link={linkPath} title={downloadTip(at)} disabled={!!busy} onClick={click}>
+    <button class={`btn btn-icon ${at ? "btn-ghost" : "btn-soft"}`} data-link={linkPath} title={downloadTip(at)} disabled={!!busy} onClick={click}>
       {busy ? <IconOnly name="loader" label={busy} /> : <IconOnly name={at ? "download-done" : "download"} label="내려받기" />}
     </button>
   );
@@ -196,7 +196,7 @@ function BulkButton({ items, title }: { items: BulkItem[]; title: string }) {
   if (items.length < 2) return null;
   const label = `전체 내려받기 (${items.length})`;
   const face = <><Icon name="download" />전체 {items.length}</>;
-  const common = { class: "btn small link", "aria-label": `${title} ${label}`, title: label };
+  const common = { class: "btn btn-link gap-1 px-2 font-semibold whitespace-nowrap", "aria-label": `${title} ${label}`, title: label };
   if (isPhoneDevice()) return <button {...common} data-bulk="" disabled>{face}</button>;  // 이유는 화면 위쪽에 한 번만 알린다
   if (state.videoTab === "materials" && !bulkDownloadSupported()) {
     return <><button {...common} disabled>{face}</button><span class="reason">폴더에 바로 저장하는 기능은 데스크톱 Chrome·Edge에서만 지원해요</span></>;
@@ -216,9 +216,9 @@ function InstallGuide() {
         {state.extensionMissing && <p class="warning" role="alert">{state.extensionMissing}</p>}
         <ol class="install-steps">
           <li><strong>웹 스토어에서 설치</strong><span>‘Chrome에 추가’를 누르세요.</span>
-            <a class="btn primary" href={EXTENSION_STORE_URL} target="_blank" rel="noopener">Chrome 웹 스토어 열기<Icon name="external" /></a></li>
+            <a class="btn btn-primary mt-auto gap-1.5 self-start" href={EXTENSION_STORE_URL} target="_blank" rel="noopener">Chrome 웹 스토어 열기<Icon name="external" /></a></li>
           <li><strong>이 페이지 새로고침</strong><span>설치한 뒤 한 번만 하면 돼요.</span>
-            <button class="btn" type="button" data-guide-reload onClick={() => location.reload()}><Icon name="refresh" />새로고침</button></li>
+            <button class="btn mt-auto gap-1.5 self-start" type="button" data-guide-reload onClick={() => location.reload()}><Icon name="refresh" />새로고침</button></li>
           <li><strong>내려받기</strong><span>처음 열린 창에서 저장 폴더를 고르세요. 진행 상황과 취소도 그 창에서 볼 수 있어요.</span></li>
         </ol>
         <p class="guide-note">데스크톱 크롬에서만 쓸 수 있어요. 저장이 끝날 때까지 다운로드 창과 이 탭을 열어 두세요.</p>
@@ -307,7 +307,7 @@ function VideoList() {
       <IconLegend items={items} phone={phone} />
       {groupBy(items).map((g) => (
         <Fragment key={g.id}>
-          <div class="group-label row">
+          <div class="group-label">
             <span class="group-title">{g.title}</span>
             <span class="group-actions">
               <BulkButton title={g.title} items={g.items.filter((v) => v.linkPath).map((v) => ({ linkPath: v.linkPath!, label: v.title, onDone: () => markDownloaded(v) }))} />
@@ -321,7 +321,7 @@ function VideoList() {
                 {v.thumbnail_url && <img class="thumb" src={v.thumbnail_url} alt="" loading="lazy" referrerpolicy="no-referrer"
                   onError={(e) => (e.currentTarget as HTMLImageElement).remove()} />}
                 <span class="video-info"><span class="title">{v.title}</span><br />
-                  <span class="meta row"><span>{v.duration ? fmtDuration(v.duration) : ""}</span><span>{fmtSize(v.size)}</span><DoneBadge at={v.downloaded_at} /></span>
+                  <span class="meta flex flex-wrap items-center gap-x-2.5 gap-y-0.5"><span>{v.duration ? fmtDuration(v.duration) : ""}</span><span>{fmtSize(v.size)}</span><DoneBadge at={v.downloaded_at} /></span>
                   {/* 내려받을 수 없는 이유는 마우스를 올리지 않아도 보이게 글자로 둔다. 휴대폰은 화면 위쪽 안내 하나로 갈음한다. */}
                   {!v.linkPath && !phone && <span class="reason">{v.savedRow?.resolve_error || "지금은 내려받을 수 없어요"}</span>}
                 </span>
@@ -329,7 +329,7 @@ function VideoList() {
                   <TranscribeButton v={v} courseId={courseId} />
                   {v.linkPath && !phone
                     ? <DownloadButton linkPath={v.linkPath} at={v.downloaded_at} onDone={done(v)} />
-                    : <button class="btn small ghost" disabled><IconOnly name={v.downloaded_at ? "download-done" : "download"} label="내려받기" /></button>}
+                    : <button class="btn btn-icon btn-ghost" disabled><IconOnly name={v.downloaded_at ? "download-done" : "download"} label="내려받기" /></button>}
                 </span>
               </li>
             ))}
@@ -355,7 +355,7 @@ function MaterialList() {
     <>
       {groupBy(items).map((g) => (
         <Fragment key={g.id}>
-          <div class="group-label row">
+          <div class="group-label">
             <span class="group-title">{g.title}</span>
             <span class="group-actions"><BulkButton title={g.title} items={g.items.map((m) => ({ linkPath: m.linkPath, label: m.file_name, onDone: () => mark(m.key) }))} /></span>
           </div>
@@ -363,7 +363,7 @@ function MaterialList() {
             {g.items.map((m) => (
               <li class="video-row" key={m.key}>
                 <span class="video-info"><span class="title">{m.file_name}</span><br />
-                  <span class="meta row"><span>{m.title}</span><span>{fmtSize(m.size)}</span>
+                  <span class="meta flex flex-wrap items-center gap-x-2.5 gap-y-0.5"><span>{m.title}</span><span>{fmtSize(m.size)}</span>
                     {m.kind === "canvas_file" && <span>위키 첨부</span>}<DoneBadge at={m.downloaded_at} /></span></span>
                 <span class="row-actions"><DownloadButton linkPath={m.linkPath} at={m.downloaded_at} onDone={() => { mark(m.key); renderCurrentTab(); }} /></span>
               </li>
@@ -400,16 +400,16 @@ function Videos({ loading }: { loading: boolean }) {
           )}
         </select></label>
       </ViewHead>
-      <div class="tabs" role="tablist">
-        <button role="tab" data-tab="videos" aria-selected={state.videoTab === "videos"} onClick={() => setTab("videos")}>영상</button>
-        <button role="tab" data-tab="materials" aria-selected={state.videoTab === "materials"} disabled={isPast}
+      <div class="flex flex-wrap items-center gap-1.5" role="tablist">
+        <button class="min-h-touch cursor-pointer rounded-chip border-2 border-ink bg-surface px-3.5 font-sans text-md leading-normal font-semibold text-ink aria-selected:bg-ink aria-selected:text-white disabled:cursor-not-allowed disabled:opacity-45 max-phone:px-3" role="tab" data-tab="videos" aria-selected={state.videoTab === "videos"} onClick={() => setTab("videos")}>영상</button>
+        <button class="min-h-touch cursor-pointer rounded-chip border-2 border-ink bg-surface px-3.5 font-sans text-md leading-normal font-semibold text-ink aria-selected:bg-ink aria-selected:text-white disabled:cursor-not-allowed disabled:opacity-45 max-phone:px-3" role="tab" data-tab="materials" aria-selected={state.videoTab === "materials"} disabled={isPast}
           aria-describedby={isPast ? "tabs-reason" : undefined} onClick={() => setTab("materials")}>수업자료</button>
-        <label class="check inline"><input type="checkbox" id="not-downloaded" checked={state.notDownloadedOnly}
+        <label class="check ml-auto text-sm text-ink-2"><input type="checkbox" id="not-downloaded" checked={state.notDownloadedOnly}
           onChange={(e) => { state.notDownloadedOnly = e.currentTarget.checked; renderCurrentTab(); }} /><span>안 받은 것만</span></label>
       </div>
       {isPast && <p class="tabs-reason" id="tabs-reason">지난 과목은 수업자료를 볼 수 없어요</p>}
       {phone && <p class="notice-inline" role="note">{PHONE_NOTICE}</p>}
-      <details class="notice-inline notice-fold"><summary>개인 복습용이에요. 공유하지 마세요</summary><p>본인이 수강하는 강의와 자료를 개인 복습용으로 받는 기능입니다. 강의 영상과 자료는 교수와 학교의 저작물이므로 다른 사람에게 공유하거나 올리지 마세요. 파일은 서버에 저장하지 않고 학교에서 받는 대로 바로 전달합니다. 동기화 때 영상 주소를 저장해 두므로 시청기간이 끝난 영상도 받을 수 있지만, 학교 서버가 주소를 막거나 영상을 지우면 받을 수 없습니다.</p></details>
+      <details class="notice-inline notice-fold overflow-hidden p-0"><summary>개인 복습용이에요. 공유하지 마세요</summary><p>본인이 수강하는 강의와 자료를 개인 복습용으로 받는 기능입니다. 강의 영상과 자료는 교수와 학교의 저작물이므로 다른 사람에게 공유하거나 올리지 마세요. 파일은 서버에 저장하지 않고 학교에서 받는 대로 바로 전달합니다. 동기화 때 영상 주소를 저장해 두므로 시청기간이 끝난 영상도 받을 수 있지만, 학교 서버가 주소를 막거나 영상을 지우면 받을 수 없습니다.</p></details>
       <div class="panel" id="video-list" aria-busy={ready ? undefined : "true"}>
         {!ready
           ? <><p class="sr-only" role="status">LMS에서 목록을 불러오는 중</p><div class="skeleton-list" aria-hidden="true">{[0, 1, 2, 3].map((n) => <div key={n} class="skeleton" />)}</div></>

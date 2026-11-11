@@ -113,7 +113,7 @@ function PlanSection() {
     <>
       <Panel>
         <form class="panel-body" id="plan-form" onSubmit={submit}>
-          <div class="row">
+          <div class="flex flex-wrap items-center gap-2">
             <label>범위<select name="scope" value={form.scope} onChange={(e) => set({ scope: e.currentTarget.value })}>
               <option value="module">주차 하나</option><option value="course">과목 하나</option><option value="all">모든 과목</option></select></label>
             <label>과목<select name="course" value={form.course} disabled={form.scope === "all"} onChange={(e) => set({ course: e.currentTarget.value })}>
@@ -121,8 +121,8 @@ function PlanSection() {
             <label>주차<select name="module" value={form.module} disabled={form.scope !== "module"} onChange={(e) => set({ module: e.currentTarget.value })}>
               {modules.map(([id, n]) => <option key={String(id)} value={String(id)}>{n || `모듈 ${id}`}</option>)}</select></label>
           </div>
-          <div class="row"><button class="btn">재생 계획 보기</button>
-            <span class="muted small-text">1배속으로 처음부터 끝까지 재생하고, 영상마다 LMS에서 완료로 바뀌었는지 확인합니다.</span></div>
+          <div class="flex flex-wrap items-center gap-2"><button class="btn">재생 계획 보기</button>
+            <span class="text-sm text-ink-3">1배속으로 처음부터 끝까지 재생하고, 영상마다 LMS에서 완료로 바뀌었는지 확인합니다.</span></div>
         </form>
       </Panel>
       {state.plan && <PlanView plan={state.plan} />}
@@ -139,7 +139,7 @@ function PlanView({ plan }: { plan: Plan }) {
           <span><b>{plan.items.length}</b>개 영상</span><span><b>{fmtDuration(plan.total_seconds)}</b>예상 소요</span>
           <span><b>{plan.expected_end ? fmtDate(new Date(plan.expected_end)) : ""}</b>예상 종료</span>
         </div>
-        <p class="muted small-text">현재 대기열을 반영한 예상입니다. 새 요청·재시도에 따라 달라집니다.</p>
+        <p class="text-sm text-ink-3">현재 대기열을 반영한 예상입니다. 새 요청·재시도에 따라 달라집니다.</p>
         {plan.warnings.length > 0 && (
           <Warning>{plan.warnings.length}개 영상은 순서대로 재생하면 마감 전에 끝나지 않습니다. 마감이 이른 과목부터 재생하니, 필요하면 범위를 줄이세요.</Warning>
         )}
@@ -150,15 +150,15 @@ function PlanView({ plan }: { plan: Plan }) {
           <li key={i.position} class={i.at_risk ? "risk" : ""}>
             <span class="num">{i.position + 1}</span>
             <span><span class="title">{i.title}</span><br />
-              <span class="meta row small-text"><span>{i.course_name} {i.module_title}</span><span>{fmtDuration(i.duration)}</span>
+              <span class="meta flex flex-wrap items-center gap-2 text-sm"><span>{i.course_name} {i.module_title}</span><span>{fmtDuration(i.duration)}</span>
                 <span>예상 종료 {fmtDate(new Date(i.expected_end))}</span><span>{dueText(i.deadline)}</span></span></span>
             <span class={`status ${i.at_risk ? "failed" : "queued"}`}>{i.at_risk ? "마감 초과" : ""}</span>
           </li>
         ))}
       </ol>
       <div class="actions">
-        <button class="btn primary" id="start-batch" onClick={startBatch}>{plan.items.length}개 재생 시작</button>
-        <button class="btn ghost" id="clear-plan" onClick={() => { state.plan = null; viewPlayback(); }}>계획 닫기</button>
+        <button class="btn btn-primary" id="start-batch" onClick={startBatch}>{plan.items.length}개 재생 시작</button>
+        <button class="btn btn-ghost" id="clear-plan" onClick={() => { state.plan = null; viewPlayback(); }}>계획 닫기</button>
       </div>
     </Panel>
   );
@@ -190,7 +190,7 @@ async function startBatch() {
 /** 재생이 정상이면 진행률이 말해 주므로 아무것도 쓰지 않는다. 확인이 필요할 때만 한 줄을 보인다. */
 function PlaybackActivity({ job }: { job: Job }) {
   const updated = job.progress_updated_at ? new Date(job.progress_updated_at) : null;
-  if (!updated || !Number.isFinite(updated.getTime())) return <p class="muted small-text">재생 위치를 확인하는 중이에요</p>;
+  if (!updated || !Number.isFinite(updated.getTime())) return <p class="text-sm text-ink-3">재생 위치를 확인하는 중이에요</p>;
   const age = Math.max(0, Math.floor((Date.now() - updated.getTime()) / 1000));
   if (age <= 45) return null;
   return <Warning>재생 확인 필요 · 45초 넘게 진행 보고가 없어요 (마지막 {updated.toLocaleTimeString("ko-KR", { hour12: false })})</Warning>;
@@ -277,7 +277,7 @@ function PlaybackQueue({ b, jobs, lateIds }: { b: BatchDetail; jobs: Job[]; late
           return (
             <li key={j.module_item_id} class={[late ? "risk" : "", j.status === "playing" ? "now" : ""].filter(Boolean).join(" ")}>
               <span class="num">{j.position + 1}</span>
-              <span><span class="title">{j.title}</span><span class="meta row small-text">{meta.map((m, i) => <span key={i}>{m}</span>)}</span></span>
+              <span><span class="title">{j.title}</span><span class="meta flex flex-wrap items-center gap-2 text-sm">{meta.map((m, i) => <span key={i}>{m}</span>)}</span></span>
               <span class={`status ${j.status}`}>{j.module_item_id === nextId ? "다음 재생" : JOB_STATUS[j.status] || j.status}</span>
             </li>
           );
@@ -305,7 +305,7 @@ function History() {
             <li key={b.id}>
               <span class="history-head"><span class="title">{SCOPE_NAME[b.scope] || b.scope} {b.total}개</span>
                 <span class={`status ${b.status}`}>{BATCH_STATUS[b.status] || b.status}</span></span>
-              <span class="meta row">
+              <span class="meta flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
                 {counts.map(([name, n]) => <span key={name}>{name} {n}</span>)}
                 <span>{fmtDate(new Date(b.created_at))}</span>
                 {!failed && b.error && <span>{b.error}</span>}
@@ -357,7 +357,7 @@ function FailureList({ batch }: { batch: BatchDetail }) {
           {failed.map((job) => (
             <li key={job.module_item_id}><strong>{job.title}</strong>
               <p>{job.error || batch.error || "오류 사유가 기록되지 않았습니다. 서버의 재생 워커 로그를 확인해야 합니다."}</p>
-              <p class="muted small-text">시도 {job.attempts}회 · 마지막 재생 위치 {fmtDuration(job.progress_seconds || 0)} / {fmtDuration(job.duration)}</p>
+              <p class="text-sm text-ink-3">시도 {job.attempts}회 · 마지막 재생 위치 {fmtDuration(job.progress_seconds || 0)} / {fmtDuration(job.duration)}</p>
             </li>
           ))}
         </ul>

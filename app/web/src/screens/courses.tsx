@@ -19,7 +19,7 @@ interface AttendWeek { week: string | number; statuses?: string[] }
 /** 주차별 출석 칸. 기록이 없으면 empty 문구를 쓴다. */
 export function Attendance({ attendance, empty = "출석 기록이 아직 없습니다." }: { attendance: unknown; empty?: string }) {
   const weeks = ((attendance as AttendWeek[] | null) || []).filter((w) => w.statuses?.length);
-  if (!weeks.length) return <p class="muted small-text">{empty}</p>;
+  if (!weeks.length) return <p class="text-sm text-ink-3">{empty}</p>;
   return (
     <div class="attend" aria-label="주차별 출석">
       {weeks.map((w) => (
@@ -50,14 +50,14 @@ function CourseRow({ c }: { c: Course }) {
   };
   return (
     <div class="course">
-      <div class="course-head"><h3>{c.name}</h3><span class="muted small-text">{c.professors || ""}</span>
+      <div class="course-head"><h3>{c.name}</h3><span class="text-sm text-ink-3">{c.professors || ""}</span>
         <label class="toggle">
           <input type="checkbox" data-course={c.lms_course_id} checked={pending ?? c.auto_play} disabled={pending !== null}
             onChange={(e) => toggle(e.currentTarget.checked)} />자동 수강
         </label>
       </div>
       <Attendance attendance={c.attendance} />
-      <p class="muted small-text">남은 영상 {pendingVideos}개</p>
+      <p class="text-sm text-ink-3">남은 영상 {pendingVideos}개</p>
     </div>
   );
 }
@@ -72,7 +72,7 @@ function Courses() {
           ? state.courses.map((c) => <CourseRow key={c.lms_course_id} c={c} />)
           : <div class="empty"><p>과목이 없습니다. ‘LMS 동기화’를 눌러 불러오세요.</p></div>}
       </Panel>
-      <p class="muted small-text">초록 출석, 노랑 지각, 빨강 결석, 회색 기록 없음</p>
+      <p class="text-sm text-ink-3">초록 출석, 노랑 지각, 빨강 결석, 회색 기록 없음</p>
     </>
   );
 }

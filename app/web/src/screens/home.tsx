@@ -188,7 +188,7 @@ function TaskRow({ t, first, divided }: { t: Lecture | Work; first: boolean; div
       <div class={SIDE}>
         {t.late ? <Due first={first} late>지각 제출 {dueShort(t.deadline)}까지</Due> : <Due first={first}>{dueShort(t.deadline)}</Due>}
         {submit
-          ? <a class="btn small" href={url!} target="_blank" rel="noopener" aria-label={`${t.title} LMS에서 제출 (새 탭)`}>LMS에서 제출 <Icon name="external" /></a>
+          ? <a class="btn btn-sm" href={url!} target="_blank" rel="noopener" aria-label={`${t.title} LMS에서 제출 (새 탭)`}>LMS에서 제출 <Icon name="external" /></a>
           : <JobBadge job={job} />}
       </div>
     </li>
@@ -200,7 +200,7 @@ const NOTE = "cta-note text-center text-sm text-ink-3";
 /** 주요 동작 하나: 재생 중이면 진행 요약, 강의가 있으면 전부 재생, 과제만 있으면 가장 급한 과제 제출 */
 function Cta({ videos, work }: { videos: Lecture[]; work: Work[] }) {
   const a = state.active;
-  if (state.playbackStarting) return <button class="btn primary block" disabled>재생 요청 중…</button>;
+  if (state.playbackStarting) return <button class="btn btn-primary btn-block" disabled>재생 요청 중…</button>;
   if (a) {
     return (
       <div class="cta-progress grid gap-2.5 rounded-card border-2 border-ink bg-surface p-5">
@@ -214,7 +214,7 @@ function Cta({ videos, work }: { videos: Lecture[]; work: Work[] }) {
     const seconds = videos.reduce((s, v) => s + (v.duration || 0), 0);
     return (
       <>
-        <button class="btn primary block" id="dashboard-play-all" disabled={state.dashboardLoading} onClick={confirmDashboardPlayback}>
+        <button class="btn btn-primary btn-block" id="dashboard-play-all" disabled={state.dashboardLoading} onClick={confirmDashboardPlayback}>
           강의 {videos.length}개 모두 재생
         </button>
         <p class={NOTE}>{fmtDuration(seconds)} 분량 · 마감 빠른 순서로 1배속 재생{work.length ? " · 과제·퀴즈는 직접 제출해야 해요" : ""}</p>
@@ -227,7 +227,7 @@ function Cta({ videos, work }: { videos: Lecture[]; work: Work[] }) {
   if (next) {
     return (
       <>
-        <a class="btn primary block" href={safeUrl(next.url)!} target="_blank" rel="noopener">{next.title} LMS에서 제출 <Icon name="external" /></a>
+        <a class="btn btn-primary btn-block" href={safeUrl(next.url)!} target="_blank" rel="noopener">{next.title} LMS에서 제출 <Icon name="external" /></a>
         <p class={NOTE}>학교 LMS에서 제출하면 다음 동기화 때 목록에서 빠져요</p>
       </>
     );
@@ -252,7 +252,7 @@ function Home() {
       <section class={SECTION}>
         <h1 class="caption">할 일을 불러오지 못했어요</h1>
         <p class={SUBTITLE}>{week.error}</p>
-        <div class="cta mt-4 grid gap-2"><button class="btn primary block" id="week-retry" onClick={renderWeek}>다시 불러오기</button></div>
+        <div class="cta mt-4 grid gap-2"><button class="btn btn-primary btn-block" id="week-retry" onClick={renderWeek}>다시 불러오기</button></div>
       </section>
     );
   }

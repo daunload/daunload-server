@@ -1,11 +1,11 @@
-/* 화면 뼈대 컴포넌트. 여러 화면이 같은 모양을 쓰므로 여기서만 스타일을 정한다.
- * 지금은 legacy.css의 클래스(.view-head, .panel, .panel-body, .empty, .warning)를 그대로 내보낸다.
- * 모든 화면을 옮긴 뒤 이 파일의 클래스를 Tailwind 유틸리티로 바꾸고 legacy 규칙을 지운다. */
+/* 화면 뼈대 컴포넌트. 카드·안내의 모양은 styles/components.css의 panel, panel-body, empty, warning 클래스가 정한다
+ * (정적 HTML과 HTML 문자열도 같은 클래스를 쓰기 때문). 한 화면만 다른 부분은 class에 유틸리티를 덧붙인다. */
 import type { ComponentChildren, JSX } from "preact";
 
 /** 화면 제목(자막 상자)과 오른쪽 동작 버튼. */
 export function ViewHead({ title, children }: { title: string; children?: ComponentChildren }) {
-  return <div class="view-head"><h1>{title}</h1>{children}</div>;
+  // view-head는 안에 넣은 label·select의 모양(legacy.css)을 고르는 이름이다.
+  return <div class="view-head flex flex-wrap items-center gap-2 px-1 pt-1 max-phone:px-0"><h1 class="caption mr-auto">{title}</h1>{children}</div>;
 }
 
 type PanelProps = Omit<JSX.HTMLAttributes<HTMLElement>, "ref"> & { as?: "div" | "section"; children?: ComponentChildren };

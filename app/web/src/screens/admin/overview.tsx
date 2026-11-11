@@ -17,7 +17,7 @@ function AccessRequests() {
   const d = load.data;
   if (!d.items.length) return null;
   return (
-    <section class="panel admin-box admin-access" aria-labelledby="admin-access-title">
+    <section class="panel admin-box admin-access border-amber" aria-labelledby="admin-access-title">
       <h2 id="admin-access-title">권한 요청 {adminNumber(d.total)}건</h2>
       <Table caption="권한 요청" cls="admin-linked" rows={d.items} columns={[
         { label: "학번", render: (r) => <UserLink id={r.student_id} />, cls: "admin-nowrap" },
@@ -48,7 +48,7 @@ function Chart({ d }: { d: Row }) {
       <div class="admin-box-head"><h2 id="admin-chart-title">일별 {label}</h2>
         <div class="admin-seg" role="group" aria-label="그래프 항목">
           {Object.entries(ADMIN_METRICS).map(([key, name]) => (
-            <button key={key} class="btn small" type="button" data-metric={key} aria-pressed={key === metric}
+            <button key={key} class="btn btn-sm px-2.5" type="button" data-metric={key} aria-pressed={key === metric}
               onClick={() => { adminUi.metric = key; setMetric(key); }}>{name}</button>
           ))}
         </div>

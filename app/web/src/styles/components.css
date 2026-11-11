@@ -1,0 +1,110 @@
+/* 공통 컴포넌트 클래스(components 레이어). 정적 HTML(index.html), HTML 문자열, Preact 화면이 함께 쓴다.
+ * - 유틸리티가 이 레이어보다 강하다: 한 곳만 다르면 class="btn btn-sm px-2.5"처럼 유틸리티를 덧붙인다.
+ * - 이 레이어는 legacy보다 강하다: legacy.css에서 이 클래스를 덮어쓰지 않는다(덮어써도 지지 않는다).
+ * - 버튼:  btn + (btn-primary | btn-danger | btn-ghost | btn-soft | btn-link) + (btn-sm | btn-block | btn-icon)
+ *          눌림 상태 버튼(aria-pressed="true")은 검정 바탕이 된다.
+ * - 카드:  panel(흰 카드) · panel-body(안쪽 여백) · panel-title(카드 제목) · actions(카드 아래 버튼 줄)
+ * - 안내:  warning(빨간 경고) · notice-inline(흰 안내 한 줄) · empty(뚱이 사진이 붙는 빈 화면)
+ * - 입력:  check(체크박스 + 글자 label) · toggle(스위치 label)
+ * - 불러오는 중: skeleton-list > skeleton
+ */
+
+/* ---------- 버튼 ---------- */
+.btn {
+  @apply inline-flex min-h-touch cursor-pointer items-center justify-center gap-1 rounded-btn border-2 border-ink bg-surface px-3.5 py-1.5
+    text-center font-sans text-sm leading-tight font-semibold tracking-[-0.01em] whitespace-normal text-ink no-underline wrap-anywhere;
+  transition: background .12s;
+  &:hover { background: var(--fill); text-decoration: none; }
+  &:active { transform: scale(.98); }
+  &:disabled { opacity: .45; cursor: default; transform: none; }
+  &[aria-pressed="true"], &[aria-pressed="true"]:hover { background: var(--ink); color: #fff; }
+  /* 버튼 안 아이콘은 글자색을 따른다. 받음·텍스트 보기 아이콘만 제 색을 갖는다. */
+  & .icon { @apply size-4 basis-4 text-current; }
+  & .icon[data-icon="download-done"] { @apply text-green; }
+  & .icon[data-icon="text-view"] { @apply text-blue; }
+}
+
+/* 크기 */
+.btn-sm { @apply px-3; }
+.btn-block { @apply w-full min-h-[54px] rounded-card text-md; }
+
+/* 모양 */
+.btn-primary {
+  @apply bg-pink shadow-[3px_3px_0_var(--ink)];
+  &:hover { background: var(--pink-press); }
+  &:active:not(:disabled) { transform: translate(3px, 3px); box-shadow: none; }
+  &:disabled { box-shadow: none; }
+}
+.btn-danger { @apply border-red text-red; }
+.btn-ghost {
+  @apply border-transparent bg-transparent;
+  &:hover { background: var(--fill); }
+}
+.btn-soft {
+  @apply border-[1.5px] border-line;
+  &:hover { border-color: var(--ink-3); }
+}
+.btn-link {
+  @apply border-0 bg-transparent px-1 py-0 font-medium text-blue;
+  &:hover { background: none; text-decoration: underline; }
+}
+
+/* 글자 없는 아이콘 버튼(목록 줄 오른쪽): 44px 정사각형 */
+.btn-icon {
+  @apply w-touch flex-none p-0;
+  & .icon { @apply size-5 basis-5; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-primary:active:not(:disabled) { transform: none; }
+}
+
+/* ---------- 카드 ---------- */
+.panel { @apply rounded-card border-2 border-ink bg-surface; }
+.panel-body { @apply grid gap-3 p-5 max-phone:p-4; }
+.panel-title { @apply px-5 pt-[18px] pb-1 text-md font-bold max-phone:px-4; }
+.actions { @apply flex flex-wrap items-center gap-2 px-5 pt-3 pb-5; }
+
+/* ---------- 안내 ---------- */
+.warning { @apply rounded-btn border-2 border-red bg-red-soft px-3.5 py-3 text-sm text-red; }
+.notice-inline { @apply rounded-btn border-2 border-ink bg-surface px-3.5 py-3 text-sm text-ink-2; }
+.empty {
+  @apply grid justify-items-center gap-2.5 px-5 py-8 text-center text-sm text-ink-3;
+  &::before {
+    content: ""; width: 120px; height: 120px;
+    background: url(/patrick-drool.webp) center / cover no-repeat; border: 2px solid var(--ink); border-radius: 12px;
+  }
+  & strong { @apply font-display text-[19px]/[1.35] font-normal text-ink; }
+  & p { max-width: 46ch; }
+}
+
+/* ---------- 입력 ---------- */
+.check {
+  @apply min-h-touch cursor-pointer grid-cols-[auto_1fr] items-center gap-2 font-normal text-ink;
+  & input { @apply m-0 size-[18px] min-h-0 accent-blue; }
+}
+.toggle {
+  @apply inline-flex cursor-pointer items-center gap-2 text-sm font-medium text-ink-2;
+  & input {
+    position: relative; width: 40px; height: 24px; min-height: 0; padding: 0; appearance: none; cursor: pointer;
+    background: var(--fill); border: 2px solid var(--ink); border-radius: 99px; transition: background .15s;
+  }
+  & input::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+    border-radius: 50%; background: var(--ink); transition: transform .15s;
+  }
+  & input:checked { background: var(--pink); }
+  & input:checked::after { transform: translateX(16px); }
+}
+
+/* ---------- 불러오는 중 ---------- */
+.skeleton-list { @apply grid gap-2.5 p-4; }
+.skeleton {
+  height: 44px; border-radius: var(--r-btn);
+  background: linear-gradient(90deg, var(--fill) 25%, var(--line) 50%, var(--fill) 75%); background-size: 200% 100%;
+  animation: skeleton 1.2s linear infinite;
+}
+@keyframes skeleton { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; }
+}

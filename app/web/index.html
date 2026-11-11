@@ -36,27 +36,27 @@
   <div id="startup" class="startup" role="status">
     <img class="startup-photo" id="startup-photo" src="/patrick-steam.webp" alt="" width="300" height="300">
     <h1>불러오는 중… 나도 하기 싫어…</h1>
-    <p class="muted" id="startup-message">잠시만 기다려 주세요.</p>
-    <button class="btn primary" id="retry-boot" hidden>다시 시도</button>
-    <button class="btn ghost" id="startup-login" hidden>로그인 화면으로</button>
+    <p class="text-ink-3" id="startup-message">잠시만 기다려 주세요.</p>
+    <button class="btn btn-primary" id="retry-boot" hidden>다시 시도</button>
+    <button class="btn btn-ghost" id="startup-login" hidden>로그인 화면으로</button>
   </div>
   <!-- 승인 전 사용자 -->
   <main id="access" class="access" hidden>
     <header class="access-top">
       <span class="brand"><img class="brand-mark" src="/mark.png" alt="" width="26" height="26">아유 하기싫어</span>
-      <button class="btn small ghost" id="access-logout" type="button">로그아웃</button>
-      <button class="btn small danger" id="access-delete" type="button">계정 삭제</button>
+      <button class="btn btn-sm btn-ghost" id="access-logout" type="button">로그아웃</button>
+      <button class="btn btn-sm btn-danger" id="access-delete" type="button">계정 삭제</button>
     </header>
     <section class="access-box" aria-labelledby="access-title" tabindex="-1" id="access-box">
       <h1 class="access-cap" id="access-title"></h1>
-      <p class="muted" id="access-message"></p>
-      <span class="tag warn" id="access-tag" hidden>대기 중</span>
-      <p class="error" id="access-error" role="alert"></p>
+      <p class="text-ink-3" id="access-message"></p>
+      <span class="inline-block rounded-chip bg-amber-soft px-[7px] py-px text-xs font-semibold whitespace-nowrap text-amber" id="access-tag" hidden>대기 중</span>
+      <p class="text-sm text-red empty:hidden" id="access-error" role="alert"></p>
       <div class="access-actions">
-        <button class="btn primary" id="access-request" type="button" hidden>권한 요청 보내기</button>
+        <button class="btn btn-primary" id="access-request" type="button" hidden>권한 요청 보내기</button>
         <button class="btn" id="access-recheck" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg>상태 다시 확인</button>
       </div>
-      <a class="btn link" href="/privacy.html" target="_blank" rel="noopener">개인정보처리방침</a>
+      <a class="btn btn-link" href="/privacy.html" target="_blank" rel="noopener">개인정보처리방침</a>
     </section>
   </main>
   <!-- 로그인 / 가입 -->
@@ -64,8 +64,8 @@
     <div class="auth-stage" aria-hidden="true"><div class="auth-frame"><img id="auth-mood" src="/patrick-blank.webp" fetchpriority="high" alt="" width="640" height="640"><p class="auth-caption" id="auth-caption">아유… 하기 싫어…</p></div></div>
     <div class="auth-box">
       <div class="auth-brand"><img class="brand-mark" src="/mark.png" alt="" width="26" height="26"><span class="brand">아유 하기싫어</span></div>
-      <div><h1>아유… 로그인부터 하자</h1><p class="muted small-text">통합 로그인(유세인트, LMS) 학번과 비밀번호를 그대로 써요. 학교 공식 서비스가 아니에요.</p></div>
-      <form id="login-form" class="stack">
+      <div><h1>아유… 로그인부터 하자</h1><p class="text-sm text-ink-3">통합 로그인(유세인트, LMS) 학번과 비밀번호를 그대로 써요. 학교 공식 서비스가 아니에요.</p></div>
+      <form id="login-form" class="grid gap-3.5">
         <label>학번<input name="student_id" placeholder="학번을 입력하세요" inputmode="numeric" autocomplete="username" required></label>
         <label for="password">비밀번호</label>
         <div class="password-field"><input id="password" name="password" type="password" placeholder="학교 계정 비밀번호" autocomplete="current-password" required><button type="button" id="password-toggle" aria-controls="password" aria-pressed="false">표시</button></div>
@@ -77,10 +77,10 @@
           </ul>
           <label class="check"><input name="agree" type="checkbox"><span>위 내용을 이해했고 동의합니다.</span></label>
         </div>
-        <p class="error" id="auth-error" role="alert"></p>
-        <button class="btn primary" id="auth-submit">로그인</button>
+        <p class="text-sm text-red empty:hidden" id="auth-error" role="alert"></p>
+        <button class="btn btn-primary" id="auth-submit">로그인</button>
       </form>
-      <p class="muted small-text"><a href="/privacy.html" target="_blank" rel="noopener">개인정보처리방침</a></p>
+      <p class="text-sm text-ink-3"><a href="/privacy.html" target="_blank" rel="noopener">개인정보처리방침</a></p>
     </div>
   </main>
 
@@ -89,11 +89,11 @@
     <header class="topbar">
       <a class="brand home-link" href="#dashboard"><img class="brand-mark" src="/mark.png" alt="" width="26" height="26">아유 하기싫어</a>
       <span class="sync" id="sync-status" role="status"></span>
-      <button class="btn small" id="sync-btn">LMS 동기화</button>
-      <button class="btn small ghost" id="logout-btn">로그아웃</button>
+      <button class="btn btn-sm max-phone:px-2" id="sync-btn">LMS 동기화</button>
+      <button class="btn btn-sm btn-ghost max-phone:px-2" id="logout-btn">로그아웃</button>
     </header>
     <div class="app-shell">
-      <div class="navigation"><button class="mobile-menu btn" id="menu-toggle" aria-controls="main-menu" aria-expanded="false"><span id="current-view">학습 현황</span><span>전체 메뉴<i class="chevron" aria-hidden="true"></i></span></button>
+      <div class="navigation"><button class="mobile-menu hidden w-full min-h-touch cursor-pointer items-center justify-between gap-1 rounded-none border-x-0 border-t-0 border-b-2 border-ink bg-bg px-gutter py-0 text-center font-sans text-sm leading-tight font-semibold tracking-[-0.01em] text-ink wrap-anywhere active:scale-[.98] max-phone:flex" id="menu-toggle" aria-controls="main-menu" aria-expanded="false"><span id="current-view">학습 현황</span><span>전체 메뉴<i class="chevron" aria-hidden="true"></i></span></button>
       <nav class="side" id="main-menu" aria-label="메뉴">
         <p class="nav-label">나의 학습</p>
         <button data-view="dashboard" class="on"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>학습 현황</button>
@@ -111,7 +111,7 @@
       <div class="workspace">
         <div class="notice-inline privacy-notice" id="privacy-notice" role="note" hidden>
           <p>개인정보처리방침이 바뀌었어요. 관리자가 승인한 사용자만 서비스를 쓸 수 있고, 권한 요청과 결정 기록을 보관해요.</p>
-          <div class="privacy-notice-actions"><a class="btn small" href="/privacy.html" target="_blank" rel="noopener">자세히 보기</a><button class="btn small" id="privacy-notice-close" type="button" aria-label="개인정보처리방침 안내 닫기">닫기</button></div>
+          <div class="privacy-notice-actions"><a class="btn btn-sm" href="/privacy.html" target="_blank" rel="noopener">자세히 보기</a><button class="btn btn-sm" id="privacy-notice-close" type="button" aria-label="개인정보처리방침 안내 닫기">닫기</button></div>
         </div>
         <main class="view" id="view" tabindex="-1"></main>
       </div>

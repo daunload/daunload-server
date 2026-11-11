@@ -35,12 +35,12 @@ function ChannelRow({ c }: { c: Channel }) {
     catch (err) { toast((err as Error).message, true); }
   };
   return (
-    <li class="row">
+    <li class="items-center">
       <span class="title">{CHANNEL_NAME[c.kind] || c.kind}</span>
       <span class="meta">{fmtDate(new Date(c.created_at))} 등록</span>
-      <span class="row ml-auto">
-        <PendingButton class="btn small" data-test={c.id} busy={testing} onClick={sendTest}>테스트 메시지 보내기</PendingButton>
-        <PendingButton class="btn small danger" data-del={c.id} busy={deleting} onClick={remove}>삭제</PendingButton>
+      <span class="ml-auto flex flex-wrap items-center gap-2">
+        <PendingButton class="btn btn-sm" data-test={c.id} busy={testing} onClick={sendTest}>테스트 메시지 보내기</PendingButton>
+        <PendingButton class="btn btn-sm btn-danger" data-del={c.id} busy={deleting} onClick={remove}>삭제</PendingButton>
       </span>
     </li>
   );
@@ -67,7 +67,7 @@ function ChannelForm() {
       <label data-for="discord" hidden={kind !== "discord"}>웹훅 URL<input name="webhook_url" placeholder="https://discord.com/api/webhooks/..." /></label>
       <label data-for="telegram" hidden={kind !== "telegram"}>봇 토큰<input name="bot_token" /></label>
       <label data-for="telegram" hidden={kind !== "telegram"}>채팅 ID<input name="chat_id" /></label>
-      <div><PendingButton class="btn primary" busy={busy}>추가하기</PendingButton></div>
+      <div><PendingButton class="btn btn-primary" busy={busy}>추가하기</PendingButton></div>
     </form>
   );
 }
