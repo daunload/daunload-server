@@ -16,3 +16,19 @@ backups/
 dist/
 node_modules/
 app/web-dist/
+
+# Not needed at runtime. Keeps local builds (CPX02/CPX12 guides) from copying large or private files.
+.claude/
+**/.venv
+**/.DS_Store
+*.mp4
+.github/
+.ruff_cache/
+.superpowers/
+debug/
+design-system/
+docs/
+extensions/
+scripts/
+store-assets/
+tests/

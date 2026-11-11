@@ -111,5 +111,37 @@ for attempt in range(6):
 # Persist only a successful image selection; secrets never enter this state file.
 printf 'APP_IMAGE=%s\n' "$image" > "$config_dir/.release.env.next"
 mv "$config_dir/.release.env.next" "$config_dir/.release.env"
+trap - ERR  # The release is recorded. Cleanup below must never report a failed deployment.
+
+# Remove app images other than the running one and the one recorded for manual recovery.
+# Never `docker image prune -a`: it would delete the stopped recovery image too.
+prune_images() {
+  local previous keep=() id ref
+  previous="$(sed -n 's/^APP_IMAGE=//p' "$config_dir/.release.env.previous" 2>/dev/null || true)"
+  for ref in "$image" "$previous"; do
+    [[ -n "$ref" ]] || continue
+    id="$(docker image inspect --format '{{.Id}}' "$ref" 2>/dev/null)" || continue
+    keep+=("$id")
+  done
+  if [[ "${#keep[@]}" -eq 0 ]]; then
+    echo "Image cleanup skipped: the running image could not be identified." >&2
+    return 0
+  fi
+  local candidates
+  candidates="$(docker image ls --no-trunc --format '{{.ID}}' "${image%@*}")"
+  if [[ "$previous" != "ssu-lms:previous" ]] && docker image inspect ssu-lms:previous > /dev/null 2>&1; then
+    candidates+=$'\n'"ssu-lms:previous"
+  fi
+  while read -r id; do
+    [[ -n "$id" ]] || continue
+    if [[ "$id" != ssu-lms:* ]]; then
+      [[ " ${keep[*]} " == *" $id "* ]] && continue
+    fi
+    docker image rm "$id" > /dev/null && echo "Removed old image $id" || echo "Could not remove image $id" >&2
+  done <<< "$(sort -u <<< "$candidates")"
+  docker image prune -f > /dev/null || true
+  docker builder prune -f --filter until=168h > /dev/null 2>&1 || true
+}
+prune_images || echo "Image cleanup failed; the deployment itself succeeded." >&2
 dc ps
 echo "Deployed $image"

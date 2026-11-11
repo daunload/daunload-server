@@ -54,3 +54,31 @@ def test_invalid_values_do_not_appear_in_validation_logs(production_env, monkeyp
 def test_server_has_no_ffmpeg_audio_path():
     assert "ffmpeg" not in (Path(__file__).resolve().parent.parent / "Dockerfile").read_text()
     assert not hasattr(Settings(), "max_audio_streams")
+
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_dockerfile_playwright_versions_match_lockfile():
+    """Chrome 설치용 CLI, 기본 이미지, uv.lock의 Playwright 버전이 함께 움직이게 한다."""
+    import re
+    import tomllib
+
+    dockerfile = (ROOT / "Dockerfile").read_text()
+    locked = next(p["version"] for p in tomllib.loads((ROOT / "uv.lock").read_text())["package"] if p["name"] == "playwright")
+    assert re.search(r"^ARG PLAYWRIGHT_VERSION=(\S+)$", dockerfile, re.MULTILINE).group(1) == locked
+    assert f"mcr.microsoft.com/playwright/python:v{locked}-" in dockerfile
+
+
+def test_chrome_layer_is_built_before_dependencies():
+    dockerfile = (ROOT / "Dockerfile").read_text()
+    assert dockerfile.index("playwright install --with-deps chrome") < dockerfile.index("COPY pyproject.toml uv.lock")
+
+
+def test_dockerignore_keeps_runtime_files_and_drops_local_clutter():
+    ignored = (ROOT / ".dockerignore").read_text().split()
+    for pattern in (".claude/", "*.mp4", "**/.venv", "tests/", "docs/", "**/.env"):
+        assert pattern in ignored
+    # 운영 배포가 이미지 안에서 실행하는 파일은 제외하면 안 된다.
+    # (app/web-dist/는 web 단계에서 새로 빌드해 복사하므로 제외해도 된다.)
+    assert not any(p.startswith(("deploy", "migrations", "app", "alembic")) for p in ignored if p != "app/web-dist/")

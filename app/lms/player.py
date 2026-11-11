@@ -147,6 +147,19 @@ class MediaWatch:
         self.content_id: str | None = None
         self.network_url: str | None = None
         self.reported = False
+        self.page = None
+
+    def attach(self, page) -> None:
+        self.page = page
+        page.on("request", self.on_request)
+        page.on("response", self.on_response)
+
+    def detach(self) -> None:
+        """주소를 보고한 뒤에는 영상 range 요청마다 Python 콜백을 부를 이유가 없다."""
+        if self.page is not None:
+            self.page.remove_listener("request", self.on_request)
+            self.page.remove_listener("response", self.on_response)
+            self.page = None
 
     def on_request(self, request) -> None:
         if self.content_id is None and request.url.split("?", 1)[0] == CONTENT_PHP:
@@ -168,6 +181,7 @@ class MediaWatch:
         if url is None:
             return
         self.reported = True
+        self.detach()
         try:
             await self.callback(self.video, self.content_id, url)
         except Exception:  # 기록 실패로 재생을 멈추지 않는다
@@ -243,8 +257,7 @@ class VideoPlayer:
             page = await context.new_page()
             page.on("dialog", _accept_dialog)
             media = MediaWatch(video, on_media)
-            page.on("request", media.on_request)
-            page.on("response", media.on_response)
+            media.attach(page)
             return await self._play_on_page(page, video, on_progress, media)
         except Exception as e:
             self._raise_if_lost(e)
@@ -277,22 +290,30 @@ class VideoPlayer:
         frame = await self._start_video(page)
 
         last_t, last_advance = -1.0, time.monotonic()
+        prev_t = -1.0
         near_end_since: float | None = None
         state = VideoState(0, 0, True, False, 1, 0)
         while True:
             if time.monotonic() > hard_limit:
                 raise PlaybackError(f"재생 시간 초과: {video.title}")
             await asyncio.sleep(self.poll_seconds)
-            # The player may create its resume dialog after a video element is found.
-            # Confirm before attempting direct media playback on every poll.
-            await _confirm_resume(page)
             try:
-                state = await _video_state(frame, "play")
+                state = await _video_state(frame, "read")
             except Exception:  # 프레임이 사라진 경우(플레이어가 iframe을 갈아끼움)
                 state = None
+            # 잘 재생되고 있으면 상태만 읽는다. 모든 프레임에서 확인 창을 찾는 일은 브라우저 왕복이 많아서
+            # 영상이 멈췄거나 진행되지 않을 때만 한다. 확인 창이 뜨면 플레이어가 영상을 멈추므로 이 경로로 들어온다.
+            # 플레이어가 영상을 찾은 뒤에 이어보기 창을 띄울 수 있으므로, 직접 재생을 걸기 전에 먼저 확인 창을 누른다.
+            if state is None or state.paused or state.t <= prev_t:
+                await _confirm_resume(page)
+                try:
+                    state = await _video_state(frame, "play")
+                except Exception:
+                    state = None
             if state is None:
                 frame = await self._start_video(page)
                 continue
+            prev_t = state.t
 
             if media:
                 await media.report(state.src)

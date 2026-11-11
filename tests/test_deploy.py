@@ -46,6 +46,15 @@ if command == os.environ.get("MOCK_FAIL"):
     sys.exit(1)
 if args[0] == "inspect":
     print("sha256:original-image")
+images = json.loads(os.environ.get("MOCK_IMAGES", "{}"))  # ref -> image ID
+if args[:2] == ["image", "inspect"]:
+    if args[-1] not in images:
+        sys.exit(1)
+    print(images[args[-1]])
+if args[:2] == ["image", "ls"]:
+    print("\\n".join(i for r, i in images.items() if r.startswith(args[-1] + "@")))
+if args[:2] == ["image", "rm"] and args[-1] in os.environ.get("MOCK_RM_FAIL", "").split():
+    sys.exit(1)
 if "ps" in args and "-q" in args:
     print("old-api-container")
 ''')
@@ -57,8 +66,8 @@ if "ps" in args and "-q" in args:
                MOCK_LOG=str(tmp_path / "docker.log"), MOCK_ORDER=str(tmp_path / "order.log"),
                MOCK_AUTH_PATH=str(tmp_path / "auth-path"))
 
-    def run(image=IMAGE, fail=None, env_name=""):
-        run_env = dict(env)
+    def run(image=IMAGE, fail=None, env_name="", images=None, rm_fail=""):
+        run_env = dict(env, MOCK_IMAGES=json.dumps(images or {}), MOCK_RM_FAIL=rm_fail)
         if fail:
             run_env["MOCK_FAIL"] = fail
         result = subprocess.run(["bash", str(config / "deploy.sh"), image, "test-user", env_name],
@@ -150,3 +159,54 @@ def test_failed_environment_deploy_preserves_previous_settings_and_cleans_upload
         assert (config / ".env.previous").read_bytes() == before
         assert (config / ".env").read_bytes() == candidate
         assert "up" not in order
+
+
+OLD = "ghcr.io/daunload/daunload-server@sha256:" + "c" * 64
+
+
+def _removed(calls):
+    return [c[-1] for c in calls if c[:2] == ["image", "rm"]]
+
+
+def test_success_removes_old_images_but_keeps_current_and_recovery(deployment):
+    config, _, run = deployment
+    (config / ".release.env").write_text(f"APP_IMAGE={PREVIOUS}\n")
+    images = {IMAGE: "sha256:new", PREVIOUS: "sha256:prev", OLD: "sha256:old", "ssu-lms:previous": "sha256:local"}
+    result, calls, _ = run(images=images)
+    assert result.returncode == 0, result.stderr
+    assert sorted(_removed(calls)) == ["sha256:old", "ssu-lms:previous"]
+    assert ["image", "prune", "-f"] in calls  # dangling only
+    assert not any("prune" in c and "-a" in c for c in calls)
+
+
+def test_first_automated_deploy_keeps_local_recovery_image(deployment):
+    _, _, run = deployment
+    images = {IMAGE: "sha256:new", OLD: "sha256:old", "ssu-lms:previous": "sha256:local"}
+    result, calls, _ = run(images=images)
+    assert result.returncode == 0, result.stderr
+    assert _removed(calls) == ["sha256:old"]
+
+
+def test_cleanup_failure_does_not_fail_a_recorded_deployment(deployment):
+    config, _, run = deployment
+    images = {IMAGE: "sha256:new", OLD: "sha256:old"}
+    result, _, _ = run(images=images, rm_fail="sha256:old")
+    assert result.returncode == 0, result.stderr
+    assert "Could not remove image sha256:old" in result.stderr
+    assert (config / ".release.env").read_text() == f"APP_IMAGE={IMAGE}\n"
+
+
+def test_cleanup_skips_when_running_image_is_unknown(deployment):
+    _, _, run = deployment
+    result, calls, _ = run(images={})
+    assert result.returncode == 0, result.stderr
+    assert _removed(calls) == []
+    assert "Image cleanup skipped" in result.stderr
+
+
+def test_failed_deploy_removes_nothing(deployment):
+    _, _, run = deployment
+    images = {IMAGE: "sha256:new", OLD: "sha256:old"}
+    result, calls, _ = run(images=images, fail="up")
+    assert result.returncode != 0
+    assert _removed(calls) == []

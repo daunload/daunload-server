@@ -305,3 +305,68 @@ async def test_play_keeps_ordinary_errors_when_browser_alive():
     video = SimpleNamespace(view_url="https://canvas.ssu.ac.kr/x", title="v")
     with pytest.raises(RuntimeError, match="boom"):
         await VideoPlayer(browser).play(SimpleNamespace(cookies=[]), video)
+
+
+async def test_healthy_playback_skips_resume_search(monkeypatch):
+    """잘 재생되는 동안에는 모든 프레임을 훑는 확인 창 찾기를 하지 않는다. 멈추면 다시 찾는다."""
+    from types import SimpleNamespace
+
+    from app.lms import player as player_mod
+    from app.lms.player import VideoState
+
+    # t: 0(멈춤) → 1 → 2 → 2(정지: 진행 없음) → 3 → 4(끝)
+    timeline = iter([(0, True), (1, False), (2, False), (2, False), (3, False), (4, False)])
+    current = {"t": 0, "paused": True}
+    calls = {"confirm": 0, "play": 0}
+
+    async def video_state(frame, action):
+        if action == "play":
+            calls["play"] += 1
+        else:
+            current["t"], current["paused"] = next(timeline)
+        t = current["t"]
+        return VideoState(t, 4, current["paused"] and action != "play", t >= 4, 1, 4)
+
+    async def confirm(page):
+        calls["confirm"] += 1
+        return False
+
+    async def start(self, page, timeout=90):
+        return "frame"
+
+    page = SimpleNamespace(url="https://canvas.ssu.ac.kr/x", goto=_noop, close=_noop)
+    monkeypatch.setattr(player_mod, "_video_state", video_state)
+    monkeypatch.setattr(player_mod, "_confirm_resume", confirm)
+    monkeypatch.setattr(VideoPlayer, "_start_video", start)
+    await VideoPlayer(SimpleNamespace(), SETTINGS, poll_seconds=0)._play_on_page(page, _video("https://canvas.ssu.ac.kr/x"), None)
+    # 첫 폴(멈춤)과 진행이 멈춘 한 번만 확인한다.
+    assert calls == {"confirm": 2, "play": 2}
+
+
+async def _noop(*args, **kwargs):
+    return None
+
+
+@pytest.mark.browser
+async def test_media_watch_detaches_after_reporting(browser):
+    from app.lms.player import CONTENT_PHP, MediaWatch
+
+    page = await browser.new_page()
+    try:
+        await page.route("**/*", lambda route: route.fulfill(content_type="text/html", body="ok"))
+        reported = []
+
+        async def callback(video, content_id, url):
+            reported.append((content_id, url))
+
+        watch = MediaWatch(_video(), callback)
+        watch.attach(page)
+        await page.goto(f"{CONTENT_PHP}?content_id=first")
+        assert watch.content_id == "first"
+        await watch.report("https://commons.ssu.ac.kr/lecture.mp4")
+        assert reported and watch.page is None
+        watch.content_id = None
+        await page.goto(f"{CONTENT_PHP}?content_id=second")
+        assert watch.content_id is None  # 리스너가 실제로 떨어졌다
+    finally:
+        await page.close()
