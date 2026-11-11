@@ -79,7 +79,11 @@ async def notify_user(db: AsyncSession, user_id: int, text: str, key: str | None
 
 async def notify_admins_of_request(db: AsyncSession, user: User) -> None:
     """승인 요청을 모든 관리자의 사용 중인 디스코드 채널로 한 번씩 알린다. 실패는 기록만 한다."""
-    text = f"[승인 요청] 학번 {user.student_id} 님이 서비스 사용 승인을 요청했어요. 관리자 화면에서 확인해 주세요."
+    await notify_admins(db, f"[승인 요청] 학번 {user.student_id} 님이 서비스 사용 승인을 요청했어요. 관리자 화면에서 확인해 주세요.")
+
+
+async def notify_admins(db: AsyncSession, text: str) -> None:
+    """모든 관리자의 사용 중인 디스코드 채널로 한 번씩 보낸다. 실패는 기록만 한다."""
     channels = (await db.scalars(
         select(NotificationChannel).join(User, User.id == NotificationChannel.user_id).where(
             User.student_id.in_(get_settings().admin_student_ids),
@@ -89,7 +93,7 @@ async def notify_admins_of_request(db: AsyncSession, user: User) -> None:
         try:
             await send_to_channel(ch, text)
         except Exception as e:
-            log.warning("승인 요청 알림 실패 channel=%s: %s", ch.id, _safe_error(e))
+            log.warning("관리자 알림 실패 channel=%s: %s", ch.id, _safe_error(e))
 
 
 async def prune_notification_log(db: AsyncSession, keep_days: int = NOTIFICATION_LOG_KEEP_DAYS) -> int:

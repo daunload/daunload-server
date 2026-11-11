@@ -276,3 +276,32 @@ async def test_plays_commons_through_attendance_wrapper(browser, monkeypatch):
     assert requests[0] == "https://canvas.ssu.ac.kr/courses/1/modules/items/10"
     assert "https://canvas.ssu.ac.kr/attendance-observed" in requests
     assert result.position >= 3.9
+
+
+async def test_play_reports_dead_browser_as_browser_lost():
+    from types import SimpleNamespace
+
+    from app.lms.errors import BrowserLost
+    from app.lms.player import VideoPlayer
+
+    async def new_context(**kwargs):
+        raise RuntimeError("Target page, context or browser has been closed")
+
+    browser = SimpleNamespace(is_connected=lambda: False, new_context=new_context)
+    video = SimpleNamespace(view_url="https://canvas.ssu.ac.kr/x", title="v")
+    with pytest.raises(BrowserLost, match="has been closed"):
+        await VideoPlayer(browser).play(SimpleNamespace(cookies=[]), video)
+
+
+async def test_play_keeps_ordinary_errors_when_browser_alive():
+    from types import SimpleNamespace
+
+    from app.lms.player import VideoPlayer
+
+    async def new_context(**kwargs):
+        raise RuntimeError("boom")
+
+    browser = SimpleNamespace(is_connected=lambda: True, new_context=new_context)
+    video = SimpleNamespace(view_url="https://canvas.ssu.ac.kr/x", title="v")
+    with pytest.raises(RuntimeError, match="boom"):
+        await VideoPlayer(browser).play(SimpleNamespace(cookies=[]), video)

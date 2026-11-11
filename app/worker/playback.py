@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+import time
 from contextlib import asynccontextmanager
 
 from sqlalchemy import select, text
@@ -16,6 +17,8 @@ from app.config import get_settings
 from app.db.base import init_engine, sessionmaker, utcnow
 from app.db.models import PlaybackBatch, PlaybackJob
 from app.services import playback
+from app.services.notify import notify_admins
+from app.worker.browser import BrowserManager, BrowserUnavailable
 
 log = logging.getLogger(__name__)
 LOCK_ID = 736012459
@@ -67,8 +70,9 @@ async def process_next(player_factory) -> int | None:
         ).order_by(PlaybackBatch.queue_at, PlaybackBatch.id).limit(1))
     if batch_id is None:
         return None
+    # 묶음을 시작하기 전에 브라우저를 준비한다. BrowserUnavailable은 그대로 올려 보내 묶음을 queued로 남긴다.
+    player = await player_factory()
     try:
-        player = await player_factory()
         # Timeout cancellation closes the playback task before another turn starts.
         await asyncio.wait_for(playback.run_batch(batch_id, player, one_item=True), timeout=24 * 3600)
     except Exception as exc:
@@ -88,6 +92,50 @@ async def process_next(player_factory) -> int | None:
                 batch.failed_count = sum(j.status == "failed" for j in jobs) + batch.failed_count
                 await db.commit()
     return batch_id
+
+
+LAUNCH_BACKOFF = (30, 300)  # Chrome을 못 띄우면 30초부터 두 배씩, 최대 5분 기다린다
+ADMIN_ALERT_INTERVAL = 3600
+
+
+class Loop:
+    """재생 루프 한 바퀴(step)와 그 사이의 상태. step은 다음 바퀴까지 기다릴 초를 돌려준다."""
+
+    def __init__(self, manager: BrowserManager, make_player, settings, *, alert=None, clock=time.monotonic) -> None:
+        self.manager, self.make_player, self.settings = manager, make_player, settings
+        self.alert, self.clock = alert or _alert_admins, clock
+        self.backoff = 0.0
+        self.last_alert: float | None = None
+
+    async def player(self):
+        return self.make_player(await self.manager.acquire())
+
+    async def step(self) -> float:
+        try:
+            batch_id = await process_next(self.player)
+        except BrowserUnavailable as e:
+            self.backoff = min(self.backoff * 2, LAUNCH_BACKOFF[1]) if self.backoff else LAUNCH_BACKOFF[0]
+            log.error("Chrome을 띄우지 못해 재생을 미룹니다(%.0f초 뒤 재시도): %s", self.backoff, e)
+            now = self.clock()
+            if self.last_alert is None or now - self.last_alert >= ADMIN_ALERT_INTERVAL:
+                self.last_alert = now
+                try:
+                    await self.alert(f"[재생 워커] Chrome을 띄우지 못해 재생 대기열이 멈춰 있습니다. 자동으로 다시 시도합니다. ({e})"[:1900])
+                except Exception:
+                    log.exception("관리자 알림 실패")
+            return self.backoff
+        self.backoff = 0.0
+        if batch_id is None:
+            await self.manager.close_if_idle()  # 큐가 비었을 때만 닫는다
+            return 1
+        self.manager.release()
+        await self.manager.recycle_if_old()  # 영상과 영상 사이에서만 새로 띄운다
+        return sum(self.settings.playback_gap_seconds) / 2
+
+
+async def _alert_admins(text: str) -> None:
+    async with sessionmaker()() as db:
+        await notify_admins(db, text)
 
 
 async def _heartbeat(connection):
@@ -121,28 +169,27 @@ async def serve():
         async with exclusive_worker(engine) as connection:
             await recover_interrupted()
             async with async_playwright() as pw:
-                browser = None
-
-                async def player_factory():
-                    nonlocal browser
-                    if browser is None or not browser.is_connected():
-                        browser = await pw.chromium.launch(
-                            channel=settings.playback_browser_channel or None,
-                            headless=settings.playback_headless, args=BROWSER_ARGS,
-                        )
-                    return VideoPlayer(browser, settings)
+                manager = BrowserManager(
+                    lambda: pw.chromium.launch(
+                        channel=settings.playback_browser_channel or None,
+                        headless=settings.playback_headless, args=BROWSER_ARGS,
+                    ),
+                    idle_seconds=settings.playback_browser_idle_seconds,
+                    max_age_seconds=settings.playback_browser_max_age_hours * 3600,
+                )
+                log.info("재생 워커 시작: Chrome 쉬는 동안 종료 %s, 최대 수명 %s",
+                         f"{settings.playback_browser_idle_seconds}초" if settings.playback_browser_idle_seconds > 0 else "끔",
+                         f"{settings.playback_browser_max_age_hours}시간" if settings.playback_browser_max_age_hours > 0 else "끔")
+                loop = Loop(manager, lambda browser: VideoPlayer(browser, settings), settings)
 
                 async def work():
                     while True:
-                        batch_id = await process_next(player_factory)
-                        delay = 1 if batch_id is None else sum(settings.playback_gap_seconds) / 2
-                        await asyncio.sleep(delay)
+                        await asyncio.sleep(await loop.step())
 
                 try:
                     await run_guarded(connection, work)
                 finally:
-                    if browser:
-                        await browser.close()
+                    await manager.close("shutdown")
     finally:
         await engine.dispose()
 

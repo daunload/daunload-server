@@ -192,3 +192,136 @@ async def test_queue_api_does_not_expose_other_users(env):
     assert all(j["expected_end"] for j in response.json()["jobs"])
     assert (await api.get(f"/playback/batches/{other.id}", headers=headers)).status_code == 404
     assert (await api.delete(f"/playback/batches/{other.id}", headers=headers)).status_code == 404
+
+
+# ---------- Chrome 수명 관리: 서버 문제는 사용자 실패로 세지 않는다 ----------
+
+async def _statuses():
+    async with sessionmaker()() as db:
+        batch = (await db.scalars(select(PlaybackBatch))).one()
+        jobs = (await db.scalars(select(PlaybackJob).order_by(PlaybackJob.position))).all()
+        return batch, jobs
+
+
+async def test_launch_failure_leaves_batch_untouched(env, fake_lms):
+    from app.worker.browser import BrowserUnavailable
+
+    await enqueue(await add_user("a"))
+    factory = AsyncMock(side_effect=BrowserUnavailable("no chrome"))
+    with pytest.raises(BrowserUnavailable):
+        await worker.process_next(factory)
+    batch, jobs = await _statuses()
+    assert batch.status == "queued" and batch.started_at is None and batch.failed_count == 0
+    assert [j.status for j in jobs] == ["queued", "queued"]
+
+
+async def test_browser_lost_requeues_item_without_failure(env, fake_lms):
+    from app.lms.errors import BrowserLost
+
+    await enqueue(await add_user("a"))
+    play = AsyncMock(side_effect=[BrowserLost("crashed"), None, None])
+    factory = AsyncMock(return_value=SimpleNamespace(play=play))
+    await worker.process_next(factory)
+    batch, jobs = await _statuses()
+    assert batch.status == "queued" and batch.failed_count == 0 and batch.current_position is None
+    assert [j.status for j in jobs] == ["queued", "queued"]
+    assert jobs[0].attempts == 1 and jobs[0].progress_seconds == 0
+    await worker.process_next(factory)
+    await worker.process_next(factory)
+    batch, jobs = await _statuses()
+    assert batch.status == "done" and batch.done_count == 2
+    assert [j.status for j in jobs] == ["done", "done"]
+
+
+async def test_repeated_browser_loss_fails_only_that_item(env, fake_lms):
+    from app.lms.errors import BrowserLost
+    from app.services.playback import BROWSER_LOSS_LIMIT
+
+    await enqueue(await add_user("a"), count=2)
+    play = AsyncMock(side_effect=[BrowserLost("oom")] * BROWSER_LOSS_LIMIT + [None])
+    factory = AsyncMock(return_value=SimpleNamespace(play=play))
+    for _ in range(BROWSER_LOSS_LIMIT):
+        await worker.process_next(factory)
+    batch, jobs = await _statuses()
+    assert batch.status == "queued"
+    assert [j.status for j in jobs] == ["failed", "queued"]
+    assert "Chrome" in jobs[0].error and batch.failed_count == 1
+    await worker.process_next(factory)
+    batch, jobs = await _statuses()
+    assert [j.status for j in jobs] == ["failed", "done"]
+    assert batch.status == "partial" and batch.failed_count == 1 and batch.done_count == 1
+
+
+async def test_browser_lost_on_last_item_finishes_batch(env, fake_lms):
+    from app.lms.errors import BrowserLost
+    from app.services.playback import BROWSER_LOSS_LIMIT
+
+    await enqueue(await add_user("a"), count=1)
+    factory = AsyncMock(return_value=SimpleNamespace(play=AsyncMock(side_effect=BrowserLost("oom"))))
+    for _ in range(BROWSER_LOSS_LIMIT):
+        await worker.process_next(factory)
+    batch, jobs = await _statuses()
+    assert batch.status == "failed" and batch.finished_at is not None
+    assert [j.status for j in jobs] == ["failed"]
+    assert await worker.process_next(factory) is None
+
+
+class FakeManager:
+    def __init__(self, fail=False):
+        self.fail, self.released, self.idle_checks, self.recycles = fail, 0, 0, 0
+
+    async def acquire(self):
+        from app.worker.browser import BrowserUnavailable
+        if self.fail:
+            raise BrowserUnavailable("no chrome")
+        return "browser"
+
+    def release(self):
+        self.released += 1
+
+    async def close_if_idle(self):
+        self.idle_checks += 1
+
+    async def recycle_if_old(self):
+        self.recycles += 1
+
+
+def _loop(manager, play=None, clock=None):
+    alerts = []
+
+    async def alert(text):
+        alerts.append(text)
+
+    settings = SimpleNamespace(playback_gap_seconds=(10, 30))
+    loop = worker.Loop(manager, lambda b: SimpleNamespace(play=play or AsyncMock()), settings,
+                       alert=alert, clock=clock or (lambda: 0.0))
+    return loop, alerts
+
+
+async def test_loop_closes_idle_browser_only_when_queue_empty(env, fake_lms):
+    await enqueue(await add_user("a"), count=2)
+    manager = FakeManager()
+    loop, _ = _loop(manager)
+    assert await loop.step() == 20
+    assert await loop.step() == 20
+    assert manager.idle_checks == 0 and manager.released == 2 and manager.recycles == 2
+    assert await loop.step() == 1
+    assert manager.idle_checks == 1
+
+
+async def test_loop_backs_off_and_alerts_once_per_hour(env, fake_lms):
+    await enqueue(await add_user("a"))
+    now = [0.0]
+    manager = FakeManager(fail=True)
+    loop, alerts = _loop(manager, clock=lambda: now[0])
+    delays = [await loop.step() for _ in range(6)]
+    assert delays == [30, 60, 120, 240, 300, 300]
+    assert len(alerts) == 1
+    now[0] = 3600
+    await loop.step()
+    assert len(alerts) == 2
+    manager.fail = False
+    assert await loop.step() == 20  # 회복하면 평소 영상 간격으로 돌아간다
+    _, jobs = await _statuses()
+    assert [j.status for j in jobs] == ["done", "queued"]
+    assert loop.backoff == 0

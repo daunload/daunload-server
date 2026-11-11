@@ -23,7 +23,7 @@ from playwright.async_api import Browser, BrowserContext, Dialog, Frame, Page, a
 
 from app.config import Settings, get_settings
 from app.lms.auth import CANVAS_BASE_URL, LmsSession
-from app.lms.errors import PlaybackError, SessionExpired, VideoNotFound
+from app.lms.errors import BrowserLost, PlaybackError, SessionExpired, VideoNotFound
 from app.lms.media import CONTENT_PHP, MediaError, check_media_host
 from app.lms.todo import VideoTodo
 
@@ -234,7 +234,11 @@ class VideoPlayer:
     ) -> PlaybackResult:
         if not video.view_url:
             raise PlaybackError(f"재생 주소가 없습니다: {video.title}")
-        context = await new_session_context(self.browser, session)
+        try:
+            context = await new_session_context(self.browser, session)
+        except Exception as e:
+            self._raise_if_lost(e)
+            raise
         try:
             page = await context.new_page()
             page.on("dialog", _accept_dialog)
@@ -242,8 +246,20 @@ class VideoPlayer:
             page.on("request", media.on_request)
             page.on("response", media.on_response)
             return await self._play_on_page(page, video, on_progress, media)
+        except Exception as e:
+            self._raise_if_lost(e)
+            raise
         finally:
-            await context.close()
+            try:
+                await context.close()
+            except Exception:
+                if self.browser.is_connected():
+                    raise  # 브라우저가 이미 죽었으면 닫을 컨텍스트도 없다. 원래 예외(BrowserLost)를 살린다.
+
+    def _raise_if_lost(self, error: Exception) -> None:
+        """Chrome이 죽어서 난 오류면 BrowserLost로 바꾼다. 영상 문제와 구분해야 실패 횟수에 넣지 않는다."""
+        if not self.browser.is_connected():
+            raise BrowserLost(f"{type(error).__name__}: {error}") from error
 
     async def _play_on_page(
         self, page: Page, video: VideoTodo, on_progress: ProgressCallback | None, media: MediaWatch | None = None,

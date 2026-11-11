@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     playback_browser_channel: str = "chrome"
     playback_stall_seconds: int = 90
     playback_max_reloads: int = 3
+    # 쉬는 동안 Chrome 종료: 큐가 이 시간(초) 동안 비어 있으면 브라우저를 닫고 다음 재생 때 다시 띄운다. 0이면 계속 켜 둔다.
+    playback_browser_idle_seconds: int = 0
+    # 오래 켜 둔 Chrome을 이 시간마다 영상 사이에서 새로 띄운다. 0이면 하지 않는다.
+    playback_browser_max_age_hours: float = 0
     verify_attempts: int = 4
     verify_interval_seconds: int = 20
     # 호환용 영상 중계는 기본 차단. 확장프로그램은 이 설정과 무관하게 CDN에서 직접 받는다.

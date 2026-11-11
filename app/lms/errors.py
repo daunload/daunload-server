@@ -24,3 +24,8 @@ class PlaybackError(LmsError):
 
 class VideoNotFound(PlaybackError):
     """재생 페이지에서 영상을 찾지 못했다. 선수 조건으로 잠긴 항목일 수 있다."""
+
+
+class BrowserLost(Exception):
+    """재생 중 Chrome 연결이 끊겼다. 서버 쪽 문제이므로 항목 실패로 세지 않고 다시 대기열에 넣는다.
+    LmsError가 아니어서 재생 재시도(_play_with_retry)에 잡히지 않고 run_batch까지 올라간다."""

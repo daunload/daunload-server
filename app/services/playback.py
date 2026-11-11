@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from app.config import Settings, get_settings
 from app.db.base import sessionmaker, utcnow
 from app.db.models import PlaybackBatch, PlaybackJob, TodoRow, User
+from app.lms.errors import BrowserLost
 from app.lms.batch import BatchHooks, BatchPlan, BatchRunner, ItemOutcome, Scope, build_plan, select_videos
 from app.lms.todo import VideoTodo, parse_dt
 from app.services.access import user_has_access
@@ -174,6 +175,7 @@ async def run_batch(
     cancel = asyncio.Event()
     watcher = asyncio.create_task(_watch_cancel(batch_id, cancel, cancel_poll_seconds))
     error: str | None = None
+    lost: BrowserLost | None = None
     try:
         async with sm() as db, lms_client_for(db, user_id) as client:
             runner = BatchRunner(client, player, settings=settings, hooks=_db_hooks(batch_id))
@@ -182,6 +184,9 @@ async def run_batch(
                 end_position=start_position + 1 if one_item else None,
                 failed_courses=failed_courses, locked_courses=locked_courses,
             )
+    except BrowserLost as e:
+        lost = e
+        log.warning("재생 중 Chrome 연결 끊김 batch=%s: %s", batch_id, e)
     except Exception as e:
         error = f"{type(e).__name__}: {e}"
         log.exception("일괄 재생 실패 batch=%s", batch_id)
@@ -199,6 +204,12 @@ async def run_batch(
         if batch.cancel_requested:
             cancel.set()
         jobs = (await db.scalars(select(PlaybackJob).where(PlaybackJob.batch_id == batch_id))).all()
+        if lost and not cancel.is_set():
+            _requeue_after_browser_loss(batch, jobs, lost)
+            if any(j.status == "queued" for j in jobs):
+                batch.status, batch.current_position, batch.queue_at = "queued", None, utcnow()
+                await db.commit()
+                return "queued"
         if one_item and not error and not cancel.is_set() and any(j.status == "queued" for j in jobs):
             batch.status, batch.current_position, batch.queue_at = "queued", None, utcnow()
             await db.commit()
@@ -236,6 +247,26 @@ async def run_batch(
 
 
 _STATUS_KO = {"done": "완료", "partial": "일부 완료", "failed": "실패", "cancelled": "취소됨"}
+
+# 재생 중 Chrome이 죽은 항목은 이 횟수까지 실패로 세지 않고 다시 대기열에 넣는다.
+# 특정 영상이 매번 Chrome을 죽이면(메모리 부족 등) 그 항목만 실패로 끝내 대기열이 막히지 않게 한다.
+BROWSER_LOSS_LIMIT = 3
+
+
+def _requeue_after_browser_loss(batch: PlaybackBatch, jobs, lost: BrowserLost) -> None:
+    """재생 중이던 항목을 되돌린다. 아직 재생 기록이 없는 대기 항목에서 attempts는 Chrome 손실 횟수로 쓴다.
+    (항목이 끝나면 on_item_done이 실제 재생 시도 횟수로 덮어쓴다.)"""
+    for j in jobs:
+        if j.status != "playing":
+            continue
+        j.attempts = (j.attempts or 0) + 1
+        j.progress_seconds, j.progress_updated_at = 0, None  # 다시 재생하기 전에 LMS 상태를 새로 확인한다
+        if j.attempts < BROWSER_LOSS_LIMIT:
+            j.status = "queued"
+        else:
+            j.status, j.finished_at = "failed", utcnow()
+            j.error = f"재생 중 Chrome이 {j.attempts}번 종료되었습니다: {lost}"
+            batch.failed_count += 1
 
 
 def _db_hooks(batch_id: int) -> BatchHooks:
