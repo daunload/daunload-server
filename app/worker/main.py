@@ -5,6 +5,7 @@
 - auto_sync_user_job: 자동 재생 과목만 동기화(작업 ID autosync:{uid}). 전체 동기화(sync:{uid})와 ID를 나눠 서로 버려지지 않게 한다
 - schedule_syncs (cron): 시각이 된 승인 사용자 중 자동 재생 과목이 있는 사람만 auto_sync_user_job을 넣는다
 - deadline_reminders (cron): 마감 24시간·3시간 전 알림
+- prune_daily_activity / prune_notification_logs (cron): 오래된 일별 활동·알림 발송 기록 정리
 - 재생은 별도 DB 큐 워커(app.worker.playback)가 담당한다
 """
 
@@ -26,7 +27,7 @@ from app.lms.errors import InvalidCredentials, LmsError
 from app.services import playback
 from app.services.access import has_access, user_has_access
 from app.services.activity import prune_daily
-from app.services.notify import notify_deadlines, notify_user
+from app.services.notify import notify_deadlines, notify_user, prune_notification_log
 from app.services.sync import sync_user
 
 log = logging.getLogger(__name__)
@@ -178,6 +179,11 @@ async def prune_daily_activity(ctx) -> int:
         return await prune_daily(db)
 
 
+async def prune_notification_logs(ctx) -> int:
+    async with sessionmaker()() as db:
+        return await prune_notification_log(db)
+
+
 async def startup(ctx) -> None:
     logging.basicConfig(level=logging.INFO)
     init_engine()
@@ -193,6 +199,7 @@ class WorkerSettings:
         cron(schedule_syncs, minute=set(range(0, 60, 5)), run_at_startup=True),
         cron(deadline_reminders, minute=set(range(2, 60, 10))),
         cron(prune_daily_activity, hour=4, minute=10),
+        cron(prune_notification_logs, hour=4, minute=20),
     ]
     on_startup = startup
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)

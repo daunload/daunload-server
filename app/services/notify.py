@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timedelta
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,9 @@ def _safe_error(e: Exception) -> str:
     return type(e).__name__
 
 REMINDER_HOURS = (24, 3)
+# notification_log 보관 기간. 키는 마감 알림(마감 24시간 전부터 생김)과 날짜가 든 로그인 만료 알림뿐이라
+# 이보다 오래된 키는 다시 쓰이지 않는다. 관리자 화면의 알림 기록도 이 기간만큼 보인다.
+NOTIFICATION_LOG_KEEP_DAYS = 90
 KIND_LABEL = {"video": "영상", "assignment": "과제", "quiz": "퀴즈"}
 
 
@@ -87,6 +90,13 @@ async def notify_admins_of_request(db: AsyncSession, user: User) -> None:
             await send_to_channel(ch, text)
         except Exception as e:
             log.warning("승인 요청 알림 실패 channel=%s: %s", ch.id, _safe_error(e))
+
+
+async def prune_notification_log(db: AsyncSession, keep_days: int = NOTIFICATION_LOG_KEEP_DAYS) -> int:
+    """keep_days일보다 오래된 발송 기록을 지우고 지운 개수를 돌려준다."""
+    result = await db.execute(delete(NotificationLog).where(NotificationLog.created_at < utcnow() - timedelta(days=keep_days)))
+    await db.commit()
+    return result.rowcount
 
 
 # notify_user는 중복이면 롤백하고, 롤백은 세션의 ORM 객체를 모두 만료시킨다.
