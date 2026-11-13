@@ -10,7 +10,7 @@ import { drawWeek, loadDashboardPlayback, renderWeek } from "./screens/home";
 import { startPolling, stopPolling, viewPlayback } from "./screens/playback";
 import { unmountScreen } from "./screens/mount";
 import { viewSettings } from "./screens/settings";
-import { viewVideos } from "./screens/videos";
+import { clearVideoLists, viewVideos } from "./screens/videos";
 
 /* ---------------- 로그인 ---------------- */
 
@@ -125,6 +125,7 @@ export function logout(): void {
     dashboardPlan: null, dashboardError: null, dashboardLoading: false, playbackStarting: false,
     batches: [], active: null, plan: null, planForm: null, planQuery: null,
     videoCourse: null, videoList: null, savedVideos: null, materialList: null, bulk: null });
+  clearVideoLists();  // 다른 계정의 과목 목록을 다시 쓰지 않게 한다
   closeConfirmDialog();
   $("#transcript-dialog")?.close();
   clearToasts();
@@ -145,10 +146,11 @@ $("#logout-btn").addEventListener("click", serverLogout);
 
 /* ---------------- 데이터 ---------------- */
 
-export async function loadCore(knownMe?: Me): Promise<void> {
+/** knownMe·knownCred: 방금 받은 값이 있으면 다시 요청하지 않는다(시작 화면, 동기화 버튼). */
+export async function loadCore(knownMe?: Me, knownCred?: Credentials): Promise<void> {
   const [me, cred, todos, courses, batches] = await Promise.all([
     knownMe ?? api<Me>("/me"),
-    api<Credentials>("/lms/credentials").catch((e: ApiError) => (e.status === 404 ? null : Promise.reject(e))),
+    knownCred ?? api<Credentials>("/lms/credentials").catch((e: ApiError) => (e.status === 404 ? null : Promise.reject(e))),
     api<Todo[]>("/todos"),
     api<Course[]>("/courses"),
     api<Batch[]>("/playback/batches?limit=10"),
@@ -237,12 +239,14 @@ $("#sync-btn").addEventListener("click", async () => {
   btn.textContent = "동기화 중";
   try {
     await api("/sync", { method: "POST" });
+    let cred: Credentials | undefined;
     for (let i = 0; i < 40; i++) {
       await new Promise((r) => setTimeout(r, 3000));
-      const cred = await api<Credentials>("/lms/credentials");
-      if (cred.last_synced_at !== before || cred.status !== "ok") { state.cred = cred; break; }
+      cred = await api<Credentials>("/lms/credentials");
+      if (cred.last_synced_at !== before || cred.status !== "ok") break;
     }
-    await loadCore();
+    // 방금 받은 계정 상태와 내 정보는 다시 묻지 않고 할 일·과목·재생 기록만 새로 받는다.
+    await loadCore(state.me ?? undefined, cred);
     renderAll();
     const updated = state.cred?.last_synced_at && state.cred.last_synced_at !== before;
     toast(state.cred?.status !== "ok" ? "동기화하지 못했습니다. 계정 상태를 확인하세요."

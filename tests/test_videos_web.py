@@ -460,3 +460,22 @@ async def test_guide_stays_folded_when_extension_answers(dashboard):
     await expect(guide.locator('summary')).to_contain_text('크롬 확장프로그램 안내')
     await guide.locator('summary').click()
     await expect(guide.get_by_role('link', name='Chrome 웹 스토어 열기')).to_be_visible()
+
+
+async def test_switching_courses_reuses_recent_lists(dashboard):
+    """과목을 오갈 때 방금 받은 목록은 LMS(서버)에 다시 묻지 않는다."""
+    page, data = dashboard
+    data["/saved-videos"] = []
+    data["/courses"].append({"lms_course_id": 2, "name": "자료구조", "professors": "이교수", "attendance": [], "auto_play": False})
+    data["/courses/1/videos"] = [_video(11, "1과목 강의")]
+    data["/courses/2/videos"] = [_video(21, "2과목 강의")]
+    calls = []
+    page.on("request", lambda r: calls.append(r.url.split("dashboard.test", 1)[1]) if "/videos" in r.url else None)
+    await page.goto("http://dashboard.test/#videos")
+    rows = page.locator("#video-list li.video-row")
+    await expect(rows.nth(0)).to_contain_text("1과목 강의")
+    await page.locator("#video-course").select_option("2")
+    await expect(rows.nth(0)).to_contain_text("2과목 강의")
+    await page.locator("#video-course").select_option("1")
+    await expect(rows.nth(0)).to_contain_text("1과목 강의")
+    assert calls.count("/courses/1/videos") == 1 and calls.count("/courses/2/videos") == 1

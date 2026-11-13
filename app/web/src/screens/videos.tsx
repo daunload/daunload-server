@@ -39,6 +39,12 @@ interface MaterialItem {
 
 /* ---------- 불러오기 ---------- */
 
+/** 과목을 오갈 때 방금 받은 목록을 다시 쓴다(LMS 실시간 조회라 느리다). 목록에서 받은 표시·텍스트 변환 결과는
+ * 같은 객체를 고치므로 그대로 남는다. 서버도 다운로드 링크용으로 10분 동안 목록을 기억하므로 그보다 짧게 둔다. */
+const LIST_TTL_MS = 5 * 60 * 1000;
+const lists = new Map<string, { at: number; list: { courseId: number; items: any[] } }>();
+export function clearVideoLists(): void { lists.clear(); }
+
 export async function viewVideos(): Promise<void> {
   if (needCred()) return;
   if (!state.savedVideos) {
@@ -60,10 +66,14 @@ export async function viewVideos(): Promise<void> {
   }
   const key = state.videoTab === "videos" ? "videoList" : "materialList";
   const path = state.videoTab === "videos" ? `/courses/${courseId}/videos` : `/courses/${courseId}/materials`;
+  const cacheKey = `${key}:${courseId}`;
+  const kept = lists.get(cacheKey);
+  if ((!state[key] || state[key].courseId !== courseId) && kept && Date.now() - kept.at < LIST_TTL_MS) state[key] = kept.list;
   if (!state[key] || state[key].courseId !== courseId) {
     drawVideos(true);
     try {
       state[key] = { courseId, items: await api(path) };
+      lists.set(cacheKey, { at: Date.now(), list: state[key] });
     } catch (err) {
       if (state.view === "videos" && state.videoCourse === courseId) viewError((err as Error).message, viewVideos);
       return;
