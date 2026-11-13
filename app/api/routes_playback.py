@@ -75,8 +75,18 @@ async def list_batches(user: CurrentUser, db: Db, limit: int = Query(default=20,
         .order_by(PlaybackBatch.id.desc()).limit(limit)
     )
     batches = (await db.scalars(stmt)).all()
+    if await _settle(db, batches):
+        playback.queue_estimate_cache.invalidate()
     estimates = await playback.queue_estimate_cache.get(db)
     return [await _batch_out(db, b, estimates) for b in batches]
+
+
+async def _settle(db, batches) -> bool:
+    """워커가 끝내지 않은 중지 요청 묶음을 조회할 때 닫는다(화면이 '중지 요청됨'에 갇히지 않게)."""
+    settled = [b for b in batches if await playback.settle_stale_cancel(db, b)]
+    if settled:
+        await db.commit()
+    return bool(settled)
 
 
 async def _own_batch(db, user_id: int, batch_id: int) -> PlaybackBatch:
@@ -89,6 +99,8 @@ async def _own_batch(db, user_id: int, batch_id: int) -> PlaybackBatch:
 @router.get("/batches/{batch_id}", response_model=BatchDetailOut)
 async def get_batch(batch_id: int, user: CurrentUser, db: Db):
     batch = await _own_batch(db, user.id, batch_id)
+    if await _settle(db, [batch]):
+        playback.queue_estimate_cache.invalidate()
     jobs = (await db.scalars(
         select(PlaybackJob).options(defer(PlaybackJob.video))  # 응답에 쓰지 않는 영상 JSON은 읽지 않는다
         .where(PlaybackJob.batch_id == batch_id).order_by(PlaybackJob.position)

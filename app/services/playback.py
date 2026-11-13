@@ -345,6 +345,42 @@ async def _watch_cancel(batch_id: int, cancel: asyncio.Event, poll: float) -> No
                 cancel.set()
 
 
+# 중지를 요청한 묶음이 이 시간 넘게 아무 진행도 없으면 워커가 더 이상 돌리지 않는 것으로 본다.
+# (재생 중에는 진행 위치를 10초마다 저장한다. 워커가 멈췄거나 예전 버전에서 남은 묶음이 '중지 요청됨'에 갇히지 않게 한다.)
+STALE_CANCEL = timedelta(minutes=5)
+
+
+def _aware(t: datetime) -> datetime:
+    return t if t.tzinfo else t.replace(tzinfo=utcnow().tzinfo)
+
+
+async def settle_stale_cancel(db: AsyncSession, batch: PlaybackBatch) -> bool:
+    """중지를 요청했는데 워커가 끝내 주지 않는 묶음을 끝낸다. 끝냈으면 True(커밋은 호출한 쪽).
+
+    남은 항목은 아직 미수강(활성 할 일)이면 '취소', 이미 완료돼 할 일에서 빠졌으면 '이미 완료'로 닫는다."""
+    if not batch.cancel_requested or batch.status not in ACTIVE_STATUSES:
+        return False
+    jobs = (await db.scalars(select(PlaybackJob).where(PlaybackJob.batch_id == batch.id))).all()
+    times = [batch.started_at, batch.queue_at, *(j.progress_updated_at for j in jobs), *(j.started_at for j in jobs)]
+    latest = max((_aware(t) for t in times if t), default=None)
+    if latest and utcnow() - latest < STALE_CANCEL:
+        return False
+    pending = set((await db.execute(select(TodoRow.lms_course_id, TodoRow.lms_item_id).where(
+        TodoRow.user_id == batch.user_id, TodoRow.kind == "video", TodoRow.active,
+    ))).all())
+    now = utcnow()
+    for j in jobs:
+        if j.status in ("queued", "playing"):
+            j.status = "cancelled" if (j.lms_course_id, j.module_item_id) in pending else "skipped"
+            j.finished_at = now
+    batch.done_count = sum(j.status == "done" for j in jobs)
+    batch.skipped_count = sum(j.status == "skipped" for j in jobs)
+    batch.failed_count = sum(j.status in ("failed", "locked") for j in jobs)
+    batch.status, batch.finished_at, batch.current_position = "cancelled", now, None
+    log.warning("워커가 끝내지 않은 중지 요청 묶음을 닫음 batch=%s", batch.id)
+    return True
+
+
 async def cancel_batch(db: AsyncSession, batch_id: int, user_id: int) -> PlaybackBatch | None:
     batch = await db.scalar(select(PlaybackBatch).where(
         PlaybackBatch.id == batch_id, PlaybackBatch.user_id == user_id,
@@ -360,6 +396,8 @@ async def cancel_batch(db: AsyncSession, batch_id: int, user_id: int) -> Playbac
             ))).all()
             for job in jobs:
                 job.status, job.finished_at = "cancelled", utcnow()
+        else:
+            await settle_stale_cancel(db, batch)
     await db.commit()
     return batch
 

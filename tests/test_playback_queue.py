@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import Queue
 from app.db.base import sessionmaker, utcnow
-from app.db.models import PlaybackBatch, PlaybackJob, User
+from app.db.models import PlaybackBatch, PlaybackJob, TodoRow, User
 from app.lms.todo import VideoTodo
 from app.services import playback
 from app.worker import playback as worker
@@ -122,6 +122,60 @@ async def test_cancel_during_play_stops_child_and_finishes(env, fake_lms):
         await playback.cancel_batch(db, batch.id, uid)
     assert await asyncio.wait_for(task, 2) == "cancelled"
     assert stopped.is_set()
+
+
+async def test_cancel_settles_batch_the_worker_abandoned(env):
+    """워커가 놓친 '재생 중' 묶음은 중지를 요청하면 바로 끝난다. 이미 완료된 강의는 '이미 완료'로 닫는다."""
+    uid = await add_user("a")
+    batch = await enqueue(uid)
+    old = utcnow() - timedelta(days=14)
+    async with sessionmaker()() as db:
+        b = await db.get(PlaybackBatch, batch.id)
+        b.status, b.started_at, b.queue_at, b.current_position = "running", old, old, 0
+        jobs = (await db.scalars(select(PlaybackJob).order_by(PlaybackJob.position))).all()
+        jobs[0].status, jobs[0].started_at, jobs[0].progress_seconds = "playing", old, 302
+        # 첫 강의만 아직 미수강이다. 둘째 강의는 동기화에서 완료로 빠졌다.
+        db.add(TodoRow(user_id=uid, lms_course_id=jobs[0].lms_course_id, course_name="course", kind="video",
+                       lms_item_id=jobs[0].module_item_id, title=jobs[0].title))
+        await db.commit()
+    async with sessionmaker()() as db:
+        await playback.cancel_batch(db, batch.id, uid)
+    async with sessionmaker()() as db:
+        b = await db.get(PlaybackBatch, batch.id)
+        assert (b.status, b.skipped_count, b.current_position) == ("cancelled", 1, None)
+        jobs = (await db.scalars(select(PlaybackJob).order_by(PlaybackJob.position))).all()
+        assert [j.status for j in jobs] == ["cancelled", "skipped"]
+    await enqueue(uid)  # 막혀 있던 새 재생도 다시 요청할 수 있다
+
+
+async def test_batch_read_settles_stale_cancel_request(env):
+    """이미 '중지 요청됨'에 갇힌 묶음은 화면이 조회할 때 끝난다."""
+    api, _ = env
+    headers = await _signup(api)
+    async with sessionmaker()() as db:
+        uid = await db.scalar(select(User.id))
+    batch = await enqueue(uid)
+    old = utcnow() - timedelta(days=14)
+    async with sessionmaker()() as db:
+        b = await db.get(PlaybackBatch, batch.id)
+        b.status, b.cancel_requested, b.started_at, b.queue_at = "running", True, old, old
+        await db.commit()
+    res = await api.get(f"/playback/batches/{batch.id}", headers=headers)
+    assert res.json()["status"] == "cancelled"
+    res = await api.get("/playback/batches", headers=headers)
+    assert [b["status"] for b in res.json()] == ["cancelled"]
+
+
+async def test_recent_cancel_request_waits_for_worker(env):
+    uid = await add_user("a")
+    batch = await enqueue(uid)
+    async with sessionmaker()() as db:
+        b = await db.get(PlaybackBatch, batch.id)
+        b.status, b.started_at = "running", utcnow()
+        await db.commit()
+    async with sessionmaker()() as db:
+        b = await playback.cancel_batch(db, batch.id, uid)
+        assert (b.status, b.cancel_requested) == ("running", True)
 
 
 async def test_interrupt_recovery_preserves_finished_items(env, fake_lms):
