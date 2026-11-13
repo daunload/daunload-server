@@ -370,7 +370,7 @@ async def test_admin_access_search_pagination_and_no_secrets(env, monkeypatch):
     assert r.json()["total"] == 2
     assert r.json()["users"][0]["student_id"] == "20209999"
     assert set(r.json()["users"][0]) == {
-        "student_id", "created_at", "last_login_at", "login_count", "lms_status",
+        "student_id", "created_at", "last_login_at", "login_count", "lms_status", "token_status",
             "course_count", "playback_done", "playback_failed", "download_count", "transcript_count", "channels",
             "access_status", "is_admin",
     }

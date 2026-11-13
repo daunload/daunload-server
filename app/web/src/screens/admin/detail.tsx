@@ -8,7 +8,7 @@ import { Attendance } from "../courses";
 import {
   BackIcon,
   ADMIN_BATCH_SCOPE, ADMIN_BATCH_STATUS, ADMIN_CHANNEL, ADMIN_PERIODS, ADMIN_PLAYBACK_STATUS, AccessButtons, AccessTag, Day,
-  EmptyText, ErrorBox, JobTag, KindSeg, LmsTag, Loaded, Pager, type Row, Skeleton, Table, Tag, Time, activityLabel, adminNumber,
+  EmptyText, ErrorBox, JobTag, KindSeg, LmsTag, Loaded, Pager, type Row, Skeleton, Table, Tag, Time, TokenTag, activityLabel, adminNumber,
   adminUi, adminUserPath, courseTitle, useAdmin, useRefocusKind,
 } from "./shared";
 
@@ -40,7 +40,7 @@ function Head({ s, reload }: { s: Row; reload: () => void }) {
       <div class="admin-who"><h2>{s.student_id}</h2>{s.is_admin ? <Tag label="관리자" tone="warn" /> : <Tag label="일반 사용자" />}
         <AccessTag status={s.access_status} /><AccessButtons id={s.student_id} status={s.access_status} isAdmin={s.is_admin} reload={reload} /></div>
       <p class="admin-sub">가입 <Day iso={s.created_at} /> · 로그인 {adminNumber(s.login_count)}회 · 최근 로그인 <When iso={s.last_login_at} none="기록 없음" /> · 이용 동의 <Day iso={s.consent_at} /></p>
-      <p class="admin-sub"><LmsTag status={lms?.status} prefix="LMS " />{lms && <> 동기화 <When iso={lms.last_synced_at} none="기록 없음" /></>}
+      <p class="admin-sub"><LmsTag status={lms?.status} prefix="LMS " />{lms && <> <TokenTag status={lms.token_status} /></>}{lms && <> 동기화 <When iso={lms.last_synced_at} none="기록 없음" /></>}
         {lms?.last_error && <> <Err>마지막 오류: {lms.last_error}</Err></>}</p>
       <div class="admin-kpis admin-sum">
         <Kpi label="수강 과목" value={s.counts.courses} /><Kpi label="남은 할 일" value={s.counts.todos} /><Kpi label="재생 완료" value={s.counts.playback_done} />
@@ -59,6 +59,8 @@ function LmsTab({ s }: { s: Row }) {
       <h3 class="sr-only">LMS</h3>
       <dl class="admin-dl">
         {row("상태", <LmsTag status={l.status} />)}
+        {row("개인 토큰", <><TokenTag status={l.token_status} />{l.token_status !== "none" && <> {l.token_managed ? "서버 자동 발급" : "직접 등록"} · <When iso={l.token_registered_at} none="등록일 없음" /></>}
+          {l.token_status !== "ok" && <> <span class="admin-sub">다시 로그인하면 발급돼요. 없으면 세션이 만료될 때 학교 로그인이 끝나 있어 복구하지 못해요.</span></>}</>)}
         {row("마지막 오류", l.last_error ? <><Err>{l.last_error}</Err> <When iso={l.last_error_at} none="" /></> : "없음")}
         {row("마지막 로그인", <When iso={l.last_login_at} none="기록 없음" />)}
         {row("마지막 동기화", <When iso={l.last_synced_at} none="기록 없음" />)}

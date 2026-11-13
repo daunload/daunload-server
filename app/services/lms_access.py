@@ -17,7 +17,7 @@ from app.lms.client import LmsClient
 from app.lms.errors import InvalidCredentials, LmsError, SsoExpired
 from app.security import decrypt, encrypt
 
-RELOGIN_MESSAGE = "학교 로그인이 만료되었습니다. 다시 로그인하거나 계정에서 새 개인 토큰을 등록해 주세요."
+RELOGIN_MESSAGE = "학교 로그인이 만료되었습니다. 다시 로그인하거나 설정에서 새 개인 토큰을 등록해 주세요."
 log = logging.getLogger(__name__)
 
 
@@ -146,3 +146,10 @@ def managed_token_values(created: personal_token.ManagedToken) -> dict:
 def needs_managed_token(cred: LmsCredential | None) -> bool:
     """A user-registered working token is never replaced; a managed one only when it stopped working."""
     return cred is None or not (cred.personal_token_enc and cred.personal_token_status == "ok")
+
+
+def token_state(cred: LmsCredential | None) -> str:
+    """ok: 세션 복구에 쓸 수 있는 개인 토큰이 있다. invalid: 있었지만 거절됐다. none: 없다(SSO가 끝나면 복구 불가)."""
+    if cred is None or not cred.personal_token_enc:
+        return "none"
+    return "ok" if cred.personal_token_status == "ok" else "invalid"

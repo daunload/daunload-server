@@ -1,6 +1,6 @@
-/* 관리자 사용자 탭: 학번 검색, LMS 상태·정렬·문제 있음 조건, 권한 필터, 사용자 표(권한 버튼), 페이지 넘김. */
+/* 관리자 사용자 탭: 학번 검색, LMS 상태·정렬·문제 있음·토큰 없음 조건, 권한 필터, 사용자 표(권한 버튼), 페이지 넘김. */
 import { useRef, useState } from "preact/hooks";
-import { adminNumber, AccessButtons, AccessTag, ADMIN_ACCESS, ADMIN_CHANNEL, ADMIN_LMS_STATUS, adminUi, EmptyText, LmsTag, Loaded, Pager, type Row, Table, Time, UserLink, useAdmin } from "./shared";
+import { adminNumber, AccessButtons, AccessTag, ADMIN_ACCESS, ADMIN_CHANNEL, ADMIN_LMS_STATUS, adminUi, EmptyText, LmsTag, Loaded, Pager, type Row, Table, Time, TokenTag, UserLink, useAdmin } from "./shared";
 
 const LIMIT = 25;
 const SORTS: Record<string, string> = { activity: "최근 로그인순", created: "가입일순", student_id: "학번순" };
@@ -17,6 +17,7 @@ export function Users({ again }: { again: number }) {
   if (f.q.trim()) params.set("q", f.q.trim());
   if (f.lms_status) params.set("lms_status", f.lms_status);
   if (f.has_problem) params.set("has_problem", "true");
+  if (f.token_missing) params.set("token_missing", "true");
   if (f.access) params.set("access", f.access);
   const [load, reload] = useAdmin(`/admin/users?${params}`, again);
 
@@ -29,6 +30,7 @@ export function Users({ again }: { again: number }) {
     f.lms_status = field("lms_status").value;
     f.sort = field("sort").value;
     f.has_problem = field("has_problem").checked;
+    f.token_missing = field("token_missing").checked;
     f.offset = 0;
     redraw((n) => n + 1);
   };
@@ -54,6 +56,7 @@ export function Users({ again }: { again: number }) {
         </select></label>
         <label>정렬<select class="select" name="sort" value={f.sort}>{Object.entries(SORTS).map(([k, label]) => <option key={k} value={k}>{label}</option>)}</select></label>
         <label class="flex min-h-touch cursor-pointer items-center gap-2 font-normal text-ink"><input type="checkbox" class="checkbox" name="has_problem" defaultChecked={f.has_problem} /><span>문제 있음만</span></label>
+        <label class="flex min-h-touch cursor-pointer items-center gap-2 font-normal text-ink"><input type="checkbox" class="checkbox" name="token_missing" defaultChecked={f.token_missing} /><span>토큰 없음만</span></label>
       </form>
       <div class="admin-seg admin-access-filter" role="group" aria-label="권한">
         {[["", "전체"], ...Object.entries(ADMIN_ACCESS).map(([k, a]) => [k, a.label])].map(([k, label]) => (
@@ -73,7 +76,8 @@ export function Users({ again }: { again: number }) {
                     { label: "학번", render: (u) => <UserLink id={u.student_id} />, cls: "admin-nowrap" },
                     { label: "권한", render: (u) => <AccessTag status={u.access_status} /> },
                     { label: "최근 로그인", render: (u) => <Time iso={u.last_login_at} none="로그인 기록 없음" />, cls: "admin-nowrap" },
-                    { label: "LMS", render: (u) => <LmsTag status={u.lms_status} /> },
+                    // 토큰은 열을 따로 두지 않는다(768px에서 표가 넘친다). LMS 상태 아래에 붙인다.
+                    { label: "LMS · 토큰", render: (u) => <span class="flex flex-wrap gap-1"><LmsTag status={u.lms_status} />{u.token_status && <TokenTag status={u.token_status} />}</span> },
                     { label: "과목", render: (u) => adminNumber(u.course_count) },
                     { label: "재생 (완료/실패)", render: (u) => <>{adminNumber(u.playback_done)} / {u.playback_failed ? <span class="admin-bad">{adminNumber(u.playback_failed)}</span> : "0"}</> },
                     { label: "다운로드", render: (u) => adminNumber(u.download_count) },

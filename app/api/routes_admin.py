@@ -17,6 +17,8 @@ from app.db.models import (AssignmentRow, CourseRow, DownloadRecord, LmsCredenti
                            UserDailyActivity, VideoUrl)
 from app.services.access import Action, decide_access
 from app.services.activity import local_day
+from app.services.lms_access import needs_managed_token, token_state
+from app.services.notify import notify_user
 from app.services.admin_data import (activity_union, as_utc, clean_error, failed_at, failed_job_filter,
                                      period_start, problem_union)
 
@@ -30,6 +32,9 @@ class AdminUserOut(BaseModel):
     last_login_at: datetime | None
     login_count: int
     lms_status: str | None
+    # 개인 토큰 상태(ok/invalid/none). LMS를 연결하지 않았으면 None.
+    # 토큰이 없으면 SSO가 끝나는(로그인 1~1.5시간 뒤) 다음 세션 만료 때 다시 로그인해야 한다.
+    token_status: str | None = None
     course_count: int
     playback_done: int
     playback_failed: int
@@ -65,6 +70,7 @@ async def list_users(
     q: str = Query(default="", max_length=32),
     lms_status: str | None = Query(default=None, max_length=16),
     has_problem: bool | None = None,
+    token_missing: bool | None = None,
     access: Literal["none", "pending", "approved", "rejected", "revoked"] | None = None,
     sort: Literal["activity", "created", "student_id"] = "activity",
     offset: int = Query(default=0, ge=0),
@@ -77,11 +83,15 @@ async def list_users(
     if has_problem is not None:
         problem = or_(and_(LmsCredential.user_id.is_not(None), LmsCredential.status != "ok"), _recent_failure(User.id))
         filters.append(problem if has_problem else not_(problem))
+    if token_missing is not None:  # LMS를 연결했는데 쓸 수 있는 개인 토큰이 없다
+        missing = and_(LmsCredential.user_id.is_not(None), or_(
+            LmsCredential.personal_token_enc.is_(None), LmsCredential.personal_token_status != "ok"))
+        filters.append(missing if token_missing else not_(missing))
     if access:  # 관리자는 저장된 값과 관계없이 approved
         admin_ids = get_settings().admin_student_ids
         filters.append(or_(User.student_id.in_(admin_ids), User.access_status == access) if access == "approved"
                        else and_(User.student_id.not_in(admin_ids), User.access_status == access))
-    base = select(User, LmsCredential.status).outerjoin(LmsCredential, LmsCredential.user_id == User.id).where(*filters)
+    base = select(User, LmsCredential).outerjoin(LmsCredential, LmsCredential.user_id == User.id).where(*filters)
     total = await db.scalar(select(func.count()).select_from(base.with_only_columns(User.id).subquery()))
     order = {
         "activity": (User.last_login_at.desc().nulls_last(), User.id.desc()),
@@ -101,13 +111,14 @@ async def list_users(
         channels[user_id].append(kind)
     return AdminUsersOut(total=total, users=[
         AdminUserOut(student_id=u.student_id, created_at=u.created_at,
-                     last_login_at=u.last_login_at, login_count=u.login_count, lms_status=status,
+                     last_login_at=u.last_login_at, login_count=u.login_count,
+                     lms_status=cred.status if cred else None, token_status=token_state(cred) if cred else None,
                      course_count=courses.get(u.id, 0), playback_done=done.get(u.id, 0),
                      playback_failed=failed.get(u.id, 0), download_count=downloads.get(u.id, 0),
                      transcript_count=transcripts.get(u.id, 0), channels=channels.get(u.id, []),
                      access_status="approved" if is_admin(u) else u.access_status,
                      is_admin=is_admin(u))
-        for u, status in rows
+        for u, cred in rows
     ])
 
 
@@ -362,6 +373,9 @@ class AdminLmsOut(BaseModel):
     last_login_at: datetime | None
     last_synced_at: datetime | None
     next_sync_at: datetime | None
+    token_status: str = "none"
+    token_managed: bool = False
+    token_registered_at: datetime | None = None
 
 
 class AdminCountsOut(BaseModel):
@@ -520,10 +534,12 @@ Limit = Annotated[int, Query(ge=1, le=100)]
 async def user_summary(student_id: str, admin: AdminUser, db: Db, response: Response):
     response.headers["Cache-Control"] = "no-store"
     user = await _target_user(db, student_id)
-    lms = (await db.execute(select(
-        LmsCredential.status, LmsCredential.last_error, LmsCredential.last_error_at, LmsCredential.last_login_at,
-        LmsCredential.last_synced_at, LmsCredential.next_sync_at,
-    ).where(LmsCredential.user_id == user.id))).mappings().one_or_none()
+    cred = await db.scalar(select(LmsCredential).where(LmsCredential.user_id == user.id))
+    lms = None if cred is None else AdminLmsOut(
+        status=cred.status, last_error=clean_error(cred.last_error), last_error_at=cred.last_error_at,
+        last_login_at=cred.last_login_at, last_synced_at=cred.last_synced_at, next_sync_at=cred.next_sync_at,
+        token_status=token_state(cred), token_managed=cred.personal_token_managed,
+        token_registered_at=cred.personal_token_registered_at)
 
     async def count(column, *where, value=None):
         return int(await db.scalar(select(value if value is not None else func.count()).where(column == user.id, *where)) or 0)
@@ -542,7 +558,7 @@ async def user_summary(student_id: str, admin: AdminUser, db: Db, response: Resp
         student_id=user.student_id, is_admin=is_admin(user), consent_at=user.consent_at,
         created_at=user.created_at, last_login_at=user.last_login_at, login_count=user.login_count,
         access_status="approved" if is_admin(user) else user.access_status,
-        lms=AdminLmsOut(**{**lms, "last_error": clean_error(lms["last_error"])}) if lms is not None else None,
+        lms=lms,
         counts=counts,
     )
 
@@ -915,17 +931,37 @@ class AccessDecisionOut(BaseModel):
     sync_queued: bool = True  # 승인 뒤 전체 동기화를 큐에 넣지 못했으면 False
 
 
+APPROVED_RELOGIN_MESSAGE = (
+    "✅ 서비스 사용이 승인됐어요. 사이트에서 로그아웃한 뒤 한 번 더 로그인해 주세요. "
+    "그때 학습 연결을 자동으로 복구하는 토큰이 발급돼서, 몇 시간 뒤 학교 로그인이 만료돼도 동기화와 자동 수강이 이어져요."
+)
+
+
+async def _remind_relogin(db, user_id: int) -> None:
+    """승인 전 로그인에서는 개인 토큰을 발급하지 않는다(routes_account.login). 토큰이 없으면 다시 로그인하라고 알린다.
+    알림 실패는 승인 결과에 영향을 주지 않는다. 화면도 토큰이 없으면 같은 안내를 띄운다."""
+    try:
+        if needs_managed_token(await db.get(LmsCredential, user_id)):
+            await notify_user(db, user_id, APPROVED_RELOGIN_MESSAGE)
+    except Exception as e:
+        log.warning("승인 뒤 재로그인 안내 실패 user=%s: %s", user_id, type(e).__name__)
+
+
 @router.post("/users/{student_id}/access", response_model=AccessDecisionOut)
 async def decide_user_access(student_id: str, body: AccessDecisionIn, admin: AdminUser, db: Db, queue: JobQueue):
     """관리자 API 중 유일한 쓰기 경로."""
     user = await _target_user(db, student_id)
     sync_queued = True
-    if await decide_access(db, user, body.action, admin):
+    approved = await decide_access(db, user, body.action, admin)
+    if approved:
         try:
             await queue.enqueue("sync_user_job", user.id, job_id=f"sync:{user.id}")
         except Exception as e:  # 승인은 이미 저장됐다. 큐 오류로 500을 돌려주면 재시도가 409가 된다.
             sync_queued = False
             log.warning("승인 뒤 동기화 큐 등록 실패 user=%s: %s", user.id, type(e).__name__)
-    return AccessDecisionOut(student_id=user.student_id, access_status=user.access_status,
-                             access_decided_at=user.access_decided_at, access_decided_by=user.access_decided_by,
-                             sync_queued=sync_queued)
+    out = AccessDecisionOut(student_id=user.student_id, access_status=user.access_status,
+                            access_decided_at=user.access_decided_at, access_decided_by=user.access_decided_by,
+                            sync_queued=sync_queued)
+    if approved:
+        await _remind_relogin(db, user.id)
+    return out

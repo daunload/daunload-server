@@ -533,3 +533,26 @@ async def test_course_todo_assignment_download_transcript_notification_tabs(env,
     n = (await get("notifications")).json()
     assert n["channels"] == [{"kind": "telegram", "enabled": False, "created_at": n["channels"][0]["created_at"]}]
     assert [i["key"] for i in n["items"]] == ["k1"] and n["total"] == 1
+
+
+async def test_users_token_status_and_filter(env, monkeypatch):
+    api, admin, _ = await _admin(env, monkeypatch)
+    await _signup(api, "20205555")  # user 3: LMS 연결 없음으로 바꾼다
+    async with db_base.sessionmaker()() as db:
+        cred1 = await db.get(LmsCredential, 1)
+        cred1.personal_token_enc, cred1.personal_token_status, cred1.personal_token_managed = "enc", "ok", True
+        await db.delete(await db.get(LmsCredential, 3))
+        await db.commit()
+
+    def rows(r):
+        return {u["student_id"]: u["token_status"] for u in r.json()["users"]}
+    assert rows(await api.get("/admin/users", headers=admin)) == {"20201234": "ok", "20209999": "none", "20205555": None}
+    assert rows(await api.get("/admin/users?token_missing=true", headers=admin)) == {"20209999": "none"}
+    assert set(rows(await api.get("/admin/users?token_missing=false", headers=admin))) == {"20201234", "20205555"}
+    async with db_base.sessionmaker()() as db:
+        await _set_lms(db, personal_token_enc="enc", personal_token_status="invalid")
+    assert rows(await api.get("/admin/users?token_missing=true", headers=admin)) == {"20209999": "invalid"}
+
+    lms = (await api.get("/admin/users/20201234/summary", headers=admin)).json()["lms"]
+    assert lms["token_status"] == "ok" and lms["token_managed"] is True
+    assert (await api.get("/admin/users/20209999/summary", headers=admin)).json()["lms"]["token_status"] == "invalid"

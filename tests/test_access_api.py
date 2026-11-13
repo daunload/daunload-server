@@ -404,7 +404,8 @@ async def test_approve_queues_full_sync(env, admins):
     api, queue = env
     admin_h, _ = await _admin_and_target(api, "pending")
     queue.jobs.clear()
-    assert (await _decide(api, admin_h, "approve")).status_code == 200
+    r = await _decide(api, admin_h, "approve")
+    assert r.status_code == 200 and r.json()["sync_queued"] is True
     assert queue.jobs == [("sync_user_job", (2,), "sync:2")]
     queue.jobs.clear()
     assert (await _decide(api, admin_h, "approve")).status_code == 409  # 이미 승인됨
@@ -484,12 +485,6 @@ async def test_approve_still_succeeds_when_queue_is_down(env, admins, monkeypatc
     assert (await _decide(api, admin_h, "approve")).status_code == 409  # 승인은 저장됐다
 
 
-async def test_decision_reports_sync_queued(env, admins):
-    api, _ = env
-    admin_h, _ = await _admin_and_target(api, "pending")
-    assert (await _decide(api, admin_h, "approve")).json()["sync_queued"] is True
-
-
 @respx.mock
 async def test_webhook_url_never_reaches_logs(env, admins, clock, caplog):
     api, _ = env
@@ -505,7 +500,39 @@ async def test_webhook_url_never_reaches_logs(env, admins, clock, caplog):
     assert "500" in caplog.text  # 상태 코드는 남는다
 
 
-async def test_audio_routes_are_gone(env):
+async def test_approve_reminds_relogin_only_without_token(env, admins, monkeypatch):
     api, _ = env
-    paths = {p for _, p in _all_routes(api._transport.app)}
-    assert not any(p.startswith("/audio/") or p.endswith("/audio-link") for p in paths)
+    sent = []
+
+    async def fake_notify(db, user_id, text, key=None):
+        sent.append((user_id, text))
+        return True
+
+    monkeypatch.setattr("app.api.routes_admin.notify_user", fake_notify)
+    admin_h, _ = await _admin_and_target(api, "pending")
+    assert (await _decide(api, admin_h, "approve")).status_code == 200
+    assert len(sent) == 1 and sent[0][0] == 2 and "한 번 더 로그인" in sent[0][1]
+
+    sent.clear()
+    assert (await _decide(api, admin_h, "revoke")).status_code == 200
+    assert sent == []  # 승인 말고는 안내하지 않는다
+    async with db_base.sessionmaker()() as db:
+        cred = await db.get(LmsCredential, 2)
+        cred.personal_token_enc, cred.personal_token_status = "enc", "ok"
+        await db.commit()
+    assert (await _decide(api, admin_h, "approve")).status_code == 200
+    assert sent == []  # 쓸 수 있는 토큰이 이미 있다
+
+
+async def test_approve_succeeds_when_relogin_reminder_fails(env, admins, monkeypatch, caplog):
+    api, _ = env
+
+    async def broken(*args, **kwargs):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr("app.api.routes_admin.notify_user", broken)
+    admin_h, _ = await _admin_and_target(api, "pending")
+    with caplog.at_level("WARNING"):
+        r = await _decide(api, admin_h, "approve")
+    assert r.status_code == 200 and r.json()["access_status"] == "approved"
+    assert "재로그인 안내 실패" in caplog.text

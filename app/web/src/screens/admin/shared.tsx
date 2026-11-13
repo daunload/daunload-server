@@ -35,6 +35,10 @@ export const ADMIN_BATCH_STATUS: Record<string, { label: string; tone: string }>
 export const ADMIN_LMS_STATUS: Record<string, { label: string; tone: string }> = {
   ok: { label: "정상", tone: "ok" }, invalid: { label: "다시 로그인 필요", tone: "bad" }, error: { label: "최근 오류", tone: "warn" },
 };
+/** 개인 토큰 상태. 없으면 SSO가 끝나는 다음 세션 만료 때 다시 로그인해야 한다. */
+export const ADMIN_TOKEN_STATUS: Record<string, { label: string; tone: string }> = {
+  ok: { label: "토큰 있음", tone: "ok" }, invalid: { label: "토큰 만료", tone: "bad" }, none: { label: "토큰 없음", tone: "warn" },
+};
 /** 사용 권한(User.access_status)의 화면 이름. 사용자 탭의 필터 순서이기도 하다. */
 export const ADMIN_ACCESS: Record<string, { label: string; tone: string }> = {
   approved: { label: "승인됨", tone: "ok" }, pending: { label: "대기 중", tone: "warn" }, rejected: { label: "거절됨", tone: "bad" },
@@ -53,7 +57,7 @@ export const ADMIN_PLAYBACK_STATUS: Record<string, string> = {
 export const adminUi = {
   nav: 0, days: 7, metric: "playback_done", problemCount: null as number | null, problemCountFor: null as string | null,
   searchTimer: 0 as ReturnType<typeof setTimeout> | 0,
-  users: { q: "", lms_status: "", has_problem: false, access: "", sort: "activity", offset: 0 },
+  users: { q: "", lms_status: "", has_problem: false, token_missing: false, access: "", sort: "activity", offset: 0 },
   detail: null as null | { viewer: string; id: string; summary: Row | null; tabs: Record<string, Row> },
   activity: { kind: "all", student_id: "", offset: 0 },
   problems: { kind: "all", student_id: "", course: "", offset: 0 },
@@ -125,6 +129,12 @@ export function LmsTag({ status, prefix = "" }: { status?: string | null; prefix
   if (!status) return <Tag label={`${prefix}연결 안 함`} />;
   const s = ADMIN_LMS_STATUS[status] || { label: status, tone: "warn" };
   return <Tag label={prefix + s.label} tone={s.tone} />;
+}
+
+export function TokenTag({ status }: { status?: string | null }) {
+  if (!status) return <>-</>;
+  const t = ADMIN_TOKEN_STATUS[status] || { label: status, tone: "warn" };
+  return <Tag label={t.label} tone={t.tone} />;
 }
 
 export function AccessTag({ status }: { status: string }) {
