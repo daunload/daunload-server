@@ -1,15 +1,17 @@
-/* 계정 화면(#account): LMS 연결 상태, 개인 액세스 토큰 등록·교체·제거, 계정 삭제. */
+/* 설정 화면(#settings): LMS 연결, 개인 액세스 토큰, 알림 받을 곳, 계정 삭제를 한 화면의 묶음(Section)으로 둔다.
+ * 예전 알림(#notifications)·계정(#account) 화면을 합쳤다. 알림 묶음은 screens/notifications.tsx. */
 import { useRef, useState } from "preact/hooks";
-import { logout } from "../app";
+import { logout, renderReloginNotice } from "../app";
 import { api, fmtDate, state } from "../core";
 import type { Credentials } from "../types";
 import { confirmDialog, toast } from "../ui";
-import { Panel, PanelBody, ViewHead } from "../ui/layout";
+import { Section, ViewHead } from "../ui/layout";
 import { PendingButton, usePending } from "../ui/pending";
 import { mountScreen } from "./mount";
+import { NotificationsSection } from "./notifications";
 
-export function viewAccount(): void {
-  mountScreen("account", <Account />);
+export function viewSettings(): void {
+  mountScreen("settings", <Settings />);
 }
 
 const STATUS_NAME: Record<string, string> = { ok: "정상", invalid: "다시 로그인 필요", error: "최근 오류" };
@@ -40,7 +42,8 @@ function TokenForm({ c }: { c: Credentials | null }) {
     setBusy(method);
     try {
       state.cred = await api<Credentials>("/lms/access-token", { method, ...(body ? { json: body } : {}) });
-      if (state.view === "account") viewAccount();
+      renderReloginNotice();
+      if (state.view === "settings") viewSettings();
       toast(method === "PUT" ? "토큰을 등록하고 학습 연결을 확인했습니다" : "저장된 개인 토큰을 제거했습니다");
     } catch (err) {
       setError((err as Error).message);
@@ -89,32 +92,29 @@ function DeleteAccount() {
   return <div><PendingButton class="btn btn-error btn-outline" id="delete-me" busy={busy} onClick={remove}>계정 삭제</PendingButton></div>;
 }
 
-function Account() {
+function Settings() {
   const c = state.cred;
   return (
     <>
-      <ViewHead title="계정" />
-      <Panel><PanelBody>
-        <div class="summary-line"><span><b>{state.me?.student_id || ""}</b>학번</span>
-          {c && <span><b>{STATUS_NAME[c.status] || c.status}</b>LMS 연결</span>}</div>
+      <ViewHead title="설정" sub={`학번 ${state.me?.student_id || ""}`} />
+      <Section id="settings-lms" title="LMS 연결" actions={c && <span class="text-sm font-bold">{STATUS_NAME[c.status] || c.status}</span>}
+        note="학교 비밀번호는 저장하지 않습니다.">
         {c && <p class="text-sm text-ink-3">마지막 LMS 로그인 {date(c.last_login_at, "없음")}, 다음 자동 동기화 {date(c.next_sync_at, "예정 없음")}</p>}
         {c?.last_error && <p class="text-sm text-red empty:hidden">{c.last_error}</p>}
-        <p class="text-sm">학습 연결이 만료되면 등록한 개인 토큰, 학교 로그인 정보 순으로 복구합니다. 모두 만료되면 다시 로그인하거나 새 토큰을 등록하세요. 학교 비밀번호는 저장하지 않습니다.</p>
-      </PanelBody></Panel>
-      <Panel><PanelBody>
-        <h3>개인 액세스 토큰</h3>
-        <p class="text-sm">{tokenStatus(c)}{c?.personal_token_registered_at ? ` 등록일 ${fmtDate(new Date(c.personal_token_registered_at))}` : ""}</p>
+        <p class="text-sm">학습 연결이 만료되면 등록한 개인 토큰, 학교 로그인 정보 순으로 복구합니다. 모두 만료되면 다시 로그인하거나 새 토큰을 등록하세요.</p>
+      </Section>
+      <Section id="settings-token" title="개인 액세스 토큰"
+        note={<>{tokenStatus(c)}{c?.personal_token_registered_at ? ` 등록일 ${fmtDate(new Date(c.personal_token_registered_at))}` : ""}</>}>
         <p class="text-sm text-ink-3" id="personal-token-help">
           <a href="https://canvas.ssu.ac.kr/profile/settings" target="_blank" rel="noopener noreferrer">Canvas 설정에서 토큰 발급</a> 후 붙여넣으세요. 토큰은 서버에 암호화해 보관합니다. 만료·폐기 시 새 토큰이 필요합니다.
         </p>
         <TokenForm c={c} />
         <p class="text-sm text-ink-3">여기서 제거해도 학교의 토큰과 현재 학습 세션은 유지됩니다. 토큰 자체를 폐기하려면 Canvas 설정에서 삭제하세요.</p>
-      </PanelBody></Panel>
-      <Panel><PanelBody>
-        <h3>계정 삭제</h3>
-        <p class="text-sm text-ink-3">저장된 학교 로그인 세션과 동기화한 과목·할 일, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다.</p>
+      </Section>
+      <NotificationsSection />
+      <Section id="settings-delete" title="계정 삭제" note="저장된 학교 로그인 세션과 동기화한 과목·할 일, 재생 기록, 알림 설정을 모두 지웁니다. 되돌릴 수 없습니다.">
         <DeleteAccount />
-      </PanelBody></Panel>
+      </Section>
     </>
   );
 }

@@ -2,6 +2,7 @@
  * Tailwind 유틸리티는 이 파일보다 뒤에 오므로 class="empty py-4"처럼 덧붙이면 유틸리티가 이긴다.
  * - empty: 뚱이 사진이 붙는 빈 화면(class="card empty")
  * - skeleton-list: 불러오는 중 줄(daisyUI skeleton)을 담는 목록
+ * - section-head: 제목 있는 카드(Section)의 머리
  * 버튼·카드·안내·입력·탭·대화상자·토스트는 daisyUI 클래스를 쓰고, 뚱이 모양은 daisy.css가 맞춘다.
  */
 
@@ -18,3 +19,7 @@
 
 /* ---------- 불러오는 중 ---------- */
 .skeleton-list { @apply grid gap-2.5 p-4; }
+
+/* ---------- 묶음 제목(ui/layout.tsx의 Section) ---------- */
+/* 카드 안쪽 여백(--card-p)을 card-body와 같이 쓴다. 본문은 제목 아래 12px에서 시작한다. */
+.section-head { @apply grid gap-1; padding: var(--card-p) var(--card-p) 12px; }

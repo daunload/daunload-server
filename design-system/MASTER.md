@@ -4,6 +4,29 @@
 
 설계 배경: `docs/superpowers/specs/2026-11-05-web-design-system-design.md`
 
+## 0. 화면 틀 (모든 화면이 같다)
+
+메뉴는 네 개다: `학습 현황`(홈), `강의 재생`, `내려받기·텍스트 변환`, `설정`(관리자는 `사용자 관리`가 더 있다). 화면은 모두 같은 순서로 쌓는다.
+
+```
+ViewHead   제목 상자(h1) + 한 줄 부제(선택) + 오른쪽 동작(선택)     ui/layout.tsx
+Section    제목(h2) + 한 줄 설명(선택) + 본문을 담은 흰 카드, 필요한 만큼   ui/layout.tsx
+```
+
+- **폭과 정렬:** 본문은 모든 화면에서 같은 폭(최대 920px)으로 왼쪽에 붙인다. 화면마다 폭이나 가운데 정렬을 따로 두지 않는다. 예외는 표가 넓은 관리자 화면(`.admin-workspace`, 1200px) 하나다.
+- **제목:** 화면 제목은 `ViewHead` 하나뿐이다. 홈도 같은 상자를 쓰고 날짜와 요약은 부제에 쓴다.
+- **묶음:** 화면 안의 묶음은 `Section`(`id`, `title`, `note`, `actions`, `flush`)으로 그린다. 제목·설명·여백을 손으로 만들지 않는다(`<h2 class="card-title px-5 …">` 금지). 목록이 카드 끝까지 닿으면 `flush`를 쓴다.
+- **안내·범례는 그 묶음 안에:** 묶음에 딸린 설명, 학칙 경고, 범례를 카드 사이에 떠 있는 별도 상자나 카드 밖 글로 두지 않는다. 설명은 `note`, 범례는 본문 끝에 둔다. 화면 전체에 걸친 안내(개인정보 변경, 다시 로그인)만 `ViewHead` 위 `.alert.alert-outline`이다.
+- **빈 상태:** 화면 전체가 빌 때만 뚱이 사진이 붙는 `Empty`를 쓴다. 묶음 하나가 비었으면 그 `Section` 안에 한 줄로 쓴다.
+- **화면을 늘리지 않는다:** 설정 성격의 기능은 `설정`의 묶음으로, 강의 재생에 관한 설정(자동 수강 과목)은 `강의 재생`의 묶음으로 넣는다. 새 메뉴는 기존 화면 어디에도 속하지 않을 때만 만든다. 합친 화면의 예전 주소는 `core.ts`의 `VIEW_ALIASES`로 새 화면에 보낸다(`#courses` → `#playback`, `#notifications`·`#account` → `#settings`).
+
+| 화면 | 묶음(Section) 순서 |
+|---|---|
+| 학습 현황 `#dashboard` | `재생할 강의 N개`(모두 재생 버튼 → 과목별로 접은 강의 목록, 펼치면 강의마다 재생 버튼) → `직접 낼 과제·퀴즈 N개`(6-2) |
+| 강의 재생 `#playback` | 지금 재생(또는 `골라서 재생` → `재생 계획`) → `자동 수강 과목` → `지난 재생` |
+| 내려받기·텍스트 변환 `#videos` | 탭(영상·수업자료) → 목록 |
+| 설정 `#settings` | `LMS 연결` → `개인 액세스 토큰` → `알림 받을 곳` → `계정 삭제` |
+
 ## 1. 토큰 (`app/web/src/styles/tokens.css`의 `:root`, Tailwind 테마는 `app.css`)
 
 | 토큰 | 값 | 용도 |
@@ -124,12 +147,12 @@ button.innerHTML = `${icon("external")}LMS에서 제출`;
 
 ## 6-2. 홈 (`app/web/src/screens/home.tsx`)
 
-들어오자마자 **재생할 강의와 낼 과제를 전부** 한 카드에서 보고, **버튼 한 번**으로 끝낸다. 순서는 `제목 → 주요 버튼 → 목록`이고 탭, 요약 카드, 일정표는 두지 않는다. 강의가 많아도 주요 버튼은 스크롤 없이 보여야 한다.
+들어오자마자 **무엇을 재생해야 하는지와 무엇을 내야 하는지**를 보고, **버튼 한 번**으로 끝낸다. 순서는 `제목(ViewHead, 부제는 날짜 · 요약) → 재생할 강의(Section) → 직접 낼 과제·퀴즈(Section)`이고 탭, 요약 카드, 일정표, 뚱이 사진은 두지 않는다.
 
-- **목록:** 재생할 수 있는 강의 전부(`scope=all` 미리보기)와 아직 낼 수 있는 과제·퀴즈 전부(`/week`의 `assignments` + `later_assignments` + `late_assignments`)를 마감순으로 둔다. 마감이 지났지만 지각 제출이 열린 과제는 맨 앞에 `지각 제출 ○○까지`로 둔다.
-- **주요 버튼 하나:** 재생 중이면 진행 요약, 강의가 있으면 `강의 N개 모두 재생`, 과제만 있으면 마감이 가장 빠른 과제의 `LMS에서 제출`.
+- **재생할 강의 카드:** 재생할 수 있는 강의 전부(`scope=all` 미리보기)를 **과목별 한 줄**(`과목 / 강의 N개 · 분량 / 가장 빠른 마감 / 재생 상태`)로 접어 `<details>`에 둔다. 과목 순서는 실제 재생 순서(마감 빠른 순)다. 펼치면 그 과목의 강의가 재생 순서대로 `제목 / 주차 · 길이 / 마감`과 그 강의만 재생하는 작은 `재생` 버튼(일반 버튼)으로 보인다. 펼침 상태는 5초 폴링으로 다시 그려도 남는다. 카드 맨 위(목록 앞)에 `강의 N개 모두 재생`을 둬서 강의가 많아도 버튼이 스크롤 없이 보인다. 재생 중이면 버튼 자리에 진행 요약과 `재생 현황 보기`, 줄마다 `듣는 중 %`·`완료` 상태가 붙는다.
+- **직접 낼 과제·퀴즈 카드:** 아직 낼 수 있는 과제·퀴즈 전부(`/week`의 `assignments` + `later_assignments` + `late_assignments`)를 마감순으로, 줄마다 `LMS에서 제출`. 지각 제출이 열린 과제는 맨 앞에 `지각 제출 ○○까지`로 둔다. 강의가 없으면 가장 급한 과제의 `LMS에서 제출`이 이 카드 맨 위의 주요 버튼이 된다.
+- **주요 버튼 하나:** 강의가 있으면 `강의 N개 모두 재생`, 없으면 가장 급한 과제 제출. 둘이 동시에 분홍이 되지 않는다.
 - **제목은 사실대로:** "이번 주 할 일을 모두 끝냈어요. 누워도 됨"은 재생할 강의도 낼 과제도 없을 때만 쓴다. 남은 게 있으면 `할 일이 N개 남았어요`, 강의 목록을 확인하지 못했으면 그렇게 말한다.
-- **묶기:** 같은 과목의 강의가 2개 이상이면 `과목 · 강의 N개 · 분량 · 가장 빠른 마감` 한 줄로 묶고 `<details>`로 접는다. 과제·퀴즈는 제출 버튼이 있어 한 줄씩 둔다. 펼침 상태는 5초 폴링으로 다시 그려도 유지한다.
 - **없앤 화면:** 할 일, 미제출 과제, 캘린더 화면과 위쪽 요약 카드·7일 일정표는 홈과 같은 데이터를 다시 보여 줄 뿐이라 없앴다. 공지 화면과 새 공지 알림도 없앴다(학교 LMS에서 확인). 예전 주소(`#todos`, `#announcements` 등)는 홈(`#dashboard`)으로 보낸다. 같은 데이터를 보여 주는 화면을 다시 만들지 않는다.
 
 ## 7. 피드백 규칙 (`app/web/src/ui.ts`(컴포넌트는 `ui/`))
@@ -174,8 +197,8 @@ app/web/src/core.ts       state, store, api, 날짜·시간 형식, esc. 다른 
 app/web/src/types.ts      서버 API 응답 타입(app/api/schemas.py와 맞춘다)
 app/web/src/ui.ts, ui/    아이콘·토스트·확인 창(Preact)과 작은 공통 도구
 app/web/src/extension.js  확장 프로그램 창구 ext.request. 다른 모듈을 import하지 않는다
-app/web/src/screens/      Preact 화면: home, playback, videos, transcript, courses, notifications, account, mount(#view에 붙이기)
-app/web/src/ui/layout.tsx 화면 뼈대(ViewHead, Panel, PanelBody, Empty, Warning), ui/pending.tsx(처리 중 버튼)
+app/web/src/screens/      Preact 화면: home, playback(+ courses: 자동 수강 과목 묶음), videos, transcript, settings(+ notifications: 알림 받을 곳 묶음), mount(#view에 붙이기)
+app/web/src/ui/layout.tsx 화면 뼈대(ViewHead, Section, Panel, PanelBody, Empty, Warning), ui/pending.tsx(처리 중 버튼)
 app/web/src/tasks.tsx     하단 진행 패널
 app/web/src/app.ts        로그인·부팅·동기화·화면 전환(마크업은 index.html의 정적 HTML)
 app/web/src/screens/admin/ 관리자 화면(관리자만 import()로 받는다): index(머리·탭), overview, users, detail, feeds, shared
@@ -184,7 +207,7 @@ app/web/src/styles/       app.css(진입점·Tailwind 테마), tokens.css(토큰
 ```
 
 - **import 규칙:** 전역 변수를 쓰지 않는다. 필요한 이름은 import한다. `core.js`와 `extension.js`는 아무것도 import하지 않는다. 최상위에서 바로 실행되는 코드는 `core`·`ui`처럼 먼저 평가되는 모듈의 값만 쓴다(순환 import에서 초기화 전 값을 읽으면 TDZ 오류가 난다). 화면 모듈끼리의 호출은 함수 안에서만 한다.
-- **화면 추가:** `screens/이름.tsx`에 `viewX()`를 두고 `mountScreen("이름", <X />)`로 그린다. 다시 그리기는 같은 함수를 다시 부르면 된다(같은 컨테이너에 diff로 그려 포커스·펼침이 남는다). `app.ts`의 `renderView()` 표에 넣는다.
+- **화면 추가:** 먼저 0장대로 기존 화면의 묶음으로 넣을 수 없는지 본다. 새 화면이면 `screens/이름.tsx`에 `viewX()`를 두고 `mountScreen("이름", <X />)`로 그린다. 다시 그리기는 같은 함수를 다시 부르면 된다(같은 컨테이너에 diff로 그려 포커스·펼침이 남는다). `app.ts`의 `renderView()` 표에 넣는다.
 - **정적 UI는 HTML에:** 첫 화면(시작·로그인·승인 대기)과 앱 뼈대(상단 바·메뉴)는 `index.html`의 정적 HTML이다. JS가 오기 전에 그려지므로 Preact로 옮기지 않는다.
 - **새 화면·컴포넌트:** Preact(TSX) + Tailwind 유틸리티로 만든다. 색·글자 크기·반경·간격은 토큰 이름만 쓴다(`bg-pink`, `text-ink-2`, `text-sm`, `rounded-card`, `min-h-touch`). Tailwind 기본 색 팔레트는 꺼 두었다. 기존 화면을 옮기면 그 화면의 `legacy.css` 규칙을 지운다.
 - **공통 컴포넌트(daisyUI 5):** 정적 HTML·HTML 문자열·TSX가 같이 쓴다. 테마(`ttungi`)는 `app.css`의 `@plugin "daisyui/theme"`, 뚱이 모양(먹선, 분홍 주요 버튼 그림자, 44px 터치 영역, 16px 본문)은 `daisy.css`가 맞춘다.
@@ -206,6 +229,8 @@ app/web/src/styles/       app.css(진입점·Tailwind 테마), tokens.css(토큰
 - **브라우저 테스트:** 빌드 결과(`app/web-dist`)를 쓴다. 먼저 `npm run build`를 돌린다.
 
 ## 10. 완료 체크
+
+- [ ] 새 화면·묶음이 0장의 틀(`ViewHead` → `Section`)을 따르고, 손으로 만든 카드 제목이나 카드 밖 안내 글이 없다.
 
 - [ ] 375, 768, 1024, 1440px에서 가로 스크롤이 없고 진행 패널이 내용을 가리지 않는다.
 - [ ] 휴대폰 크기에서 모든 버튼의 터치 영역이 44px 이상이다.

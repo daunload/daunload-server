@@ -25,8 +25,14 @@ export const store = {
 };
 
 export const PRIVACY_NOTICE_KEY = "privacy-notice-2026-11-access";
-export type View = "dashboard" | "courses" | "playback" | "videos" | "notifications" | "account" | "admin";
-export const VIEW_NAMES: Record<View, string> = { dashboard: "학습 현황", courses: "과목", playback: "강의 재생", videos: "내려받기·텍스트 변환", notifications: "알림", account: "계정", admin: "사용자 관리" };
+export type View = "dashboard" | "playback" | "videos" | "settings" | "admin";
+export const VIEW_NAMES: Record<View, string> = { dashboard: "학습 현황", playback: "강의 재생", videos: "내려받기·텍스트 변환", settings: "설정", admin: "사용자 관리" };
+/** 합친 화면의 예전 주소. 과목은 강의 재생, 알림·계정은 설정의 한 묶음이 됐다. 나머지 없어진 주소(#todos 등)는 홈으로 간다. */
+const VIEW_ALIASES: Record<string, View> = { courses: "playback", notifications: "settings", account: "settings" };
+export function toView(name: string): View {
+  if (Object.hasOwn(VIEW_NAMES, name)) return name as View;
+  return VIEW_ALIASES[name] ?? "dashboard";
+}
 /** 주소의 해시를 화면 이름과 하위 경로로 나눈다. `#admin/users/2020%201234` → { view: "admin", path: ["users", "2020 1234"] } */
 export function parseHash(hash: string | null | undefined): { view: string; path: string[] } {
   const parts = String(hash || "").replace(/^#/, "").split("/").filter(Boolean).map((part) => {
@@ -71,7 +77,7 @@ export interface State {
 export const state: State = {
   token: store.get("token"),
   dashboardPlan: null, dashboardError: null, dashboardLoading: false, playbackStarting: false,
-  view: Object.hasOwn(VIEW_NAMES, initialView.view) ? initialView.view as View : "dashboard",
+  view: toView(initialView.view),
   adminPath: initialView.view === "admin" && initialView.path.length ? initialView.path : ["overview"],
   me: null, cred: null, todos: [], courses: [],
   batches: [], active: null, plan: null,

@@ -99,10 +99,8 @@
         <button data-view="dashboard" class="on"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>학습 현황</button>
         <button data-view="playback"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4Z"/></svg>강의 재생</button>
         <button data-view="videos"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M12 7v10m-4-4 4 4 4-4"/></svg>내려받기·텍스트 변환</button>
-        <button data-view="courses"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 6c-3-2-7-2-10-1v15c3-1 7-1 10 1 3-2 7-2 10-1V5c-3-1-7-1-10 1Zm0 0v15"/></svg>과목</button>
-        <p class="nav-label settings-label">설정</p>
-        <button data-view="notifications"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>알림</button>
-        <button data-view="account"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg>계정</button>
+        <p class="nav-label settings-label">기타</p>
+        <button data-view="settings"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>설정</button>
         <button data-view="admin" id="admin-menu" hidden><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3 3 7v5c0 5 9 9 9 9s9-4 9-9V7Z"/><path d="m8 12 3 3 5-6"/></svg>사용자 관리</button>
         <a class="privacy-link" href="https://lms.ssu.ac.kr" target="_blank" rel="noopener" aria-label="학교 LMS (새 탭)"><svg class="icon" data-icon="external" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>학교 LMS</a>
         <a class="privacy-link" href="/privacy.html" target="_blank" rel="noopener" aria-label="개인정보처리방침 (새 탭)"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>개인정보처리방침</a>
@@ -112,6 +110,10 @@
         <div class="alert alert-outline privacy-notice" id="privacy-notice" role="note" hidden>
           <p>개인정보처리방침이 바뀌었어요. 관리자가 승인한 사용자만 서비스를 쓸 수 있고, 권한 요청과 결정 기록을 보관해요.</p>
           <div class="privacy-notice-actions"><a class="btn btn-sm" href="/privacy.html" target="_blank" rel="noopener">자세히 보기</a><button class="btn btn-sm" id="privacy-notice-close" type="button" aria-label="개인정보처리방침 안내 닫기">닫기</button></div>
+        </div>
+        <div class="alert alert-outline privacy-notice" id="relogin-notice" role="status" hidden>
+          <p>자동 수강이 끊기지 않으려면 한 번 더 로그인해 주세요. 다시 로그인하면 학습 연결을 자동으로 복구하는 토큰이 발급돼요. 토큰이 없으면 몇 시간 뒤 학교 로그인이 만료돼 동기화와 자동 수강이 멈춰요.</p>
+          <div class="privacy-notice-actions"><button class="btn btn-sm" id="relogin-notice-login" type="button">다시 로그인</button><button class="btn btn-sm" id="relogin-notice-close" type="button" aria-label="다시 로그인 안내 닫기">닫기</button></div>
         </div>
         <main class="view" id="view" tabindex="-1"></main>
       </div>

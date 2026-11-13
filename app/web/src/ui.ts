@@ -43,9 +43,10 @@ export function confirmPlayback(plan: Plan, scopeLabel: string): Promise<boolean
   const risky = plan.items.filter((i) => i.at_risk).length;
   const end = plan.expected_end ? ` · ${fmtTime(new Date(plan.expected_end))}쯤 끝나요` : "";
   return confirmDialog({
-    title: `${scopeLabel} 강의 ${plan.items.length}개를 순서대로 재생할까요?`,
+    title: plan.items.length === 1 && scopeLabel === "이" ? `'${plan.items[0].title}' 강의를 재생할까요?`
+      : `${scopeLabel} 강의 ${plan.items.length}개를 순서대로 재생할까요?`,
     body: [`1배속 · 약 ${fmtDuration(plan.total_seconds)}${end}`],
     warnings: [PLAYBACK_WARNING, ...(risky ? [`마감 전에 끝나지 않는 강의가 ${risky}개 있어요`] : [])],
-    confirmLabel: `${plan.items.length}개 재생 시작`,
+    confirmLabel: plan.items.length === 1 ? "재생 시작" : `${plan.items.length}개 재생 시작`,
   });
 }

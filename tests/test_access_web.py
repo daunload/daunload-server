@@ -130,12 +130,12 @@ async def test_request_429_shows_rejected_state(stage):
 
 async def test_access_required_mid_session_switches_screen(stage):
     stage.me = me_of("approved")
-    await stage.goto("http://dashboard.test/#courses")
+    await stage.goto("http://dashboard.test/#playback")
     await expect(stage.locator("#app")).to_be_visible()
     # 관리자가 권한을 회수했다: /me는 열려 있고 나머지는 403
     stage.me = me_of("revoked")
     stage.handlers[("GET", "/notifications/channels")] = (403, {"detail": {"code": "ACCESS_REQUIRED", "message": "관리자 승인이 필요합니다."}})
-    await stage.get_by_role("button", name="알림", exact=True).click()
+    await stage.get_by_role("button", name="설정", exact=True).click()
     await expect(stage.get_by_role("heading", name="권한이 회수됐어요")).to_be_visible()
     await expect(stage.locator("#app")).to_be_hidden()
     await expect(stage.locator("#toast")).not_to_contain_text("관리자 승인이 필요합니다")
@@ -144,14 +144,14 @@ async def test_access_required_mid_session_switches_screen(stage):
 @pytest.mark.parametrize("failure", ["network", "5xx"])
 async def test_me_failure_during_switch_still_shows_access_screen(stage, failure):
     stage.me = me_of("approved")
-    await stage.goto("http://dashboard.test/#courses")
+    await stage.goto("http://dashboard.test/#playback")
     await expect(stage.locator("#app")).to_be_visible()
     stage.handlers[("GET", "/notifications/channels")] = (403, {"detail": {"code": "ACCESS_REQUIRED", "message": "관리자 승인이 필요합니다."}})
     if failure == "5xx":
         stage.handlers[("GET", "/me")] = (503, {"detail": "잠시 후 다시 시도하세요."})
     else:
         await stage.route("**/me", lambda r: r.abort())
-    await stage.get_by_role("button", name="알림", exact=True).click()
+    await stage.get_by_role("button", name="설정", exact=True).click()
     await expect(stage.get_by_role("heading", name="권한이 회수됐어요")).to_be_visible()
     await expect(stage.get_by_role("button", name="권한 요청 보내기")).to_be_visible()
     await expect(stage.get_by_role("button", name="상태 다시 확인")).to_be_visible()
@@ -159,7 +159,7 @@ async def test_me_failure_during_switch_still_shows_access_screen(stage, failure
 
 async def test_revoked_user_button_in_open_tab_runs_nothing(stage):
     stage.me = me_of("approved")
-    await stage.goto("http://dashboard.test/#courses")
+    await stage.goto("http://dashboard.test/#playback")
     await expect(stage.locator("#app")).to_be_visible()
     stage.me = me_of("revoked")
     stage.handlers[("POST", "/sync")] = (403, {"detail": {"code": "ACCESS_REQUIRED", "message": "관리자 승인이 필요합니다."}})

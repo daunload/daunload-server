@@ -5,14 +5,15 @@
  * 폴링(startPolling/stopPolling/finishActive)과 재생 중지(cancelActivePlayback)는 홈·진행 패널도 쓴다.
  */
 import { render } from "preact";
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { needCred } from "../app";
-import { BATCH_STATUS, GAP_SECONDS, JOB_STATUS, api, dueText, dueTime, fmtDate, fmtDuration, state } from "../core";
+import { ApiError, BATCH_STATUS, GAP_SECONDS, JOB_STATUS, api, dueText, dueTime, fmtDate, fmtDuration, state } from "../core";
 import { renderTaskPanel } from "../tasks";
 import type { Batch, BatchDetail, Job, Plan } from "../types";
 import { PLAYBACK_WARNING, confirmDialog, toast } from "../ui";
-import { Empty, Panel, PanelBody, ViewHead, Warning } from "../ui/layout";
+import { Empty, Panel, PanelBody, Section, ViewHead, Warning } from "../ui/layout";
 import { drawWeek, loadDashboardPlayback, renderWeek } from "./home";
+import { AutoPlayCourses } from "./courses";
 import { mountScreen } from "./mount";
 
 export function viewPlayback(): void {
@@ -25,6 +26,7 @@ function PlaybackView() {
     <>
       <ViewHead title="강의 재생" />
       {state.active ? <ActiveBatch b={state.active} /> : <PlanSection />}
+      <AutoPlayCourses />
       <History />
     </>
   );
@@ -88,7 +90,7 @@ function PlanSection() {
     const module = saved.module && modules.some(([id]) => String(id) === saved.module) ? saved.module : firstModule(modules);
     return { scope: saved.scope ?? "module", course, module };
   });
-  if (!videos.length) return <Empty><p>기간 안에 남은 영상이 없습니다.</p></Empty>;
+  if (!videos.length) return <Section id="plan-title" title="골라서 재생"><p class="text-sm text-ink-3">기간 안에 남은 영상이 없습니다.</p></Section>;
   const modules = modulesOf(form.course);
   const set = (patch: Partial<PlanForm>) => setForm((f) => {
     const next = { ...f, ...patch };
@@ -111,8 +113,8 @@ function PlanSection() {
 
   return (
     <>
-      <Panel>
-        <form class="card-body" id="plan-form" onSubmit={submit}>
+      <Section id="plan-title" title="골라서 재생" note="1배속으로 처음부터 끝까지 재생하고, 영상마다 LMS에서 완료로 바뀌었는지 확인합니다.">
+        <form class="grid gap-3" id="plan-form" onSubmit={submit}>
           <div class="flex flex-wrap items-center gap-2">
             <label>범위<select class="select" name="scope" value={form.scope} onChange={(e) => set({ scope: e.currentTarget.value })}>
               <option value="module">주차 하나</option><option value="course">과목 하나</option><option value="all">모든 과목</option></select></label>
@@ -121,20 +123,19 @@ function PlanSection() {
             <label>주차<select class="select" name="module" value={form.module} disabled={form.scope !== "module"} onChange={(e) => set({ module: e.currentTarget.value })}>
               {modules.map(([id, n]) => <option key={String(id)} value={String(id)}>{n || `모듈 ${id}`}</option>)}</select></label>
           </div>
-          <div class="flex flex-wrap items-center gap-2"><button class="btn">재생 계획 보기</button>
-            <span class="text-sm text-ink-3">1배속으로 처음부터 끝까지 재생하고, 영상마다 LMS에서 완료로 바뀌었는지 확인합니다.</span></div>
+          <div><button class="btn">재생 계획 보기</button></div>
         </form>
-      </Panel>
+      </Section>
       {state.plan && <PlanView plan={state.plan} />}
     </>
   );
 }
 
 function PlanView({ plan }: { plan: Plan }) {
-  if (!plan.items.length) return <Empty><p>이 범위에는 재생할 영상이 없습니다.</p></Empty>;
+  if (!plan.items.length) return <Section id="plan-view-title" title="재생 계획"><p class="text-sm text-ink-3">이 범위에는 재생할 영상이 없습니다.</p></Section>;
   return (
-    <Panel>
-      <PanelBody>
+    <Section id="plan-view-title" title="재생 계획" flush>
+      <PanelBody class="pt-0">
         <div class="summary-line">
           <span><b>{plan.items.length}</b>개 영상</span><span><b>{fmtDuration(plan.total_seconds)}</b>예상 소요</span>
           <span><b>{plan.expected_end ? fmtDate(new Date(plan.expected_end)) : ""}</b>예상 종료</span>
@@ -160,7 +161,7 @@ function PlanView({ plan }: { plan: Plan }) {
         <button class="btn btn-primary" id="start-batch" onClick={startBatch}>{plan.items.length}개 재생 시작</button>
         <button class="btn btn-ghost" id="clear-plan" onClick={() => { state.plan = null; viewPlayback(); }}>계획 닫기</button>
       </div>
-    </Panel>
+    </Section>
   );
 }
 
@@ -261,13 +262,14 @@ function PlaybackHero({ b, jobs, lateIds }: { b: BatchDetail; jobs: Job[]; lateI
 }
 
 /** 강의가 2개 이상일 때만 목록을 둔다. 진행률은 위에서 보여 주므로 여기서는 순서와 상태만 쓴다. */
-function PlaybackQueue({ b, jobs, lateIds }: { b: BatchDetail; jobs: Job[]; lateIds: Set<number> }) {
+function PlaybackQueue({ b, jobs: all, lateIds }: { b: BatchDetail; jobs: Job[]; lateIds: Set<number> }) {
+  // 중지를 요청했으면 이미 완료된 강의는 목록에서 뺀다(남은 강의만 보인다).
+  const jobs = b.cancel_requested ? all.filter((j) => !COMPLETE.includes(j.status)) : all;
   if (b.total < 2 || !jobs.length) return null;
   const manyCourses = new Set(jobs.map((job) => job.lms_course_id)).size > 1;
   const nextId = b.cancel_requested ? null : jobs.find((job) => job.status === "queued")?.module_item_id;
   return (
-    <Panel as="section" class="playback-queue" aria-labelledby="playback-queue-title">
-      <h2 class="card-title px-5 pt-[18px] pb-1 max-phone:px-4" id="playback-queue-title">재생 목록 {b.total}개</h2>
+    <Section id="playback-queue-title" title={`재생 목록 ${b.total}개`} class="playback-queue" flush>
       <ol class="steps">
         {jobs.map((j) => {
           const late = lateIds.has(j.module_item_id);
@@ -283,7 +285,7 @@ function PlaybackQueue({ b, jobs, lateIds }: { b: BatchDetail; jobs: Job[]; late
           );
         })}
       </ol>
-    </Panel>
+    </Section>
   );
 }
 
@@ -291,18 +293,46 @@ function PlaybackQueue({ b, jobs, lateIds }: { b: BatchDetail; jobs: Job[]; late
 
 const SCOPE_NAME: Record<string, string> = { item: "영상 하나", module: "주차", course: "과목", all: "모든 과목", auto: "자동 수강" };
 
+const COMPLETE = ["done", "skipped"];
+
+/** 중지한 묶음의 영상 목록(끝난 묶음이라 바뀌지 않으므로 한 번만 받는다). */
+const stoppedJobs = new Map<number, Job[] | "loading" | "error">();
+
+/** 아직 LMS에서 완료되지 않은 강의인지. 재생이 끝나 완료된 강의는 /todos에서 빠진다. */
+const stillPending = (j: Job) => !COMPLETE.includes(j.status)
+  && state.todos.some((t) => t.kind === "video" && t.lms_item_id === j.module_item_id && t.lms_course_id === j.lms_course_id);
+
 function History() {
   const past = state.batches.filter((b) => !["queued", "running"].includes(b.status));
-  if (!past.length) return null;
+  const stopped = past.filter((b) => b.status === "cancelled").map((b) => b.id);
+  useEffect(() => {
+    for (const id of stopped) {
+      if (stoppedJobs.has(id)) continue;
+      stoppedJobs.set(id, "loading");
+      api<BatchDetail>(`/playback/batches/${id}`)
+        .then((d) => { stoppedJobs.set(id, d.jobs || []); })
+        .catch(() => { stoppedJobs.set(id, "error"); })
+        .finally(() => { if (state.view === "playback") viewPlayback(); });
+    }
+  }, [stopped.join(",")]);
+  // 중지한 묶음: 완료된 강의는 숨기고 남은 강의마다 재생 요청 버튼을 둔다. 같은 강의는 가장 최근 묶음에만 보인다.
+  const seen = new Set<string>();
+  const rows = past.map((b) => {
+    const jobs = b.status === "cancelled" ? stoppedJobs.get(b.id) : undefined;
+    if (!Array.isArray(jobs)) return { b, left: null };
+    const left = jobs.filter((j) => stillPending(j) && !seen.has(`${j.lms_course_id}:${j.module_item_id}`));
+    left.forEach((j) => seen.add(`${j.lms_course_id}:${j.module_item_id}`));
+    return { b, left };
+  }).filter(({ left }) => left === null || left.length > 0);
+  if (!rows.length) return null;
   return (
-    <Panel as="section" class="playback-history" aria-labelledby="playback-history-title">
-      <h2 class="card-title px-5 pt-[18px] pb-1 max-phone:px-4" id="playback-history-title">지난 재생</h2>
+    <Section id="playback-history-title" title="지난 재생" class="playback-history" flush>
       <ul class="list">
-        {past.map((b) => {
+        {rows.map(({ b, left }) => {
           const failed = !!b.failed_count || b.status === "failed" || b.status === "partial";
           const counts = ([["완료", b.done_count], ["실패", b.failed_count], ["이미 완료", b.skipped_count]] as const).filter(([, n]) => n);
           return (
-            <li key={b.id}>
+            <li key={b.id} data-batch-id={b.id}>
               <span class="history-head"><span class="title">{SCOPE_NAME[b.scope] || b.scope} {b.total}개</span>
                 <span class={`status ${b.status}`}>{BATCH_STATUS[b.status] || b.status}</span></span>
               <span class="meta flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
@@ -310,13 +340,54 @@ function History() {
                 <span>{fmtDate(new Date(b.created_at))}</span>
                 {!failed && b.error && <span>{b.error}</span>}
               </span>
+              {left && <StoppedVideos jobs={left} />}
               {failed && <FailureDetails batchId={b.id} />}
             </li>
           );
         })}
       </ul>
-    </Panel>
+    </Section>
   );
+}
+
+/** 중지해서 아직 완료되지 않은 강의. 재생이 진행 중이면 끝난 뒤에 요청할 수 있다. */
+function StoppedVideos({ jobs }: { jobs: Job[] }) {
+  const busy = !!state.active;
+  return (
+    <div class="stopped-videos grid gap-1.5 pt-1">
+      <p class="text-sm text-ink-3">{busy ? "지금 재생이 끝나면 다시 요청할 수 있어요" : `완료되지 않은 강의 ${jobs.length}개`}</p>
+      <ul class="m-0 grid list-none gap-1.5 p-0">
+        {jobs.map((j) => (
+          <li key={j.module_item_id} class="flex flex-wrap items-center gap-2">
+            <span class="min-w-0 flex-1"><span class="title wrap-anywhere">{j.title}</span>
+              <span class="meta block text-sm text-ink-3">{[courseName(j), fmtDuration(j.duration), dueText(j.deadline)].filter(Boolean).join(" · ")}</span></span>
+            <button class="btn btn-sm" disabled={busy} aria-label={`${j.title} 재생 요청`} onClick={() => replayVideo(j)}>재생 요청</button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+let replaying = false;
+
+/** 영상 한 개를 다시 재생 대기열에 넣는다(항목 1개짜리 묶음). */
+async function replayVideo(j: Job): Promise<void> {
+  if (replaying || state.active) return;
+  replaying = true;
+  try {
+    const batch = await api<Batch>(`/playback/items/${j.module_item_id}`, { method: "POST" });
+    state.active = await api<BatchDetail>(`/playback/batches/${batch.id}`);
+    state.batches = await api<Batch[]>("/playback/batches?limit=10");
+    toast(`${j.title} 재생을 요청했어요`);
+    startPolling();
+  } catch (err) {
+    toast((err as Error).message, true);
+    if ((err as ApiError).status === 404) state.todos = await api("/todos").catch(() => state.todos);  // 이미 완료됐으면 목록에서 빠진다
+  } finally {
+    replaying = false;
+    if (state.view === "playback") viewPlayback();
+  }
 }
 
 type FailureState = { kind: "idle" } | { kind: "loading" } | { kind: "loaded"; batch: BatchDetail } | { kind: "error"; message: string };

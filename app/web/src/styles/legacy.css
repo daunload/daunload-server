@@ -92,7 +92,6 @@
 /* 할 일 목록 */
 
 /* ---------- 첫 화면: 이번 주 할 일 (week.js) ---------- */
-.dashboard-workspace { max-width: 600px; margin-inline: auto; padding-top: 32px; }
 
 /* ---------- 캘린더 (calendar.js) ---------- */
 

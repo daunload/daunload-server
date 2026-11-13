@@ -53,7 +53,7 @@ async def test_double_open_shows_one_dialog(page):
 
 async def test_notification_channel_delete_confirms(page):
     page.data["/notifications/channels"] = [{"id": 5, "kind": "discord", "enabled": True, "created_at": page.now.isoformat()}]
-    await page.goto("http://dashboard.test/#notifications")
+    await page.goto("http://dashboard.test/#settings")
     await page.get_by_role("button", name="삭제", exact=True).click()
     dialog = page.locator("#confirm-dialog")
     await expect(dialog).to_contain_text("이 알림 채널을 삭제할까요?")
@@ -65,7 +65,7 @@ async def test_notification_channel_delete_confirms(page):
 
 
 async def test_account_delete_requires_student_id(page):
-    await page.goto("http://dashboard.test/#account")
+    await page.goto("http://dashboard.test/#settings")
     await page.get_by_role("button", name="계정 삭제", exact=True).click()
     dialog = page.locator("#confirm-dialog")
     confirm = dialog.get_by_role("button", name="계정 삭제")

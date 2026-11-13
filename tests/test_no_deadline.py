@@ -137,7 +137,8 @@ async def test_home_shows_no_deadline_last(dashboard):  # noqa: F811
             "module_item_id": 90, "title": "마감 없는 강의", "deadline": None}
     data["/playback/batches/preview"]["items"].append(item)
     await page.goto("http://dashboard.test/")
-    row = page.locator(".task").last
+    row = page.locator(".lectures .task-group").last  # 재생 순서(서버 계획)대로라 마감 없는 과목은 맨 뒤다
+    await row.locator("summary").click()
     await expect(row).to_contain_text("마감 없는 강의")
     await expect(row).to_contain_text("마감 없음")
     await expect(page.locator("#view")).not_to_contain_text("1970")

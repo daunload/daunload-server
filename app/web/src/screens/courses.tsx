@@ -1,16 +1,11 @@
-/* 과목 화면(#courses): 과목별 출석 칸, 남은 영상 수, 자동 수강 켜고 끄기. */
+/* 강의 재생 화면의 `자동 수강 과목` 묶음: 과목별 출석 칸, 남은 영상 수, 자동 수강 켜고 끄기.
+ * 예전 과목 화면(#courses)을 강의 재생 화면으로 옮겼다. 출석 칸(Attendance)은 관리자 상세도 쓴다. */
 import { useState } from "preact/hooks";
-import { needCred } from "../app";
 import { api, state } from "../core";
 import type { Course } from "../types";
 import { toast } from "../ui";
-import { Panel, ViewHead } from "../ui/layout";
-import { mountScreen } from "./mount";
-
-export function viewCourses(): void {
-  if (needCred()) return;
-  mountScreen("courses", <Courses />);
-}
+import { Section } from "../ui/layout";
+import { viewPlayback } from "./playback";
 
 const ATTEND_LABEL: Record<string, string> = { attendance: "출석", late: "지각", absent: "결석" };
 
@@ -45,7 +40,7 @@ function CourseRow({ c }: { c: Course }) {
       toast((err as Error).message, true);
     } finally {
       setPending(null);
-      if (state.view === "courses") viewCourses();
+      if (state.view === "playback") viewPlayback();
     }
   };
   return (
@@ -62,17 +57,14 @@ function CourseRow({ c }: { c: Course }) {
   );
 }
 
-function Courses() {
+export function AutoPlayCourses() {
   return (
-    <>
-      <ViewHead title="과목" />
-      <p class="alert alert-outline">자동 수강을 켜면 동기화할 때마다 새로 열린 영상을 순서대로 재생합니다. 직접 시청하지 않은 수강은 학칙상 문제가 될 수 있으니 확인 후 켜세요.</p>
-      <Panel>
-        {state.courses.length
-          ? state.courses.map((c) => <CourseRow key={c.lms_course_id} c={c} />)
-          : <div class="empty"><p>과목이 없습니다. ‘LMS 동기화’를 눌러 불러오세요.</p></div>}
-      </Panel>
-      <p class="text-sm text-ink-3">초록 출석, 노랑 지각, 빨강 결석, 회색 기록 없음</p>
-    </>
+    <Section id="auto-play-title" title="자동 수강 과목" flush
+      note="켜 두면 동기화할 때마다 새로 열린 영상을 순서대로 재생합니다. 직접 시청하지 않은 수강은 학칙상 문제가 될 수 있으니 확인 후 켜세요.">
+      {state.courses.length
+        ? state.courses.map((c) => <CourseRow key={c.lms_course_id} c={c} />)
+        : <p class="px-5 pb-5 text-sm text-ink-3 max-phone:px-4">과목이 없습니다. ‘LMS 동기화’를 눌러 불러오세요.</p>}
+      {state.courses.length > 0 && <p class="px-5 pt-2 pb-5 text-sm text-ink-3 max-phone:px-4">출석 칸: 초록 출석, 노랑 지각, 빨강 결석, 회색 기록 없음</p>}
+    </Section>
   );
 }

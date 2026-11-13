@@ -1,4 +1,4 @@
-import { $, type ApiError, PRIVACY_NOTICE_KEY, VIEW_NAMES, type View, api, esc, fmtDate, parseHash, setApiHandlers, state, store } from "./core";
+import { $, type ApiError, PRIVACY_NOTICE_KEY, VIEW_NAMES, type View, api, esc, fmtDate, parseHash, setApiHandlers, state, store, toView } from "./core";
 import type { Batch, BatchDetail, Course, Credentials, Me, Todo } from "./types";
 import { whenIdle } from "./assets";
 import { clearToasts, closeConfirmDialog, skeletonRows, toast } from "./ui";
@@ -9,9 +9,7 @@ import { showAccessScreen } from "./access";
 import { drawWeek, loadDashboardPlayback, renderWeek } from "./screens/home";
 import { startPolling, stopPolling, viewPlayback } from "./screens/playback";
 import { unmountScreen } from "./screens/mount";
-import { viewCourses } from "./screens/courses";
-import { viewNotifications } from "./screens/notifications";
-import { viewAccount } from "./screens/account";
+import { viewSettings } from "./screens/settings";
 import { viewVideos } from "./screens/videos";
 
 /* ---------------- 로그인 ---------------- */
@@ -110,8 +108,11 @@ $("#login-form").addEventListener("submit", async (e: SubmitEvent) => {
   }
 });
 
+let reloginNoticeClosed = false;  // 닫으면 이 탭에서만 숨긴다. 토큰이 생길 때까지 다음 접속에 다시 보인다.
 export function logout(): void {
   $("#admin-menu").hidden = true;
+  $("#relogin-notice").hidden = true;
+  reloginNoticeClosed = false;
   state.token = null;
   store.del("token");
   stopPolling();
@@ -198,8 +199,23 @@ $("#privacy-notice-close").addEventListener("click", () => {
 
 function renderAll() {
   renderSync();
+  renderReloginNotice();
   renderView();
 }
+
+/* ---------------- 상단: 다시 로그인 안내 ---------------- */
+
+/** 승인 전 로그인에서는 개인 토큰을 발급하지 않는다. 토큰 없이 SSO만 있으면 몇 시간 뒤 복구할 수 없으므로 다시 로그인을 권한다. */
+export function renderReloginNotice(): void {
+  const c = state.cred;
+  const tokenOk = !!c?.personal_token_registered && c.personal_token_status === "ok";
+  $("#relogin-notice").hidden = reloginNoticeClosed || !c || tokenOk;
+}
+$("#relogin-notice-login").addEventListener("click", () => serverLogout());
+$("#relogin-notice-close").addEventListener("click", () => {
+  reloginNoticeClosed = true;
+  $("#relogin-notice").hidden = true;
+});
 
 /* ---------------- 상단: 동기화 ---------------- */
 
@@ -253,12 +269,12 @@ export function viewHash(): string {
 /** target은 화면 이름이나 해시(`admin/users`). focus가 false면 포커스를 옮기지 않는다(관리자 탭 이동). */
 export function navigate(target: string, push = true, { focus = true } = {}): void {
   const { view, path } = parseHash(target);
-  state.view = Object.hasOwn(VIEW_NAMES, view) ? view as View : "dashboard";  // 없어진 화면(#todos 등)은 홈으로
+  state.view = toView(view);  // 합친 화면(#courses 등)은 새 화면으로, 없어진 화면(#todos 등)은 홈으로
   if (state.view === "admin") state.adminPath = path.length ? path : ["overview"];
   store.set("view", state.view);
   if (state.view === "videos") state.savedVideos = null;  // 동기화로 새로 저장된 주소 반영
   if (push && location.hash !== viewHash()) history.pushState(null, "", viewHash());
-  else if (!push && location.hash !== viewHash()) history.replaceState(null, "", viewHash());  // #admin → #admin/overview, 없어진 #todos → #dashboard
+  else if (!push && location.hash !== viewHash()) history.replaceState(null, "", viewHash());  // #admin → #admin/overview, #account → #settings, 없어진 #todos → #dashboard
   closeMenu();
   renderView();
   if (!focus) return;
@@ -285,7 +301,6 @@ $(".skip-link").addEventListener("click", (e: MouseEvent) => {
 $(".home-link").addEventListener("click", (e: MouseEvent) => { e.preventDefault(); navigate("dashboard"); });
 function renderView(): void {
   unmountScreen();  // 이전 Preact 화면을 정리한다(같은 화면을 다시 그릴 때도 처음부터 그린다)
-  $(".workspace").classList.toggle("dashboard-workspace", state.view === "dashboard");
   $(".workspace").classList.toggle("admin-workspace", state.view === "admin");
   $("#current-view").textContent = VIEW_NAMES[state.view] || "학습 현황";
   document.title = `${VIEW_NAMES[state.view] || "학습 현황"} · 아유 하기싫어`;
@@ -294,7 +309,7 @@ function renderView(): void {
     b.classList.toggle("on", selected);
     if (selected) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
   });
-  const views: Record<View, () => unknown> = { dashboard: viewDashboard, courses: viewCourses, playback: viewPlayback, videos: viewVideos, notifications: viewNotifications, account: viewAccount, admin: renderAdminView };
+  const views: Record<View, () => unknown> = { dashboard: viewDashboard, playback: viewPlayback, videos: viewVideos, settings: viewSettings, admin: renderAdminView };
   (views[state.view] || viewDashboard)();
 }
 
@@ -331,8 +346,8 @@ function viewDashboard(): void {
   renderWeek();
 }
 
-/* 옮긴 화면: 홈(screens/home.tsx), 강의 재생(screens/playback.tsx), 과목(screens/courses.tsx),
- * 알림(screens/notifications.tsx), 계정(screens/account.tsx), 내려받기·텍스트 변환(screens/videos.tsx). */
+/* 화면: 홈(screens/home.tsx), 강의 재생(screens/playback.tsx, 자동 수강 과목은 screens/courses.tsx),
+ * 내려받기·텍스트 변환(screens/videos.tsx), 설정(screens/settings.tsx, 알림 받을 곳은 screens/notifications.tsx). */
 
 /* ---------------- 시작 ---------------- */
 

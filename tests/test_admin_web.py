@@ -75,8 +75,8 @@ async def test_admin_tabs_routes_and_back(dashboard):  # noqa: F811
     await expect(tabs.get_by_role("link", name="현황")).to_have_attribute("aria-current", "page")
     await expect(page.locator("#view .admin-kpi")).to_have_count(4)
     await expect(page.locator(".workspace")).to_have_class("workspace admin-workspace")
-    await page.get_by_role("button", name="과목", exact=True).click()
-    await expect(page).to_have_url(BASE + "#courses")
+    await page.get_by_role("button", name="강의 재생", exact=True).click()
+    await expect(page).to_have_url(BASE + "#playback")
     await expect(page.locator(".workspace")).not_to_have_class("admin-workspace")
 
 
