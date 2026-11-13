@@ -388,18 +388,20 @@ async def test_queue_estimate_cache_reuses_until_ttl(env, monkeypatch):
 
     async def fake(db):
         calls.append(1)
-        return {len(calls): {}}
+        return playback.QueueSnapshot(running=False, jobs={len(calls): ()})
 
-    monkeypatch.setattr(playback, "queue_estimates", fake)
+    monkeypatch.setattr(playback, "load_queue", fake)
+    monkeypatch.setattr(playback, "simulate_queue", lambda snap, proposed=None: {k: proposed for k in snap.jobs})
     now = [0.0]
     cache = QueueEstimateCache(ttl=3, clock=lambda: now[0])
     first = await cache.get(None)
     now[0] = 2.9
     assert await cache.get(None) is first and len(calls) == 1
+    assert (await cache.snapshot(None)).jobs == {1: ()} and len(calls) == 1  # 미리보기도 같은 DB 값을 쓴다
     now[0] = 3.0
-    assert await cache.get(None) == {2: {}}
+    assert await cache.get(None) == {2: None}
     cache.invalidate()
-    assert await cache.get(None) == {3: {}}
+    assert await cache.get(None) == {3: None}
 
 
 async def test_new_batch_appears_in_queue_immediately_despite_cache(env, monkeypatch):
@@ -420,3 +422,27 @@ async def test_new_batch_appears_in_queue_immediately_despite_cache(env, monkeyp
     # 취소도 바로 반영된다
     cancelled = await api.delete(f"/playback/batches/{created.json()['id']}", headers=headers)
     assert cancelled.json()["status"] == "cancelled" and cancelled.json()["queue_position"] is None
+
+
+async def test_preview_reuses_cached_queue_snapshot(env, monkeypatch):
+    """홈 화면 미리보기는 대기열 전체를 DB에서 다시 읽지 않고 캐시한 값에 제안 묶음만 붙인다."""
+    api, _ = env
+    headers = await _signup(api)
+    await enqueue(await add_user("other"))
+    loads = []
+    real = playback.load_queue
+
+    async def counting(db):
+        loads.append(1)
+        return await real(db)
+
+    async def pending(*args, **kwargs):
+        return [video(1)]
+
+    monkeypatch.setattr(playback, "load_queue", counting)
+    monkeypatch.setattr(playback, "pending_videos_from_db", pending)
+    for _ in range(3):
+        plan = await api.get("/playback/batches/preview?scope=all", headers=headers)
+        assert plan.status_code == 200 and plan.json()["items"][0]["expected_start"]
+    assert (await api.get("/playback/batches?limit=10", headers=headers)).status_code == 200
+    assert len(loads) == 1

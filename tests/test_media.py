@@ -324,3 +324,19 @@ async def test_same_content_in_other_course_reuses_url(env):
     assert php.call_count == 2  # 예산이 0이어도 다른 분반의 주소를 받아 채운다
     saved = (await api.get("/saved-videos", headers=h)).json()
     assert len(saved) == 4 and all(v["saved"] for v in saved)
+
+
+@respx.mock
+async def test_video_links_reuse_listed_videos(env):
+    """묶음 다운로드: 목록을 본 뒤 영상 링크를 여러 개 만들어도 모듈 목록을 다시 받지 않는다."""
+    api, _ = env
+    h = await _with_course(api)
+    modules = next(r for r in respx.routes if "/modules" in repr(r.pattern))
+    respx.get(CONTENT_PHP).respond(200, text=f"<content><content_playing_info><media_uri>{CDN}/a.mp4</media_uri></content_playing_info></content>")
+    assert (await api.get("/courses/45446/videos", headers=h)).status_code == 200
+    for item in (11, 13):
+        assert (await api.post(f"/courses/45446/videos/{item}/direct-download", headers=h)).status_code == 200
+    assert modules.call_count == 1
+    # 목록에서 닫혀 있던 영상은 열렸는지 LMS에서 다시 확인한다.
+    assert (await api.post("/courses/45446/videos/21/direct-download", headers=h)).status_code == 409
+    assert modules.call_count == 2

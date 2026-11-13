@@ -15,6 +15,7 @@ from app.api.deps import Queue
 from app.api import routes_admin
 from app.config import get_settings
 from app.db.base import init_engine
+from app.lms.http_pool import close_shared_transports
 
 
 @asynccontextmanager
@@ -35,6 +36,7 @@ async def lifespan(app: FastAPI):
     finally:
         await redis.aclose()
         await engine.dispose()
+        await close_shared_transports()
 
 
 # 브라우저 Whisper: transformers.js·onnxruntime(cdn.jsdelivr.net, wasm 백엔드는 blob: 모듈로 불러온다),

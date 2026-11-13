@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import utcnow
 from app.config import get_settings
+from app.lms.http_pool import shared_transport
 from app.db.models import NotificationChannel, NotificationLog, TodoRow, User
 from app.security import decrypt
 
@@ -36,7 +37,7 @@ KIND_LABEL = {"video": "영상", "assignment": "과제", "quiz": "퀴즈"}
 async def send_to_channel(channel: NotificationChannel, text: str, http: httpx.AsyncClient | None = None) -> None:
     target = decrypt(channel.target_enc)
     own = http is None
-    http = http or httpx.AsyncClient(timeout=10)
+    http = http or httpx.AsyncClient(timeout=10, transport=shared_transport())
     try:
         if channel.kind == "discord":
             resp = await http.post(target, json={"content": text[:2000]})
@@ -127,6 +128,14 @@ async def notify_deadlines(db: AsyncSession, user_id: int, now: datetime | None 
         label = KIND_LABEL.get(row.kind, row.kind)
         text = f"⏰ [{row.course_name}] {label} 마감 {hours}시간 이내: {row.title} (마감 {row.deadline.astimezone():%m/%d %H:%M})"
         messages.append((text, f"deadline:{row.kind}:{row.lms_item_id}:{hours}"))
+    if not messages:
+        return 0
+    # 이미 보낸 알림은 미리 걸러 낸다. 크론이 10분마다 돌 때 항목마다 기록 삽입·롤백을 반복하지 않게 한다
+    # (동시에 보내는 경우는 notify_user의 유니크 제약이 그대로 막는다).
+    sent_keys = set((await db.scalars(select(NotificationLog.key).where(
+        NotificationLog.user_id == user_id, NotificationLog.key.in_([key for _, key in messages]),
+    ))).all())
+    messages = [(text, key) for text, key in messages if key not in sent_keys]
     sent = 0
     for text, key in messages:
         if await notify_user(db, user_id, text, key=key):

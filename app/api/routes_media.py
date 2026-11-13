@@ -24,6 +24,7 @@ from app.db.models import CourseRow, SavedVideo, SavedVideoItem
 from app.config import get_settings
 from app.lms import auth
 from app.lms.errors import InvalidCredentials, LmsError
+from app.lms.http_pool import shared_transport
 from app.lms.materials import CourseMaterial, check_file_host, commons_download_url, course_materials
 from app.lms.media import (
     COMMONS_HEADERS,
@@ -39,6 +40,7 @@ from app.security import DOWNLOAD_LINK_MINUTES, create_download_token, decode_do
 from app.services.access import user_has_access
 from app.services.downloads import downloaded_map, record_download, video_key
 from app.services.lms_access import NoCredentials, lms_client_for
+from app.services.lms_cache import listing_cache
 from app.services.transcripts import transcript_map
 
 router = APIRouter(tags=["videos"])
@@ -162,6 +164,7 @@ async def _course_row(db, user_id: int, course_id: int) -> CourseRow:
 
 
 async def _videos(db, user_id: int, course_id: int) -> list[CourseVideo]:
+    """LMS에서 새로 받는다. 결과는 다운로드 링크를 만들 때 다시 쓰도록 캐시에 넣는다."""
     row = await _course_row(db, user_id, course_id)
     try:
         async with lms_client_for(db, user_id) as client:
@@ -170,19 +173,33 @@ async def _videos(db, user_id: int, course_id: int) -> list[CourseVideo]:
         raise HTTPException(400, str(e)) from e
     except LmsError as e:
         raise HTTPException(502, f"LMS 조회 실패: {e}") from e
-    return course_videos(Course(id=course_id, name=row.name), modules)
+    videos = course_videos(Course(id=course_id, name=row.name), modules)
+    listing_cache.put(("videos", user_id, course_id), videos)
+    return videos
 
 
 async def _materials(db, user_id: int, course_id: int) -> list[CourseMaterial]:
+    """LMS에서 새로 받는다(모듈 + 위키 페이지마다 1번). 결과는 다운로드 링크용으로 캐시에 넣는다."""
     row = await _course_row(db, user_id, course_id)
     course = Course(id=course_id, name=row.name)
     try:
         async with lms_client_for(db, user_id) as client:
-            return await course_materials(client, course, await client.get_modules(course_id))
+            mats = await course_materials(client, course, await client.get_modules(course_id))
     except (NoCredentials, InvalidCredentials) as e:
         raise HTTPException(400, str(e)) from e
     except LmsError as e:
         raise HTTPException(502, f"LMS 조회 실패: {e}") from e
+    listing_cache.put(("materials", user_id, course_id), mats)
+    return mats
+
+
+async def _find_material(db, user_id: int, course_id: int, key: str) -> CourseMaterial | None:
+    """방금 받은 자료 목록에서 찾고, 없으면(만료·새 자료) LMS에서 다시 받아 찾는다."""
+    await _course_row(db, user_id, course_id)  # 과목 수강 여부는 매번 DB로 확인한다
+    cached = listing_cache.get(("materials", user_id, course_id))
+    if cached is not None and (mat := next((m for m in cached if m.key == key), None)):
+        return mat
+    return next((m for m in await _materials(db, user_id, course_id) if m.key == key), None)
 
 
 _VIDEO_FIELDS = ("module_item_id", "module_id", "module_title", "title", "content_type", "duration", "size",
@@ -201,6 +218,12 @@ async def list_videos(course_id: int, user: CurrentUser, db: Db):
 
 
 async def _open_video(db, user_id: int, course_id: int, module_item_id: int) -> CourseVideo:
+    """방금 받은 영상 목록에서 열린 영상을 찾는다. 없거나 아직 닫혀 있으면 LMS에서 다시 받아 확인한다."""
+    await _course_row(db, user_id, course_id)  # 과목 수강 여부는 매번 DB로 확인한다
+    cached = listing_cache.get(("videos", user_id, course_id))
+    video = next((v for v in cached or [] if v.module_item_id == module_item_id), None)
+    if video is not None and video.available:
+        return video
     video = next((v for v in await _videos(db, user_id, course_id) if v.module_item_id == module_item_id), None)
     if video is None:
         raise HTTPException(404, "이 과목에서 해당 영상을 찾을 수 없습니다.")
@@ -229,7 +252,7 @@ async def list_materials(course_id: int, user: CurrentUser, db: Db):
 
 @router.post("/courses/{course_id}/materials/{key}/download-link", response_model=LinkOut)
 async def create_material_link(course_id: int, key: str, user: CurrentUser, db: Db, request: Request):
-    mat = next((m for m in await _materials(db, user.id, course_id) if m.key == key), None)
+    mat = await _find_material(db, user.id, course_id, key)
     if mat is None:
         raise HTTPException(404, "이 과목에서 해당 자료를 찾을 수 없습니다.")
     if mat.kind == "canvas_file":
@@ -293,7 +316,7 @@ async def _check_hop(request: httpx.Request) -> None:
 
 
 def _relay_client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(30.0, read=120.0),
+    return httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(30.0, read=120.0), transport=shared_transport(),
                              event_hooks={"request": [_check_hop]})
 
 

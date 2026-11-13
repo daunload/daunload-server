@@ -70,28 +70,44 @@ async def save_course_videos(
     await db.execute(insert(SavedVideo).values([
         dict(user_id=user_id, item_id=row.id, created_at=utcnow()) for row in items.values()
     ]).on_conflict_do_nothing(index_elements=[SavedVideo.user_id, SavedVideo.item_id]))
+    # 여러 사용자가 함께 쓰는 행이다. 학교 서버를 부르기 전에 커밋해서, 같은 과목을 듣는 다른 사용자의 동기화가
+    # 이 트랜잭션(삽입한 키·갱신한 행의 잠금)을 기다리지 않게 한다.
+    await db.commit()
 
-    for row in items.values():
-        if row.media_url or row.resolve_error:
-            continue
-        known = await db.scalar(select(SavedVideoItem).where(
-            SavedVideoItem.content_id == row.content_id, SavedVideoItem.id != row.id,
-            (SavedVideoItem.media_url.is_not(None)) | (SavedVideoItem.resolve_error.is_not(None)),
-        ).limit(1))
-        if known is not None:  # 다른 분반 등에서 같은 영상을 이미 찾았다
-            row.media_url, row.resolve_error = known.media_url, known.resolve_error
-            row.resolved_at, row.resolve_failed_at = known.resolved_at, known.resolve_failed_at
+    unresolved = [row for row in items.values() if not (row.media_url or row.resolve_error)]
+    if not unresolved:
+        return
+    # 다른 분반 등에서 같은 영상을 이미 찾았으면 그 결과를 쓴다(content_id별로 한 번에 조회).
+    known: dict[str, SavedVideoItem] = {}
+    for other in (await db.scalars(select(SavedVideoItem).where(
+        SavedVideoItem.content_id.in_({row.content_id for row in unresolved}),
+        SavedVideoItem.id.not_in([row.id for row in unresolved]),
+        (SavedVideoItem.media_url.is_not(None)) | (SavedVideoItem.resolve_error.is_not(None)),
+    ).order_by(SavedVideoItem.id))).all():
+        known.setdefault(other.content_id, other)
+    await db.commit()  # 아래 HTTP 호출 동안 트랜잭션을 열어 두지 않는다
+
+    resolved: list[tuple[SavedVideoItem, dict]] = []
+    for row in unresolved:
+        if (k := known.get(row.content_id)) is not None:
+            resolved.append((row, dict(media_url=k.media_url, resolve_error=k.resolve_error,
+                                       resolved_at=k.resolved_at, resolve_failed_at=k.resolve_failed_at)))
             continue
         if budget.left <= 0:
             continue
         budget.left -= 1
         try:
-            row.media_url = await resolve_media_url(http, row.content_id)
-            row.resolved_at, row.resolve_failed_at = utcnow(), None
+            resolved.append((row, dict(media_url=await resolve_media_url(http, row.content_id),
+                                       resolved_at=utcnow(), resolve_failed_at=None)))
         except MediaError as e:  # 지원하지 않는 형식: 다시 시도하지 않는다
-            row.resolve_error, row.resolve_failed_at = str(e), utcnow()
+            resolved.append((row, dict(resolve_error=str(e), resolve_failed_at=utcnow())))
         except httpx.HTTPError as e:  # 일시 오류: 다음 동기화에서 다시
             log.warning("영상 주소 저장 실패 %s/%s: %s", course.id, row.module_item_id, e)
+    for row, values in resolved:
+        for k, v in values.items():
+            setattr(row, k, v)
+    if resolved:
+        await db.commit()
 
 
 async def link_saved_video(db: AsyncSession, user_id: int, **item: object) -> SavedVideo:

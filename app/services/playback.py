@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
 
 from sqlalchemy import or_, select, update
@@ -63,7 +63,7 @@ async def preview(db: AsyncSession, user_id: int, scope: Scope, course_id: int |
     now = utcnow()
     videos = await pending_videos_from_db(db, user_id, scope, course_id, module_id, now)
     plan = build_plan(videos, now)
-    estimate = (await queue_estimates(db, videos)).get(-1)
+    estimate = simulate_queue(await queue_estimate_cache.snapshot(db), videos).get(-1)
     if not estimate:
         return plan
     items = [replace(item, **estimate["job_estimates"][item.position]) for item in plan.items]
@@ -402,32 +402,46 @@ async def cancel_batch(db: AsyncSession, batch_id: int, user_id: int) -> Playbac
     return batch
 
 
-async def queue_estimates(db: AsyncSession, proposed: list[VideoTodo] | None = None) -> dict[int, dict]:
-    """현재 대기열의 영상 단위 순환을 시뮬레이션한다. 다른 계정 정보는 반환하지 않는다."""
-    from collections import deque
+@dataclass(frozen=True)
+class QueueSnapshot:
+    """대기열 계산에 쓰는 DB 값. running: 맨 앞 묶음이 재생 중인지. jobs: 묶음 ID → (위치, 길이, 마감, 진행) 순서대로."""
+    running: bool
+    jobs: dict[int, tuple[tuple, ...]]
 
+
+async def load_queue(db: AsyncSession) -> QueueSnapshot:
+    """모든 사용자의 진행 중인 묶음과 남은 영상을 읽는다(대기열 계산에서 비싼 부분)."""
     batches = list((await db.scalars(select(PlaybackBatch).where(
         PlaybackBatch.status.in_(ACTIVE_STATUSES), ~PlaybackBatch.cancel_requested,
     ).order_by(PlaybackBatch.queue_at, PlaybackBatch.id))).all())
     batches.sort(key=lambda b: b.status != "running")  # 재생 중 영상은 먼저 끝낸다.
     # 계산에 쓰는 컬럼만 읽는다(영상 JSON은 크고 여기서 쓰지 않는다).
-    jobs = list((await db.execute(select(
+    rows = list((await db.execute(select(
         PlaybackJob.batch_id, PlaybackJob.position, PlaybackJob.duration, PlaybackJob.deadline,
         PlaybackJob.progress_seconds, PlaybackJob.status,
     ).where(
         PlaybackJob.batch_id.in_([b.id for b in batches]),
         PlaybackJob.status.in_(("queued", "playing")),
     ).order_by(PlaybackJob.position))).all())
-    grouped = {b.id: deque() for b in batches}
-    for j in jobs:
+    grouped: dict[int, list[tuple]] = {b.id: [] for b in batches}
+    for j in rows:
         grouped[j.batch_id].append((j.position, j.duration, j.deadline,
                                     j.progress_seconds if j.status == "playing" else 0))
+    return QueueSnapshot(running=bool(batches and batches[0].status == "running"),
+                         jobs={k: tuple(v) for k, v in grouped.items()})
+
+
+def simulate_queue(snapshot: QueueSnapshot, proposed: list[VideoTodo] | None = None) -> dict[int, dict]:
+    """대기열의 영상 단위 순환을 시뮬레이션한다. proposed가 있으면 맨 뒤에 새 묶음(키 -1)으로 넣어 본다."""
+    from collections import deque
+
+    grouped = {k: deque(v) for k, v in snapshot.jobs.items()}
     if proposed is not None:
         grouped[-1] = deque((i.position, i.video.duration, i.video.deadline, 0)
                             for i in build_plan(proposed, utcnow()).items)
     order = deque(k for k, v in grouped.items() if v)
     result = {}
-    running = bool(batches and batches[0].status == "running")
+    running = snapshot.running
     for index, key in enumerate(order):
         result[key] = {"queue_position": index if running else index + 1,
                        "estimated_start": None, "estimated_wait_seconds": 0,
@@ -456,28 +470,41 @@ async def queue_estimates(db: AsyncSession, proposed: list[VideoTodo] | None = N
     return result
 
 
-class QueueEstimateCache:
-    """API용 대기열 예상 캐시. 대기열 전체를 다시 계산하는 일을 모든 사용자가 몇 초마다 반복하지 않게 한다.
+async def queue_estimates(db: AsyncSession, proposed: list[VideoTodo] | None = None) -> dict[int, dict]:
+    """현재 대기열의 영상 단위 순환을 시뮬레이션한다. 다른 계정 정보는 반환하지 않는다."""
+    return simulate_queue(await load_queue(db), proposed)
 
-    결과는 사용자와 무관하게 같으므로 프로세스 하나에서 공유한다. 이 프로세스에서 묶음을 만들거나 취소하면
-    바로 비운다. 워커가 바꾼 상태(진행률·순서)는 최대 ttl초 늦게 보인다.
+
+class QueueEstimateCache:
+    """API용 대기열 캐시. 대기열 전체를 DB에서 다시 읽는 일을 모든 사용자가 몇 초마다 반복하지 않게 한다.
+
+    DB 값(snapshot)과 그 계산 결과(get)는 사용자와 무관하게 같으므로 프로세스 하나에서 공유한다.
+    홈 화면의 미리보기는 같은 snapshot에 제안 묶음만 붙여 계산한다(DB를 다시 읽지 않는다).
+    이 프로세스에서 묶음을 만들거나 취소하면 바로 비운다. 워커가 바꾼 상태(진행률·순서)는 최대 ttl초 늦게 보인다.
     """
 
     def __init__(self, ttl: float = 3.0, clock=time.monotonic) -> None:
         self.ttl, self.clock = ttl, clock
+        self._snapshot: QueueSnapshot | None = None
         self._value: dict[int, dict] | None = None
         self._at = 0.0
 
-    async def get(self, db: AsyncSession) -> dict[int, dict]:
-        # 만료 직후 동시에 온 요청은 각자 계산할 수 있다. 몇 번 겹치는 정도라 잠금은 두지 않는다
+    async def snapshot(self, db: AsyncSession) -> QueueSnapshot:
+        # 만료 직후 동시에 온 요청은 각자 읽을 수 있다. 몇 번 겹치는 정도라 잠금은 두지 않는다
         # (모듈 전역 asyncio.Lock은 이벤트 루프에 묶여 테스트·재시작에서 문제가 된다).
-        if self._value is None or self.clock() - self._at >= self.ttl:
-            value = await queue_estimates(db)
-            self._value, self._at = value, self.clock()
+        if self._snapshot is None or self.clock() - self._at >= self.ttl:
+            snapshot = await load_queue(db)
+            self._snapshot, self._value, self._at = snapshot, None, self.clock()
+        return self._snapshot
+
+    async def get(self, db: AsyncSession) -> dict[int, dict]:
+        snapshot = await self.snapshot(db)
+        if self._value is None:
+            self._value = simulate_queue(snapshot)
         return self._value
 
     def invalidate(self) -> None:
-        self._value = None
+        self._snapshot = self._value = None
 
 
 queue_estimate_cache = QueueEstimateCache()

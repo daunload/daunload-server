@@ -42,3 +42,13 @@ def fresh_queue_estimates():
     queue_estimate_cache.invalidate()
     yield
     queue_estimate_cache.invalidate()
+
+
+@pytest.fixture(autouse=True)
+def fresh_lms_listing_cache():
+    """다운로드 링크용 LMS 목록 캐시도 프로세스 전역이다. 테스트끼리 섞이지 않게 비운다."""
+    from app.services.lms_cache import listing_cache
+
+    listing_cache.clear()
+    yield
+    listing_cache.clear()

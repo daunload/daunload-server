@@ -24,6 +24,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from app.lms.errors import InvalidCredentials, LmsError, LmsParseError, SsoExpired
+from app.lms.http_pool import shared_transport
 
 CANVAS_BASE_URL = "https://canvas.ssu.ac.kr"
 LMS_BASE_URL = "https://lms.ssu.ac.kr"
@@ -61,6 +62,12 @@ class LmsSession:
 
 
 def new_http_client(**kwargs) -> httpx.AsyncClient:
+    """사용자별 쿠키를 담는 클라이언트. 연결은 공용 풀(app.lms.http_pool)로 다시 쓴다."""
+    if "transport" not in kwargs:
+        try:
+            kwargs["transport"] = shared_transport()
+        except RuntimeError:  # 실행 중인 이벤트 루프 밖: 공용 풀 없이 만든다
+            pass
     return httpx.AsyncClient(
         follow_redirects=True,
         timeout=httpx.Timeout(30.0),

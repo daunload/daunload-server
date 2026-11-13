@@ -16,6 +16,7 @@ from app.config import get_settings
 from app.db.base import utcnow
 from app.db.models import AssignmentRow, CourseRow, LmsCredential, TodoRow
 from app.lms.errors import LmsError
+from app.lms.http_pool import shared_transport
 from app.lms.models import AssignmentGroup, Course, Submission
 from app.lms.todo import (
     AssignmentTodo,
@@ -52,7 +53,8 @@ async def sync_user(
     async with AsyncExitStack() as stack:
         client = await stack.enter_async_context(lms_client_for(db, user_id))
         # 강의 영상 주소 저장용(commons.ssu.ac.kr, 로그인 불필요)
-        media_http = await stack.enter_async_context(httpx.AsyncClient(follow_redirects=True, timeout=20.0))
+        media_http = await stack.enter_async_context(httpx.AsyncClient(
+            follow_redirects=True, timeout=20.0, transport=shared_transport()))
         budget = ResolveBudget()
         term = await client.get_current_term(now)
         courses = await client.get_courses(term.id)
@@ -61,6 +63,7 @@ async def sync_user(
         course_rows = {r.lms_course_id: r for r in await _rows(db, CourseRow, user_id)}
         todo_rows = {(r.kind, r.lms_item_id): r for r in await _rows(db, TodoRow, user_id)}
         assignment_rows = {r.assignment_id: r for r in await _rows(db, AssignmentRow, user_id)}
+        await db.commit()  # 읽기만 했다. 과목별 LMS 조회 동안 트랜잭션을 열어 두지 않는다
         seen_courses: set[int] = set()
         seen_todos: set[tuple[str, int]] = set()
 
@@ -99,6 +102,8 @@ async def sync_user(
                     if isinstance(todo, VideoTodo):
                         result.new_video_course_ids.add(course.id)
                 _apply_todo(trow, todo)
+            # 과목마다 커밋한다. 다음 과목을 LMS에서 받는 동안 트랜잭션(행 잠금, DB 연결)을 붙잡지 않는다.
+            await db.commit()
 
         for lms_course_id, row in course_rows.items():
             if lms_course_id not in seen_courses and (not partial or lms_course_id in course_ids):

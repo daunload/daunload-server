@@ -22,12 +22,13 @@ from sqlalchemy import func as sql_func, select
 from app.api.deps import Queue
 from app.config import get_settings
 from app.db.base import init_engine, sessionmaker, utcnow
-from app.db.models import CourseRow, LmsCredential, PlaybackBatch, PlaybackJob, User
+from app.db.models import CourseRow, LmsCredential, PlaybackBatch, PlaybackJob, TodoRow, User
 from app.lms.errors import InvalidCredentials, LmsError
+from app.lms.http_pool import close_shared_transports
 from app.services import playback
 from app.services.access import has_access, user_has_access
 from app.services.activity import prune_daily
-from app.services.notify import notify_deadlines, notify_user, prune_notification_log
+from app.services.notify import REMINDER_HOURS, notify_deadlines, notify_user, prune_notification_log
 from app.services.sync import sync_user
 
 log = logging.getLogger(__name__)
@@ -166,9 +167,16 @@ async def schedule_syncs(ctx) -> int:
 
 
 async def deadline_reminders(ctx) -> int:
+    now = utcnow()
     async with sessionmaker()() as db:
+        # 알림 시간대(가장 긴 알림 시각 안)에 마감이 있는 사용자만 고른다.
         users = (await db.scalars(
-            select(User).join(LmsCredential, LmsCredential.user_id == User.id).order_by(User.id)
+            select(User).join(LmsCredential, LmsCredential.user_id == User.id).where(
+                select(TodoRow.id).where(
+                    TodoRow.user_id == User.id, TodoRow.active, TodoRow.deadline > now,
+                    TodoRow.deadline <= now + timedelta(hours=max(REMINDER_HOURS)),
+                ).exists(),
+            ).order_by(User.id)
         )).all()
         user_ids = [u.id for u in users if has_access(u)]
         return sum([await notify_deadlines(db, uid) for uid in user_ids])
@@ -190,6 +198,10 @@ async def startup(ctx) -> None:
     ctx["queue"] = Queue(ctx["redis"])
 
 
+async def shutdown(ctx) -> None:
+    await close_shared_transports()
+
+
 class WorkerSettings:
     functions = [
         func(sync_user_job, timeout=600, max_tries=FULL_SYNC_MAX_TRIES),
@@ -202,6 +214,7 @@ class WorkerSettings:
         cron(prune_notification_logs, hour=4, minute=20),
     ]
     on_startup = startup
+    on_shutdown = shutdown
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     max_jobs = 20
     keep_result = 0  # 같은 job_id(sync:{user}, autosync:{user})를 바로 다시 넣을 수 있도록 결과를 남기지 않는다

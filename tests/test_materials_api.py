@@ -110,3 +110,35 @@ async def test_relay_asks_upstream_for_uncompressed_bytes(env):
     got = await api.get(url)
     assert got.content == b"plain text"
     assert up.calls.last.request.headers["Accept-Encoding"] == "identity"
+
+
+@respx.mock
+async def test_material_links_reuse_listed_materials(env):
+    """묶음 다운로드: 목록을 본 뒤 링크를 여러 개 만들어도 모듈·위키 페이지를 다시 받지 않는다."""
+    api, _ = env
+    h = await _with_course(api)
+    modules = next(r for r in respx.routes if "/modules" in repr(r.pattern))
+    week1 = next(r for r in respx.routes if "week-1" in repr(r.pattern))
+    assert (await api.get("/courses/45446/materials", headers=h)).status_code == 200
+    assert (modules.call_count, week1.call_count) == (1, 1)
+    for key in ("c12", "f701", "c12"):
+        assert (await api.post(f"/courses/45446/materials/{key}/download-link", headers=h)).status_code == 200
+    assert (modules.call_count, week1.call_count) == (1, 1)
+    # 목록에 없던 자료면 LMS에서 다시 확인한다(그래도 없으면 404).
+    assert (await api.post("/courses/45446/materials/f999/download-link", headers=h)).status_code == 404
+    assert modules.call_count == 2
+    # 다른 사용자의 과목은 캐시와 상관없이 막힌다.
+    assert (await api.post("/courses/99999/materials/c12/download-link", headers=h)).status_code == 404
+
+
+def test_listing_cache_expires():
+    from app.services.lms_cache import TtlCache
+
+    now = [0.0]
+    cache = TtlCache(ttl=10, max_entries=2, clock=lambda: now[0])
+    cache.put("a", 1)
+    assert cache.get("a") == 1
+    now[0] = 10
+    assert cache.get("a") is None
+    cache.put("a", 1); cache.put("b", 2); cache.put("c", 3)
+    assert cache.get("a") is None and cache.get("c") == 3

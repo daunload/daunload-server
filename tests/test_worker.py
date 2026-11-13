@@ -388,3 +388,29 @@ async def test_full_sync_deferred_not_dropped_while_auto_sync_runs(env, monkeypa
     assert "synclock:1" not in redis.keys
     assert await worker.sync_user_job(ctx, 1) == "ok"
     assert calls == [{COURSE_ID}, None]
+
+
+async def test_deadline_reminders_only_visit_users_with_upcoming_deadlines(env, monkeypatch):
+    from app.db.models import TodoRow
+
+    api, _ = env
+    await _setup(api)
+    visited = []
+
+    async def fake(db, user_id, now=None):
+        visited.append(user_id)
+        return 0
+
+    monkeypatch.setattr(worker, "notify_deadlines", fake)
+    async with db_base.sessionmaker()() as db:  # 알림 시간대 밖의 마감만 있다
+        db.add(TodoRow(user_id=1, lms_course_id=1, course_name="c", kind="assignment", lms_item_id=1,
+                       title="과제", deadline=utcnow() + timedelta(days=3)))
+        await db.commit()
+    await worker.deadline_reminders({})
+    assert visited == []
+    async with db_base.sessionmaker()() as db:
+        db.add(TodoRow(user_id=1, lms_course_id=1, course_name="c", kind="assignment", lms_item_id=2,
+                       title="과제2", deadline=utcnow() + timedelta(hours=5)))
+        await db.commit()
+    await worker.deadline_reminders({})
+    assert visited == [1]

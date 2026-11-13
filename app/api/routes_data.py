@@ -84,17 +84,16 @@ _STATUS_ORDER = {"open": 0, "locked": 1, "overdue": 2, "upcoming": 3, "no_due": 
 
 async def assignment_outs(db, user_id: int, course_id: int | None = None) -> list[AssignmentOut]:
     """현재 학기 과목의 공개된 과제를 지금 시각 기준 상태와 함께 반환한다(정렬 포함)."""
-    stmt = select(AssignmentRow).where(AssignmentRow.user_id == user_id)
+    # 현재 학기(활성) 과목의 과제만 DB에서 고른다. 지난 학기 과제를 모두 읽어 와서 버리지 않는다.
+    active_course = select(CourseRow.id).where(
+        CourseRow.user_id == user_id, CourseRow.active, CourseRow.lms_course_id == AssignmentRow.lms_course_id,
+    ).exists()
+    stmt = select(AssignmentRow).where(AssignmentRow.user_id == user_id, active_course)
     if course_id:
         stmt = stmt.where(AssignmentRow.lms_course_id == course_id)
-    active_courses = set((await db.scalars(
-        select(CourseRow.lms_course_id).where(CourseRow.user_id == user_id, CourseRow.active)
-    )).all())
     now = utcnow()
     out: list[AssignmentOut] = []
     for r in (await db.scalars(stmt)).all():
-        if r.lms_course_id not in active_courses:
-            continue
         if r.published is False or r.assignment_state in {"unpublished", "deleted"}:
             continue
         st = unsubmitted_status(
