@@ -30,7 +30,8 @@ def _modules():
 
     return [Module.model_validate(m) for m in [
         {"module_id": 2, "title": "2주차", "position": 2, "module_items": [
-            commons(21, 1, "file", "not_open"), wiki(22, 2, "week-2", "2주차 자료")]},
+            commons(21, 1, "file", "not_open"), wiki(22, 2, "week-2", "2주차 자료"),
+            commons(23, 3, "pdf", "p23", title="Kit/Manual")]},
         {"module_id": 1, "title": "1주차", "position": 1, "module_items": [
             commons(12, 2, "file", "f12", file_name="1장.pptx"), commons(11, 1, "movie", "m11"),
             wiki(13, 3, "week-1", "1주차 자료")]},
@@ -39,8 +40,10 @@ def _modules():
 
 def test_commons_files_skip_videos_and_unopened():
     mats = commons_files(COURSE, _modules())
-    assert [(m.key, m.kind, m.file_name, m.source_id) for m in mats] == [("c12", "commons_file", "1장.pptx", "f12")]
+    assert [(m.key, m.kind, m.file_name, m.source_id) for m in mats] == [
+        ("c12", "commons_file", "1장.pptx", "f12"), ("c23", "commons_file", "Kit Manual.pdf", "p23")]
     assert mats[0].module_title == "1주차" and mats[0].size == 1000
+    assert mats[1].size is None
 
 
 def test_wiki_links_from_endpoint_or_href():
@@ -68,7 +71,8 @@ async def test_course_materials_merges_wiki_files_in_week_order():
     async with LmsClient(LmsSession(user_id="1", bearer_token="B", cookies=[]), min_interval=0) as client:
         mats = await course_materials(client, COURSE, _modules())
     assert [(m.key, m.module_title, m.file_name) for m in mats] == [
-        ("c12", "1주차", "1장.pptx"), ("f701", "1주차", "a.pdf"), ("f702", "2주차", "b.pdf")]
+        ("c12", "1주차", "1장.pptx"), ("f701", "1주차", "a.pdf"), ("f702", "2주차", "b.pdf"),
+        ("c23", "2주차", "Kit Manual.pdf")]
     assert mats[1].kind == "canvas_file" and mats[1].title == "1주차 자료" and mats[1].source_id == "701"
 
 
@@ -79,7 +83,7 @@ async def test_failed_wiki_page_is_skipped():
         "body": '<a class="instructure_file_link" href="/courses/45446/files/702">b.pdf</a>'})
     async with LmsClient(LmsSession(user_id="1", bearer_token="B", cookies=[]), min_interval=0) as client:
         mats = await course_materials(client, COURSE, _modules())
-    assert [m.key for m in mats] == ["c12", "f702"]
+    assert [m.key for m in mats] == ["c12", "f702", "c23"]
     assert mats[1].title == "2주차 자료"  # 페이지 제목이 없으면 모듈 항목 제목
 
 

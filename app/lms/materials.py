@@ -1,7 +1,7 @@
 """수업자료(영상이 아닌 파일) 목록과 다운로드 주소.
 
 soongsil-lms-downloader v1.7.0(commons 파일)과 위키 첨부 기능을 옮겼다.
-- commons 파일: 모듈 항목 하나 = 파일 하나. content.php 없이 다운로드 주소로 바로 받는다.
+- commons 파일·PDF: 모듈 항목 하나 = 파일 하나. content.php 없이 다운로드 주소로 바로 받는다.
 - 위키 첨부: wiki_page 본문의 instructure_file_link에서 같은 과목의 Canvas 파일만 모은다.
 
 개발용 CLI (`.env`의 LMS_ID/LMS_PASSWORD 사용):
@@ -32,6 +32,8 @@ COMMONS_DOWNLOAD = "https://commons.ssu.ac.kr/index.php"
 # 리다이렉트 뒤 최종 주소도 이 안이어야 받는다. Canvas가 외부 스토리지로 보내면 실계정 확인 후 추가한다.
 ALLOWED_FILE_HOSTS = ("ssu.ac.kr", "commonscdn.com")
 _FILE_PATH = re.compile(r"/courses/(\d+)/files/(\d+)")
+# 다운로드 주소로 원본을 바로 받을 수 있는 commons 종류. pdf는 file_name이 없어 확장자를 붙인다.
+COMMONS_FILE_TYPES = {"file", "pdf"}
 
 
 @dataclass(frozen=True)
@@ -73,16 +75,22 @@ def commons_files(course: Course, modules: list[Module]) -> list[CourseMaterial]
     for module, item in _ordered(modules):
         data = item.content_data
         icd = data.item_content_data if data else None
-        if data is None or icd is None or data.item_content_type != "commons" or icd.content_type != "file":
+        if data is None or icd is None or data.item_content_type != "commons" or icd.content_type not in COMMONS_FILE_TYPES:
             continue
         if not icd.content_id or icd.content_id == "not_open":
             continue
         title = data.title or item.title or ""
+        file_name = safe_file_name(icd.file_name or title)
+        size = icd.total_file_size
+        if icd.content_type == "pdf":
+            if not file_name.lower().endswith(".pdf"):
+                file_name = safe_file_name(f"{file_name}.pdf")
+            size = None  # pdf의 total_file_size는 변환본까지 합친 값이라 실제 파일보다 훨씬 크다
         result.append(CourseMaterial(
             key=f"c{item.module_item_id}", kind="commons_file", course_id=course.id,
             module_id=module.module_id or 0, module_title=module.title or "", module_position=module.position or 0,
-            item_position=item.position or 0, title=title, file_name=safe_file_name(icd.file_name or title),
-            source_id=icd.content_id, size=icd.total_file_size,
+            item_position=item.position or 0, title=title, file_name=file_name,
+            source_id=icd.content_id, size=size,
         ))
     return result
 

@@ -27,7 +27,8 @@ async def test_list_materials_and_ownership(env):
     h = await _with_course(api)
     mats = (await api.get("/courses/45446/materials", headers=h)).json()
     assert [(m["key"], m["kind"], m["file_name"]) for m in mats] == [
-        ("c12", "commons_file", "1장.pptx"), ("f701", "canvas_file", "a.pdf")]
+        ("c12", "commons_file", "1장.pptx"), ("f701", "canvas_file", "a.pdf"),
+        ("c23", "commons_file", "Kit Manual.pdf")]
     assert (await api.get("/courses/99999/materials", headers=h)).status_code == 404
 
 
