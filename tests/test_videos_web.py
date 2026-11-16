@@ -228,6 +228,52 @@ async def test_bulk_progress_note_and_stop_in_panel(dashboard):
     assert await page.evaluate('__ssu.bulk.ctrl') is None
 
 
+FAKE_NESTED_FOLDER = """
+window.__saved = {};
+const dirOf = (prefix) => ({
+  getDirectoryHandle: async (name) => dirOf(prefix + name + "/"),
+  getFileHandle: async (name) => ({ createWritable: async () => new WritableStream({ close: () => { window.__saved[prefix + name] = 1; } }) }),
+});
+window.showDirectoryPicker = async () => dirOf("");
+"""
+
+
+async def test_course_bulk_saves_every_material_into_week_folders(dashboard):
+    page, data = dashboard
+    await page.add_init_script(FAKE_NESTED_FOLDER)
+    data['/saved-videos'] = []
+    data['/courses/1/videos'] = []
+    m = {"kind": "commons_file", "title": "자료", "size": 1, "downloaded_at": None}
+    data['/courses/1/materials'] = [
+        {**m, "key": "c21", "module_id": 1, "module_title": "1주차", "file_name": "같은.pdf"},
+        {**m, "key": "c22", "module_id": 2, "module_title": "2/3주차", "file_name": "같은.pdf"},
+        {**m, "key": "c23", "module_id": 2, "module_title": "2/3주차", "file_name": "다른.pdf", "downloaded_at": "2026-01-01T00:00:00Z"}]
+    for key, name in (("c21", "같은.pdf"), ("c22", "같은.pdf"), ("c23", "다른.pdf")):
+        data[f"/courses/1/materials/{key}/download-link"] = {"url": "/downloads/tok", "file_name": name, "expires_in_minutes": 10}
+    await page.route("**/downloads/tok", lambda r: r.fulfill(body=b"x", content_type="application/pdf"))
+    await page.goto("http://dashboard.test/#videos")
+    await page.get_by_role("tab", name="수업자료").click()
+    await page.get_by_role("button", name="컴퓨터프로그래밍 과목 전체 내려받기 (3)").click()
+    await expect(page.locator('#toast')).to_contain_text('3개를 모두 받았어요')
+    saved = await page.evaluate("window.__saved")
+    assert saved == {"1주차/같은.pdf": 1, "2 3주차/같은.pdf": 1, "2 3주차/다른.pdf": 1}
+
+    # 안 받은 것만 보면 남은 자료가 없어 과목 전체 버튼도 사라진다
+    await page.locator('#not-downloaded').check()
+    await expect(page.locator('[data-course-bulk]')).to_have_count(0)
+
+
+async def test_course_bulk_hidden_with_single_week(dashboard):
+    page, data = dashboard
+    data['/saved-videos'] = []
+    data['/courses/1/videos'] = []
+    data['/courses/1/materials'] = [_material(), {**_material(), 'key': 'c22', 'file_name': '2장.pdf'}]
+    await page.goto('http://dashboard.test/#videos')
+    await page.get_by_role('tab', name='수업자료').click()
+    await expect(page.locator('#video-list li.video-row')).to_have_count(2)
+    await expect(page.locator('[data-course-bulk]')).to_have_count(0)
+
+
 async def test_bulk_material_note(dashboard):
     page, data = dashboard
     await page.add_init_script(FAKE_FOLDER)

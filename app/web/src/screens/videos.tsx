@@ -201,12 +201,14 @@ function DownloadButton({ linkPath, at, onDone }: { linkPath: string; at?: strin
 /** 받았다는 글자는 보조기기용이다(눈에는 아이콘 모양·색으로 보인다). */
 const DoneBadge = ({ at }: { at?: string | null }) => (at ? <span class="received sr-only">받음</span> : null);
 
-/** 주차 전체 받기. 받을 수 있는 항목이 2개 이상일 때만 보인다. 1개뿐이면 그 줄의 버튼과 같은 동작이다. */
-function BulkButton({ items, title }: { items: BulkItem[]; title: string }) {
+/** 주차 전체 받기. 받을 수 있는 항목이 2개 이상일 때만 보인다. 1개뿐이면 그 줄의 버튼과 같은 동작이다.
+ * course면 과목 전체 받기(목록 위에 한 번)이고, 주차마다 하위 폴더에 나눠 저장한다. */
+function BulkButton({ items, title, course = false }: { items: BulkItem[]; title: string; course?: boolean }) {
   if (items.length < 2) return null;
-  const label = `전체 내려받기 (${items.length})`;
-  const face = <><Icon name="download" />전체 {items.length}</>;
-  const common = { class: "btn btn-link gap-1 px-2 font-semibold whitespace-nowrap", "aria-label": `${title} ${label}`, title: label };
+  const label = `${course ? "과목 " : ""}전체 내려받기 (${items.length})`;
+  const face = <><Icon name="download" />{course ? "과목 전체" : "전체"} {items.length}</>;
+  const cls = course ? "btn btn-soft btn-primary gap-1.5 whitespace-nowrap" : "btn btn-link gap-1 px-2 font-semibold whitespace-nowrap";
+  const common = { class: cls, "aria-label": `${title} ${label}`, title: label };
   if (isPhoneDevice()) return <button {...common} data-bulk="" disabled>{face}</button>;  // 이유는 화면 위쪽에 한 번만 알린다
   if (state.videoTab === "materials" && !bulkDownloadSupported()) {
     return <><button {...common} disabled>{face}</button><span class="reason">폴더에 바로 저장하는 기능은 데스크톱 Chrome·Edge에서만 지원해요</span></>;
@@ -361,13 +363,22 @@ function MaterialList() {
     const src = state.materialList.items.find((x: MaterialItem) => x.key === key);
     if (src) src.downloaded_at = new Date().toISOString();
   };
+  const groups = groupBy(items);
+  const bulkItem = (m: MaterialItem, folder?: string): BulkItem => ({ linkPath: m.linkPath, label: m.file_name, onDone: () => mark(m.key), folder });
+  const courseName = state.courses.find((c) => c.lms_course_id === courseId)?.name || "과목";
   return (
     <>
-      {groupBy(items).map((g) => (
+      {groups.length > 1 && items.length > 1 && (
+        <div class="course-bulk flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-1 pb-2" data-course-bulk="">
+          <span class="text-sm text-ink-2">{state.notDownloadedOnly ? "안 받은 자료" : "모든 자료"}를 주차별 폴더로 나눠 한 번에 받아요</span>
+          <span class="group-actions"><BulkButton course title={courseName} items={items.map((m) => bulkItem(m, m.module_title))} /></span>
+        </div>
+      )}
+      {groups.map((g) => (
         <Fragment key={g.id}>
           <div class="group-label">
             <span class="group-title">{g.title}</span>
-            <span class="group-actions"><BulkButton title={g.title} items={g.items.map((m) => ({ linkPath: m.linkPath, label: m.file_name, onDone: () => mark(m.key) }))} /></span>
+            <span class="group-actions"><BulkButton title={g.title} items={g.items.map((m) => bulkItem(m))} /></span>
           </div>
           <ul class="list">
             {g.items.map((m) => (

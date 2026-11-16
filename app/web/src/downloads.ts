@@ -12,8 +12,8 @@ import { ext } from "./extension";
 const BULK_CONCURRENCY = 2;
 const BULK_RETRY_MS = 3000;
 const LINK_REUSE_MS = 8 * 60 * 1000;  // 링크는 10분짜리다. 만료 전까지는 같은 링크로 다시 시도한다
-/** 여러 개 받기의 한 항목. onDone은 받은 뒤 목록에 받음 표시를 남긴다. */
-export interface BulkItem { linkPath: string; label: string; onDone?: () => void }
+/** 여러 개 받기의 한 항목. onDone은 받은 뒤 목록에 받음 표시를 남긴다. folder가 있으면 고른 폴더 안의 그 하위 폴더에 저장한다(자료만). */
+export interface BulkItem { linkPath: string; label: string; onDone?: () => void; folder?: string }
 /** 진행 상황(하단 패널과 videos 화면이 읽는다). */
 export interface BulkStat {
   done: number; failed: number; total: number; running: boolean; errors: string[]; failedItems: BulkItem[]; direct: boolean; stopped?: boolean;
@@ -22,7 +22,11 @@ interface Link { url: string; file_name: string; receipt?: string }
 interface DirectHandle { job: string; link: Link }
 type CodedError = Error & { code?: string };
 // 폴더에 바로 쓰는 File System Access API(데스크톱 Chrome·Edge). 표준 타입에 아직 없다.
-type DirectoryPicker = (opts: { mode: "readwrite" }) => Promise<{ getFileHandle(name: string, o: { create: boolean }): Promise<{ createWritable(): Promise<WritableStream> }> }>;
+interface DirHandle {
+  getFileHandle(name: string, o: { create: boolean }): Promise<{ createWritable(): Promise<WritableStream> }>;
+  getDirectoryHandle(name: string, o: { create: boolean }): Promise<DirHandle>;
+}
+type DirectoryPicker = (opts: { mode: "readwrite" }) => Promise<DirHandle>;
 const picker = () => (window as unknown as { showDirectoryPicker?: DirectoryPicker }).showDirectoryPicker;
 
 export const bulk: { ctrl: AbortController | null } = { ctrl: null };
@@ -118,7 +122,12 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-async function saveToFolder(dir: NonNullable<Awaited<ReturnType<DirectoryPicker>>>, item: BulkItem, signal: AbortSignal): Promise<void> {
+/** 폴더 이름에 쓸 수 없는 글자를 지운다(서버 safe_file_name과 같은 규칙). */
+export function safeFolderName(name: string): string {
+  return name.replace(/[\\/:*?"<>|\x00-\x1f]/g, " ").replace(/\s+/g, " ").replace(/^[ .]+|[ .]+$/g, "").slice(0, 100).replace(/[ .]+$/, "") || "기타";
+}
+
+async function saveToFolder(dir: DirHandle, item: BulkItem, signal: AbortSignal): Promise<void> {
   let link: Link | null = null;
   let issuedAt = 0;
   for (;;) {
@@ -140,7 +149,8 @@ async function saveToFolder(dir: NonNullable<Awaited<ReturnType<DirectoryPicker>
       }
       throw new Error(typeof data?.detail === "string" ? data.detail : `요청 실패 (${res.status})`);
     }
-    const handle = await dir.getFileHandle(link!.file_name, { create: true });
+    const target = item.folder ? await dir.getDirectoryHandle(safeFolderName(item.folder), { create: true }) : dir;
+    const handle = await target.getFileHandle(link!.file_name, { create: true });
     await res.body!.pipeTo(await handle.createWritable(), { signal });
     return;
   }
