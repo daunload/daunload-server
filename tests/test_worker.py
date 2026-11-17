@@ -188,7 +188,7 @@ def _raising_ctx(exc):
     from contextlib import asynccontextmanager
 
     @asynccontextmanager
-    async def ctx(db, user_id):
+    async def ctx(db, user_id, **kwargs):
         raise exc
         yield
 

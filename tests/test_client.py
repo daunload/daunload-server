@@ -110,6 +110,31 @@ async def test_expired_relogins_once(monkeypatch, fixture):
 
 
 @respx.mock
+async def test_concurrent_expired_requests_relogin_only_once(monkeypatch, fixture):
+    """동기화가 과목 여러 개를 동시에 조회하다 함께 만료를 봐도 세션은 한 번만 다시 받는다."""
+    import asyncio
+    calls = []
+
+    async def fake_renew(session):
+        calls.append(session.bearer_token)
+        await asyncio.sleep(0.05)
+        return LmsSession(user_id=session.user_id, bearer_token="NEW", cookies=[], sso_token="SSO")
+
+    monkeypatch.setattr(client_mod.auth, "renew_from_sso", fake_renew)
+
+    def handler(request):
+        if request.headers["Authorization"] == "Bearer NEW":
+            return respx.MockResponse(200, json=fixture("modules.json"))
+        return respx.MockResponse(401)
+
+    for cid in (1, 2, 3):
+        respx.get(f"{C}/learningx/api/v1/courses/{cid}/modules").mock(side_effect=handler)
+    async with _client(sso_token="SSO") as c:
+        results = await asyncio.gather(*(c.get_modules(cid) for cid in (1, 2, 3)))
+    assert calls == ["BEARER"] and all(len(m) == 3 for m in results)
+
+
+@respx.mock
 async def test_sso_expired_during_renewal_propagates(monkeypatch):
     from app.lms.errors import SsoExpired
 

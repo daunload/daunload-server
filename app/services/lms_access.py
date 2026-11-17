@@ -63,7 +63,7 @@ async def link_session(db: AsyncSession, user_id: int, student_id: str, session:
 
 
 @asynccontextmanager
-async def lms_client_for(db: AsyncSession, user_id: int) -> AsyncIterator[LmsClient]:
+async def lms_client_for(db: AsyncSession, user_id: int, *, min_interval: float | None = None) -> AsyncIterator[LmsClient]:
     cred = await db.get(LmsCredential, user_id)
     if cred is None:
         raise NoCredentials("LMS 계정을 먼저 등록하세요.")
@@ -101,7 +101,8 @@ async def lms_client_for(db: AsyncSession, user_id: int) -> AsyncIterator[LmsCli
                 raise LmsError("학습 연결을 복구하지 못했습니다. 잠시 후 다시 시도하세요.") from None
             raise SsoExpired(RELOGIN_MESSAGE) from None
 
-    client = LmsClient(session, renew=renew if has_token else None)
+    extra = {} if min_interval is None else {"min_interval": min_interval}
+    client = LmsClient(session, renew=renew if has_token else None, **extra)
     before = client.session
     values = {}
     try:

@@ -22,11 +22,14 @@ from app.db.base import utcnow
 from app.db.models import SavedVideo, SavedVideoItem
 from app.lms.media import MediaError, course_videos, resolve_media_url
 from app.lms.models import Course, Module
+from app.services.concurrency import map_limited
 
 log = logging.getLogger(__name__)
 
 # 한 번 동기화할 때 content.php를 호출하는 최대 횟수. 남은 영상은 다음 동기화에서 이어서 찾는다.
 RESOLVE_PER_SYNC = 20
+# content.php를 동시에 부르는 수
+RESOLVE_CONCURRENCY = 3
 
 
 @dataclass
@@ -88,21 +91,27 @@ async def save_course_videos(
     await db.commit()  # 아래 HTTP 호출 동안 트랜잭션을 열어 두지 않는다
 
     resolved: list[tuple[SavedVideoItem, dict]] = []
+    to_fetch: list[SavedVideoItem] = []
     for row in unresolved:
         if (k := known.get(row.content_id)) is not None:
             resolved.append((row, dict(media_url=k.media_url, resolve_error=k.resolve_error,
                                        resolved_at=k.resolved_at, resolve_failed_at=k.resolve_failed_at)))
-            continue
-        if budget.left <= 0:
-            continue
-        budget.left -= 1
+        elif budget.left > 0:
+            budget.left -= 1
+            to_fetch.append(row)
+
+    async def fetch(row: SavedVideoItem) -> dict | None:
         try:
-            resolved.append((row, dict(media_url=await resolve_media_url(http, row.content_id),
-                                       resolved_at=utcnow(), resolve_failed_at=None)))
+            return dict(media_url=await resolve_media_url(http, row.content_id), resolved_at=utcnow(), resolve_failed_at=None)
         except MediaError as e:  # 지원하지 않는 형식: 다시 시도하지 않는다
-            resolved.append((row, dict(resolve_error=str(e), resolve_failed_at=utcnow())))
+            return dict(resolve_error=str(e), resolve_failed_at=utcnow())
         except httpx.HTTPError as e:  # 일시 오류: 다음 동기화에서 다시
             log.warning("영상 주소 저장 실패 %s/%s: %s", course.id, row.module_item_id, e)
+            return None
+
+    for row, values in zip(to_fetch, await map_limited(RESOLVE_CONCURRENCY, to_fetch, fetch), strict=True):
+        if values is not None:
+            resolved.append((row, values))
     for row, values in resolved:
         for k, v in values.items():
             setattr(row, k, v)

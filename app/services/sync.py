@@ -15,9 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db.base import utcnow
 from app.db.models import AssignmentRow, CourseRow, LmsCredential, TodoRow
+from app.lms.client import LmsClient
 from app.lms.errors import LmsError
 from app.lms.http_pool import shared_transport
-from app.lms.models import AssignmentGroup, Course, Submission
+from app.lms.models import AssignmentGroup, Course, Module, Submission
 from app.lms.todo import (
     AssignmentTodo,
     VideoTodo,
@@ -26,10 +27,35 @@ from app.lms.todo import (
     parse_dt,
     submission_state,
 )
+from app.services.concurrency import gather_all, map_limited
 from app.services.lms_access import lms_client_for
 from app.services.saved_videos import ResolveBudget, save_course_videos
 
 log = logging.getLogger(__name__)
+
+# 동시에 조회하는 과목 수. 과목 하나에서도 모듈·과제·제출 현황을 함께 요청하므로 동시 요청은 최대 이 수의 3배다.
+COURSE_CONCURRENCY = 3
+# 동기화의 요청 시작 간격(초). 기본 0.3초보다 짧지만 한 사용자의 동기화는 수십 개 요청으로 몇 초 안에 끝난다.
+SYNC_MIN_INTERVAL = 0.15
+
+
+@dataclass
+class _CourseData:
+    modules: list[Module]
+    groups: list[AssignmentGroup]
+    submissions: list[Submission] | None  # None: 권한이 없어 과제 판정을 건너뛴다
+
+
+async def _fetch_course(client: LmsClient, course_id: int) -> _CourseData:
+    async def submissions() -> list[Submission] | None:
+        try:
+            return await client.get_submissions(course_id)
+        except LmsError:  # 권한이 없으면 과제 판정을 건너뛴다(레퍼런스의 permissionFailed)
+            return None
+
+    modules, groups, subs = await gather_all(
+        client.get_modules(course_id), client.get_assignment_groups(course_id), submissions())
+    return _CourseData(modules, groups, subs)
 
 
 @dataclass
@@ -51,7 +77,7 @@ async def sync_user(
     result = SyncResult(first_sync=cred is None or cred.last_synced_at is None)
 
     async with AsyncExitStack() as stack:
-        client = await stack.enter_async_context(lms_client_for(db, user_id))
+        client = await stack.enter_async_context(lms_client_for(db, user_id, min_interval=SYNC_MIN_INTERVAL))
         # 강의 영상 주소 저장용(commons.ssu.ac.kr, 로그인 불필요)
         media_http = await stack.enter_async_context(httpx.AsyncClient(
             follow_redirects=True, timeout=20.0, transport=shared_transport()))
@@ -67,9 +93,11 @@ async def sync_user(
         seen_courses: set[int] = set()
         seen_todos: set[tuple[str, int]] = set()
 
-        for course in courses:
-            if partial and course.id not in course_ids:
-                continue
+        # LMS 조회는 과목 여러 개를 동시에 한다(네트워크만 쓴다). DB 세션은 동시에 쓸 수 없어 반영은 아래에서 차례로 한다.
+        targets = [c for c in courses if not partial or c.id in course_ids]
+        fetched = await map_limited(COURSE_CONCURRENCY, targets, lambda c: _fetch_course(client, c.id))
+
+        for course, data in zip(targets, fetched, strict=True):
             seen_courses.add(course.id)
             row = course_rows.get(course.id)
             if row is None:
@@ -83,14 +111,11 @@ async def sync_user(
                     for s in status.sections
                 ]
 
-            modules = await client.get_modules(course.id)
+            modules, groups = data.modules, data.groups
             await save_course_videos(db, media_http, user_id, course, modules, budget)
-            groups = await client.get_assignment_groups(course.id)
-            try:
-                submissions = await client.get_submissions(course.id)
+            submissions = data.submissions or []
+            if data.submissions is not None:  # 권한이 없었으면 기존 과제 기록은 유지
                 await _sync_assignments(db, user_id, course, groups, submissions, assignment_rows)
-            except LmsError:  # 권한이 없으면 과제 판정을 건너뛴다(레퍼런스의 permissionFailed). 기존 과제 기록은 유지
-                submissions = []
             for todo in collect_todos(course, modules, groups, submissions, now):
                 key = (todo.kind, _lms_item_id(todo))
                 seen_todos.add(key)

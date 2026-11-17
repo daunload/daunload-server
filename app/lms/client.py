@@ -83,9 +83,12 @@ class LmsClient:
     def can_renew(self) -> bool:
         return bool(self._renew or self.session.sso_token or auth.sso_token(self.session.cookies))
 
-    async def relogin(self) -> None:
-        """서비스의 개인 토큰/SSO 복구 함수 또는 기본 SSO 경로로 재발급한다."""
+    async def relogin(self, stale: LmsSession | None = None) -> None:
+        """서비스의 개인 토큰/SSO 복구 함수 또는 기본 SSO 경로로 재발급한다.
+        stale을 주면, 기다리는 동안 다른 요청이 이미 새 세션을 받았을 때 다시 받지 않는다(동시 요청용)."""
         async with self._renew_lock:
+            if stale is not None and self.session is not stale:
+                return
             self.session = await (self._renew or auth.renew_from_sso)(self.session)
             self._http.cookies.clear()
             auth.import_cookies(self._http, self.session.cookies)
@@ -100,6 +103,7 @@ class LmsClient:
     async def _request(self, url: str, *, bearer: bool, params: Any = None, headers: dict | None = None) -> httpx.Response:
         for attempt in range(2):
             await self._throttle()
+            sent_with = self.session
             h = dict(headers or {})
             h.setdefault("Accept", "application/json")
             if bearer and self.session.bearer_token:
@@ -108,7 +112,7 @@ class LmsClient:
             if not _looks_expired(resp, bearer):
                 break
             if attempt == 0 and self.can_renew():
-                await self.relogin()
+                await self.relogin(sent_with)
                 continue
             raise SessionExpired(f"세션이 만료되었습니다 ({resp.status_code} {resp.url}).")
         if resp.status_code >= 400:
