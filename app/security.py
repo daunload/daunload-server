@@ -1,4 +1,5 @@
 from datetime import timedelta
+from functools import lru_cache
 
 import jwt
 from cryptography.fernet import Fernet, InvalidToken
@@ -48,11 +49,16 @@ def decode_download_token(token: str) -> tuple[int, dict] | None:
         return None
 
 
+@lru_cache(maxsize=4)
+def _fernet_for_key(key: str) -> Fernet:
+    return Fernet(key)
+
+
 def _fernet() -> Fernet:
     key = get_settings().fernet_key
     if not key:
         raise RuntimeError("FERNET_KEY가 설정되지 않았습니다. Fernet.generate_key()로 만들어 .env에 넣으세요.")
-    return Fernet(key)
+    return _fernet_for_key(key)
 
 
 def encrypt(text: str) -> str:

@@ -86,9 +86,9 @@ async def sync_user(
         courses = await client.get_courses(term.id)
         statuses = {s.course.id: s for s in await client.get_learn_statuses(term.id)}
 
-        course_rows = {r.lms_course_id: r for r in await _rows(db, CourseRow, user_id)}
-        todo_rows = {(r.kind, r.lms_item_id): r for r in await _rows(db, TodoRow, user_id)}
-        assignment_rows = {r.assignment_id: r for r in await _rows(db, AssignmentRow, user_id)}
+        course_rows = {r.lms_course_id: r for r in await _rows(db, CourseRow, user_id, course_ids)}
+        todo_rows = {(r.kind, r.lms_item_id): r for r in await _rows(db, TodoRow, user_id, course_ids)}
+        assignment_rows = {r.assignment_id: r for r in await _rows(db, AssignmentRow, user_id, course_ids)}
         await db.commit()  # 읽기만 했다. 과목별 LMS 조회 동안 트랜잭션을 열어 두지 않는다
         seen_courses: set[int] = set()
         seen_todos: set[tuple[str, int]] = set()
@@ -103,13 +103,14 @@ async def sync_user(
             if row is None:
                 row = CourseRow(user_id=user_id, lms_course_id=course.id, auto_play=False)
                 db.add(row)
-            row.term_id, row.name, row.professors, row.active = course.term_id, course.name, course.professors, True
+            _set_fields(row, term_id=course.term_id, name=course.name, professors=course.professors, active=True)
             status = statuses.get(course.id)
             if status:
-                row.attendance = [
+                attendance = [
                     {"week": s.position, "statuses": [sub.status for sub in s.subsections]}
                     for s in status.sections
                 ]
+                _set_fields(row, attendance=attendance)
 
             modules, groups = data.modules, data.groups
             await save_course_videos(db, media_http, user_id, course, modules, budget)
@@ -131,10 +132,10 @@ async def sync_user(
             await db.commit()
 
         for lms_course_id, row in course_rows.items():
-            if lms_course_id not in seen_courses and (not partial or lms_course_id in course_ids):
+            if lms_course_id not in seen_courses and row.active and (not partial or lms_course_id in course_ids):
                 row.active = False
         for key, trow in todo_rows.items():
-            if key not in seen_todos and (not partial or trow.lms_course_id in course_ids):
+            if key not in seen_todos and trow.active and (not partial or trow.lms_course_id in course_ids):
                 trow.active = False
 
         result.course_count = len(seen_courses) if partial else len(courses)
@@ -175,18 +176,27 @@ async def _sync_assignments(
                 db.add(row)
                 existing[a.id] = row
             due, deadline = assignment_deadlines(a, sub)
-            row.lms_course_id, row.course_name = course.id, course.name
-            row.title, row.group_name = a.name, group.name
-            row.kind = "quiz" if a.is_quiz else "assignment"
-            row.submission_state = submission_state(sub)
-            row.submitted_at = _safe_dt(sub.submitted_at) if sub else None
-            row.missing = bool(sub and sub.missing)
-            row.score = sub.score if sub else None
-            row.points_possible = a.points_possible
-            row.due_at, row.deadline = due, deadline
-            row.lock_at, row.unlock_at = _safe_dt(a.lock_at), _safe_dt(a.unlock_at)
-            row.published, row.assignment_state, row.locked_for_user = a.published, a.workflow_state, a.locked_for_user
-            row.url = a.html_url
+            _set_fields(
+                row,
+                lms_course_id=course.id,
+                course_name=course.name,
+                title=a.name,
+                group_name=group.name,
+                kind="quiz" if a.is_quiz else "assignment",
+                submission_state=submission_state(sub),
+                submitted_at=_safe_dt(sub.submitted_at) if sub else None,
+                missing=bool(sub and sub.missing),
+                score=sub.score if sub else None,
+                points_possible=a.points_possible,
+                due_at=due,
+                deadline=deadline,
+                lock_at=_safe_dt(a.lock_at),
+                unlock_at=_safe_dt(a.unlock_at),
+                published=a.published,
+                assignment_state=a.workflow_state,
+                locked_for_user=a.locked_for_user,
+                url=a.html_url,
+            )
     for assignment_id, row in list(existing.items()):
         if row.lms_course_id == course.id and assignment_id not in seen:  # LMS에서 사라진 과제
             await db.delete(row)
@@ -197,24 +207,36 @@ def _lms_item_id(todo: VideoTodo | AssignmentTodo) -> int:
     return todo.module_item_id if isinstance(todo, VideoTodo) else todo.assignment_id
 
 
+def _set_fields(row, **values) -> None:
+    """값이 실제로 달라진 컬럼만 대입해 변경 없는 행에 불필요한 UPDATE가 나가지 않게 한다."""
+    for key, value in values.items():
+        if getattr(row, key) != value:
+            setattr(row, key, value)
+
+
 def _apply_todo(row: TodoRow, todo: VideoTodo | AssignmentTodo) -> None:
-    row.lms_course_id = todo.course_id
-    row.course_name = todo.course_name
-    row.title = todo.title
-    row.deadline = todo.deadline
-    row.due_at = todo.due_at
-    row.unlock_at = todo.unlock_at
-    row.active = True
+    fields = dict(
+        lms_course_id=todo.course_id,
+        course_name=todo.course_name,
+        title=todo.title,
+        deadline=todo.deadline,
+        due_at=todo.due_at,
+        unlock_at=todo.unlock_at,
+        active=True,
+    )
     if isinstance(todo, VideoTodo):
-        row.url = todo.view_url
-        row.module_id = todo.module_id
-        row.module_title = todo.module_title
-        row.module_position = todo.module_position
-        row.item_position = todo.item_position
-        row.item_id = todo.item_id
-        row.duration = todo.duration
+        fields.update(
+            url=todo.view_url,
+            module_id=todo.module_id,
+            module_title=todo.module_title,
+            module_position=todo.module_position,
+            item_position=todo.item_position,
+            item_id=todo.item_id,
+            duration=todo.duration,
+        )
     else:
-        row.url = todo.html_url
+        fields["url"] = todo.html_url
+    _set_fields(row, **fields)
 
 
 def video_from_row(row: TodoRow) -> VideoTodo:
@@ -227,8 +249,11 @@ def video_from_row(row: TodoRow) -> VideoTodo:
     )
 
 
-async def _rows(db: AsyncSession, model, user_id: int) -> list:
-    return list((await db.scalars(select(model).where(model.user_id == user_id))).all())
+async def _rows(db: AsyncSession, model, user_id: int, course_ids: set[int] | None = None) -> list:
+    stmt = select(model).where(model.user_id == user_id)
+    if course_ids is not None:
+        stmt = stmt.where(model.lms_course_id.in_(course_ids))
+    return list((await db.scalars(stmt)).all())
 
 
 def _safe_dt(value: str | None) -> datetime | None:

@@ -310,7 +310,7 @@ async def test_playback_percent_queue_and_live_update(page):
     batch["jobs"][0].update(status="done", progress_seconds=1800)
     batch["jobs"][1].update(status="playing", progress_seconds=900)
     batch["done_count"] = 1
-    await expect(hero).to_contain_text("전체 진행률 75%", timeout=10000)
+    await expect(hero).to_contain_text("전체 진행률 75%", timeout=15000)
     await expect(hero.get_by_role("heading")).to_have_text("버튼과 LED")
     await expect(hero.locator(".playback-percent")).to_have_text("50%")
     await expect(panel.locator(".steps .status.done")).to_have_count(1)
@@ -331,7 +331,7 @@ async def test_playback_queue_excludes_failed_and_cancelled_jobs(page):
     await expect(panel.get_by_text("다음 재생", exact=True)).to_have_count(0)
     batch["jobs"][1].update(status="queued", duration=1800)
     batch["cancel_requested"] = True
-    await expect(hero.get_by_role("heading")).to_have_text("예정된 강의는 재생하지 않아요", timeout=10000)
+    await expect(hero.get_by_role("heading")).to_have_text("예정된 강의는 재생하지 않아요", timeout=15000)
     await expect(hero).to_contain_text("재생 중지 요청됨")
     await expect(panel.get_by_text("다음 재생", exact=True)).to_have_count(0)
 
@@ -398,7 +398,7 @@ async def test_playback_guide_is_folded_and_stays_open_across_polls(page):
     await guide.locator("summary").click()
     await expect(guide.get_by_text("번갈아")).to_be_visible()
     batch["jobs"][0]["progress_seconds"] = 1200
-    await expect(panel.locator(".playback-hero")).to_contain_text("66%", timeout=10000)
+    await expect(panel.locator(".playback-hero")).to_contain_text("66%", timeout=15000)
     await expect(panel.locator(".playback-help").get_by_text("번갈아")).to_be_visible()
 
 

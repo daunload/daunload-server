@@ -93,6 +93,7 @@ def _direct_download(user, course_id: int, item_id: int, title: str, url: str, f
 async def direct_video(course_id: int, module_item_id: int, user: CurrentUser, db: Db, response: Response):
     response.headers["Cache-Control"] = "no-store"
     video = await _open_video(db, user.id, course_id, module_item_id)
+    await db.commit()  # 외부 content.php 조회 동안 DB 커넥션을 점유하지 않는다.
     try:
         async with _relay_client() as http:
             url = await resolve_media_url(http, video.content_id)

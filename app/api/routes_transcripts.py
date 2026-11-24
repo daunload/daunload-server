@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
+from sqlalchemy.orm import defer
 
 from app.api.deps import CurrentUser, Db
 from app.db.base import utcnow
@@ -87,7 +88,11 @@ async def save_transcript(course_id: int, module_item_id: int, request: Request,
 
 @router.get("/transcripts", response_model=list[TranscriptSummary])
 async def list_transcripts(user: CurrentUser, db: Db, course_id: int | None = None):
-    stmt = select(Transcript).where(Transcript.user_id == user.id)
+    stmt = (
+        select(Transcript)
+        .options(defer(Transcript.text), defer(Transcript.segments))
+        .where(Transcript.user_id == user.id)
+    )
     if course_id is not None:
         stmt = stmt.where(Transcript.lms_course_id == course_id)
     stmt = stmt.order_by(Transcript.updated_at.desc())

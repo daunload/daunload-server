@@ -56,7 +56,18 @@ RESUME_PROMPT = re.compile(
 
 END_GRACE_SECONDS = 15
 
-BROWSER_ARGS = ["--autoplay-policy=no-user-gesture-required", "--mute-audio"]
+BROWSER_ARGS = [
+    "--autoplay-policy=no-user-gesture-required",
+    "--mute-audio",
+    "--disable-gpu",
+    "--disable-extensions",
+    "--disable-background-networking",
+    "--disable-default-apps",
+    "--disable-sync",
+    "--no-first-run",
+]
+# 출석 진도 보고와 무관한 이미지·폰트만 차단해 헤드리스 Chrome의 RAM·CPU·대역폭을 줄인다.
+BLOCKED_RESOURCE_TYPES = frozenset({"image", "font"})
 
 # 모든 프레임에 미리 주입: 플레이어가 배속을 바꾸려 해도 항상 1배속으로 고정한다.
 _FORCE_NORMAL_SPEED_JS = """
@@ -216,8 +227,16 @@ def playwright_cookies(session: LmsSession) -> list[dict]:
     ]
 
 
+async def _block_heavy_resources(route) -> None:
+    if route.request.resource_type in BLOCKED_RESOURCE_TYPES:
+        await route.abort()
+    else:
+        await route.fallback()
+
+
 async def new_session_context(browser: Browser, session: LmsSession) -> BrowserContext:
-    context = await browser.new_context(locale="ko-KR", viewport={"width": 1280, "height": 800})
+    context = await browser.new_context(locale="ko-KR", viewport={"width": 640, "height": 480})
+    await context.route("**/*", _block_heavy_resources)
     await context.add_init_script(_FORCE_NORMAL_SPEED_JS)
     await context.add_cookies(playwright_cookies(session))
     return context

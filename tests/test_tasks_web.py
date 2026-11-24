@@ -20,7 +20,7 @@ window.Worker = class {
   postMessage() {}
 };
 """
-POLL = 10000  # 폴링 주기(5초)를 넘겨 기다린다
+POLL = 15000  # 폴링 주기(10초)를 넘겨 기다린다
 
 
 def _active(page):
@@ -440,8 +440,9 @@ async def test_polling_slows_while_queued_and_pauses_when_hidden(page):
     # 탭이 가려지면 쉰다.
     await _set_hidden(page, True)
     assert await _polls(page, lambda: page.clock.run_for(120_000)) == 0
-    # 다시 보이면 바로 한 번 묻고, 재생이 시작됐으면 5초 주기로 돌아간다.
+    # 다시 보이면 바로 한 번 묻고, 재생이 시작됐으면 10초 주기로 돌아간다.
     batch.update(status="running", estimated_wait_seconds=0)
     assert await _polls(page, lambda: _set_hidden(page, False)) == 1
+    assert await _polls(page, lambda: page.clock.run_for(5_100)) == 0
     assert await _polls(page, lambda: page.clock.run_for(5_100)) == 1
-    assert await _polls(page, lambda: page.clock.run_for(5_100)) == 1
+    assert await _polls(page, lambda: page.clock.run_for(10_100)) == 1

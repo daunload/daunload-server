@@ -219,7 +219,8 @@ async def test_deadline_risk_and_expired_skip(env, fake_lms):
     player.play.assert_not_awaited()
 
 
-async def test_lock_loss_cancels_work():
+async def test_lock_loss_cancels_work(monkeypatch):
+    monkeypatch.setattr(worker, "HEARTBEAT_SECONDS", 0.01)
     connection = AsyncMock()
     connection.scalar.side_effect = ConnectionError("lost")
     stopped = asyncio.Event()
@@ -446,3 +447,57 @@ async def test_preview_reuses_cached_queue_snapshot(env, monkeypatch):
         assert plan.status_code == 200 and plan.json()["items"][0]["expected_start"]
     assert (await api.get("/playback/batches?limit=10", headers=headers)).status_code == 200
     assert len(loads) == 1
+
+
+async def test_cancel_wake_stops_playback_without_waiting_for_poll(env, fake_lms):
+    uid = await add_user("a")
+    batch = await enqueue(uid)
+    started, stopped, wake = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def play(*args, **kwargs):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    task = asyncio.create_task(
+        playback.run_batch(batch.id, SimpleNamespace(play=play), one_item=True, cancel_poll_seconds=60, cancel_wake=wake)
+    )
+    await asyncio.wait_for(started.wait(), 2)
+    async with sessionmaker()() as db:
+        await playback.cancel_batch(db, batch.id, uid)
+    wake.set()
+    assert await asyncio.wait_for(task, 2) == "cancelled"
+    assert stopped.is_set()
+
+
+async def test_prune_old_batches_and_inactive_todos(env):
+    uid = await add_user("a")
+    now = utcnow()
+    old = now - timedelta(days=95)
+    recent = now - timedelta(days=10)
+    async with sessionmaker()() as db:
+        old_done = PlaybackBatch(user_id=uid, scope="all", status="done", total=1, created_at=old, finished_at=old)
+        recent_done = PlaybackBatch(user_id=uid, scope="all", status="done", total=1, created_at=recent, finished_at=recent)
+        old_active = PlaybackBatch(user_id=uid, scope="all", status="queued", total=1, created_at=old)
+        db.add_all([old_done, recent_done, old_active])
+        await db.flush()
+        for b in (old_done, recent_done, old_active):
+            db.add(PlaybackJob(batch_id=b.id, user_id=uid, position=0, lms_course_id=1, module_item_id=1,
+                               title="v", duration=60, video={"k": "v"}, status="done" if b.status == "done" else "queued"))
+        db.add_all([
+            TodoRow(user_id=uid, lms_course_id=1, course_name="c", kind="video", lms_item_id=1, title="old-off", active=False, updated_at=old),
+            TodoRow(user_id=uid, lms_course_id=1, course_name="c", kind="video", lms_item_id=2, title="old-on", active=True, updated_at=old),
+            TodoRow(user_id=uid, lms_course_id=1, course_name="c", kind="video", lms_item_id=3, title="new-off", active=False, updated_at=recent),
+        ])
+        await db.commit()
+
+        assert await playback.prune_old_batches(db, keep_days=90) == 1
+        assert await playback.prune_inactive_todos(db, keep_days=90) == 1
+        remaining_batches = {b.id for b in (await db.scalars(select(PlaybackBatch))).all()}
+        remaining_jobs = {j.batch_id for j in (await db.scalars(select(PlaybackJob))).all()}
+        remaining_todos = {t.title for t in (await db.scalars(select(TodoRow))).all()}
+    assert remaining_batches == {recent_done.id, old_active.id}
+    assert remaining_jobs == {recent_done.id, old_active.id}
+    assert remaining_todos == {"old-on", "new-off"}

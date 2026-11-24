@@ -90,7 +90,10 @@ class TodoRow(Base):
     """미수강 영상과 미제출 과제·퀴즈. active=False면 마지막 동기화에서 사라진(완료·마감) 항목."""
 
     __tablename__ = "todos"
-    __table_args__ = (UniqueConstraint("user_id", "kind", "lms_item_id"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "kind", "lms_item_id"),
+        Index("ix_todos_user_active_deadline", "user_id", "active", "deadline"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
@@ -175,6 +178,10 @@ class PlaybackBatch(Base):
 
 class PlaybackJob(Base):
     __tablename__ = "playback_jobs"
+    __table_args__ = (
+        Index("ix_playback_jobs_batch_status", "batch_id", "status"),
+        Index("ix_playback_jobs_user_status_finished", "user_id", "status", "finished_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     batch_id: Mapped[int] = mapped_column(ForeignKey("playback_batches.id", ondelete="CASCADE"), index=True)
@@ -211,7 +218,10 @@ class NotificationLog(Base):
     """같은 알림을 두 번 보내지 않기 위한 기록."""
 
     __tablename__ = "notification_log"
-    __table_args__ = (UniqueConstraint("user_id", "key"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "key"),
+        Index("ix_notification_log_created_at", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)

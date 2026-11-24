@@ -105,6 +105,9 @@ async def lms_client_for(db: AsyncSession, user_id: int, *, min_interval: float 
     client = LmsClient(session, renew=renew if has_token else None, **extra)
     before = client.session
     values = {}
+    # 외부 LMS HTTP 요청 동안 읽기 트랜잭션(DB 커넥션)을 붙잡지 않도록 먼저 반환한다.
+    if not db.new and not db.dirty and not db.deleted:
+        await db.commit()
     try:
         if cred.status == "invalid" or not cred.session_enc:
             await client.relogin()

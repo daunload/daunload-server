@@ -63,7 +63,7 @@ async def recover_interrupted() -> int:
         return len(batches)
 
 
-async def process_next(player_factory) -> int | None:
+async def process_next(player_factory, *, cancel_wake: asyncio.Event | None = None) -> int | None:
     async with sessionmaker()() as db:
         batch_id = await db.scalar(select(PlaybackBatch.id).where(
             PlaybackBatch.status == "queued",
@@ -74,7 +74,9 @@ async def process_next(player_factory) -> int | None:
     player = await player_factory()
     try:
         # Timeout cancellation closes the playback task before another turn starts.
-        await asyncio.wait_for(playback.run_batch(batch_id, player, one_item=True), timeout=24 * 3600)
+        await asyncio.wait_for(
+            playback.run_batch(batch_id, player, one_item=True, cancel_wake=cancel_wake), timeout=24 * 3600,
+        )
     except Exception as exc:
         log.exception("재생 작업 오류 batch=%s", batch_id)
         async with sessionmaker()() as db:
@@ -96,16 +98,22 @@ async def process_next(player_factory) -> int | None:
 
 LAUNCH_BACKOFF = (30, 300)  # Chrome을 못 띄우면 30초부터 두 배씩, 최대 5분 기다린다
 ADMIN_ALERT_INTERVAL = 3600
-# 큐가 비었을 때 다음 묶음을 찾는 간격. 새 재생이 이만큼 늦게 시작될 수 있다(재생 중에는 영상 간격만 쉰다).
-IDLE_POLL_SECONDS = 3
+# 큐가 비었을 때 다음 묶음을 찾는 최대 간격(초). PostgreSQL NOTIFY를 받으면 즉시 깨어나고,
+# 알림을 놓쳐도 이 간격마다 큐와 Chrome 유휴 종료를 확인한다.
+IDLE_POLL_SECONDS = 30
+# 싱글톤 advisory lock 유지 확인 주기(초).
+HEARTBEAT_SECONDS = 10.0
 
 
 class Loop:
     """재생 루프 한 바퀴(step)와 그 사이의 상태. step은 다음 바퀴까지 기다릴 초를 돌려준다."""
 
-    def __init__(self, manager: BrowserManager, make_player, settings, *, alert=None, clock=time.monotonic) -> None:
+    def __init__(
+        self, manager: BrowserManager, make_player, settings,
+        *, alert=None, clock=time.monotonic, cancel_wake: asyncio.Event | None = None,
+    ) -> None:
         self.manager, self.make_player, self.settings = manager, make_player, settings
-        self.alert, self.clock = alert or _alert_admins, clock
+        self.alert, self.clock, self.cancel_wake = alert or _alert_admins, clock, cancel_wake
         self.backoff = 0.0
         self.last_alert: float | None = None
 
@@ -114,7 +122,7 @@ class Loop:
 
     async def step(self) -> float:
         try:
-            batch_id = await process_next(self.player)
+            batch_id = await process_next(self.player, cancel_wake=self.cancel_wake)
         except BrowserUnavailable as e:
             self.backoff = min(self.backoff * 2, LAUNCH_BACKOFF[1]) if self.backoff else LAUNCH_BACKOFF[0]
             log.error("Chrome을 띄우지 못해 재생을 미룹니다(%.0f초 뒤 재시도): %s", self.backoff, e)
@@ -142,10 +150,27 @@ async def _alert_admins(text: str) -> None:
 
 async def _heartbeat(connection):
     while True:
-        await asyncio.sleep(1)
+        await asyncio.sleep(HEARTBEAT_SECONDS)
         # A lost DB session means the singleton lock is lost: stop playback immediately.
         await asyncio.wait_for(connection.scalar(text("SELECT 1")), timeout=5)
         await connection.commit()
+
+
+async def _attach_queue_listener(connection, queue_wake: asyncio.Event, cancel_wake: asyncio.Event):
+    """싱글톤 락을 유지 중인 Postgres 연결에 LISTEN을 걸어 새 묶음·취소를 즉시 감지한다."""
+    raw = await connection.get_raw_connection()
+    driver_conn = getattr(raw, "driver_connection", None)
+    if driver_conn is None or not hasattr(driver_conn, "add_listener"):
+        return None
+
+    def _on_notify(_conn, _pid, _channel, payload: str) -> None:
+        if payload.startswith("cancel:"):
+            cancel_wake.set()
+        else:
+            queue_wake.set()
+
+    await driver_conn.add_listener(playback.PLAYBACK_QUEUE_CHANNEL, _on_notify)
+    return driver_conn, _on_notify
 
 
 async def run_guarded(connection, work):
@@ -166,10 +191,12 @@ async def serve():
 
     logging.basicConfig(level=logging.INFO)
     settings = get_settings()
-    engine = init_engine()
+    engine = init_engine(pool_size=2, max_overflow=2)
     try:
         async with exclusive_worker(engine) as connection:
             await recover_interrupted()
+            queue_wake, cancel_wake = asyncio.Event(), asyncio.Event()
+            listener = await _attach_queue_listener(connection, queue_wake, cancel_wake)
             async with async_playwright() as pw:
                 manager = BrowserManager(
                     lambda: pw.chromium.launch(
@@ -182,15 +209,32 @@ async def serve():
                 log.info("재생 워커 시작: Chrome 쉬는 동안 종료 %s, 최대 수명 %s",
                          f"{settings.playback_browser_idle_seconds}초" if settings.playback_browser_idle_seconds > 0 else "끔",
                          f"{settings.playback_browser_max_age_hours}시간" if settings.playback_browser_max_age_hours > 0 else "끔")
-                loop = Loop(manager, lambda browser: VideoPlayer(browser, settings), settings)
+                loop = Loop(
+                    manager, lambda browser: VideoPlayer(browser, settings), settings,
+                    cancel_wake=cancel_wake,
+                )
 
                 async def work():
                     while True:
-                        await asyncio.sleep(await loop.step())
+                        queue_wake.clear()
+                        delay = await loop.step()
+                        if delay == IDLE_POLL_SECONDS and listener is not None:
+                            try:
+                                await asyncio.wait_for(queue_wake.wait(), timeout=delay)
+                            except TimeoutError:
+                                pass
+                        else:
+                            await asyncio.sleep(delay)
 
                 try:
                     await run_guarded(connection, work)
                 finally:
+                    if listener is not None:
+                        driver_conn, cb = listener
+                        try:
+                            await driver_conn.remove_listener(playback.PLAYBACK_QUEUE_CHANNEL, cb)
+                        except Exception:
+                            pass
                     await manager.close("shutdown")
     finally:
         await engine.dispose()

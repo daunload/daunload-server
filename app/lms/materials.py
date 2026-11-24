@@ -25,8 +25,10 @@ from app.lms.client import LmsClient
 from app.lms.errors import InvalidCredentials, LmsError, SessionExpired
 from app.lms.media import MediaError, safe_file_name
 from app.lms.models import Course, Module
+from app.services.concurrency import map_limited
 
 log = logging.getLogger(__name__)
+WIKI_CONCURRENCY = 3
 
 COMMONS_DOWNLOAD = "https://commons.ssu.ac.kr/index.php"
 # 리다이렉트 뒤 최종 주소도 이 안이어야 받는다. Canvas가 외부 스토리지로 보내면 실계정 확인 후 추가한다.
@@ -138,19 +140,28 @@ def wiki_file_links(html: str, course_id: int) -> list[tuple[str, str]]:
 
 async def course_materials(client: LmsClient, course: Course, modules: list[Module]) -> list[CourseMaterial]:
     result = commons_files(course, modules)
-    seen: set[str] = set()
-    for module, item in _ordered(modules):
-        slug = item.content_data.url if item.content_data else None
-        if item.content_type != "wiki_page" or not slug:
-            continue
+    wiki_items = [
+        (module, item, item.content_data.url)
+        for module, item in _ordered(modules)
+        if item.content_type == "wiki_page" and item.content_data and item.content_data.url
+    ]
+
+    async def fetch_wiki(entry):
+        module, item, slug = entry
         try:
             page = await client.get_json(f"/api/v1/courses/{course.id}/pages/{quote(slug, safe='')}")
         except (InvalidCredentials, SessionExpired):
             raise
         except LmsError as e:
             log.warning("위키 페이지를 가져오지 못했습니다 %s/%s: %s", course.id, slug, e)
+            return None
+        return module, item, page if isinstance(page, dict) else {}
+
+    seen: set[str] = set()
+    for fetched in await map_limited(WIKI_CONCURRENCY, wiki_items, fetch_wiki):
+        if fetched is None:
             continue
-        page = page if isinstance(page, dict) else {}
+        module, item, page = fetched
         title = page.get("title") or (item.content_data.title if item.content_data else None) or item.title or ""
         for file_id, name in wiki_file_links(page.get("body") or "", course.id):
             key = f"f{file_id}"

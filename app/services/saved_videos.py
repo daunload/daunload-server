@@ -67,9 +67,13 @@ async def save_course_videos(
         if row.content_id != v.content_id:  # 교수가 영상을 바꿨다
             row.content_id, row.media_url, row.resolve_error, row.resolved_at = v.content_id, None, None, None
             row.resolve_failed_at = None
-        row.course_name, row.module_title, row.title = v.course_name, v.module_title, v.title
-        row.module_position, row.item_position = v.module_position, v.item_position
-        row.file_name, row.duration, row.size = v.file_name, v.duration, v.size
+        for key, value in (
+            ("course_name", v.course_name), ("module_title", v.module_title), ("title", v.title),
+            ("module_position", v.module_position), ("item_position", v.item_position),
+            ("file_name", v.file_name), ("duration", v.duration), ("size", v.size),
+        ):
+            if getattr(row, key) != value:
+                setattr(row, key, value)
     await db.execute(insert(SavedVideo).values([
         dict(user_id=user_id, item_id=row.id, created_at=utcnow()) for row in items.values()
     ]).on_conflict_do_nothing(index_elements=[SavedVideo.user_id, SavedVideo.item_id]))

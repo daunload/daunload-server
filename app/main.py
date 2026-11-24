@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
         raise RuntimeError("JWT_SECRET을 32자 이상의 임의 값으로 설정하세요.")
     if not settings.fernet_key:
         raise RuntimeError("FERNET_KEY를 설정하세요 (Fernet.generate_key()).")
-    engine = init_engine()
+    engine = init_engine(pool_size=5, max_overflow=5)
     redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     app.state.queue = Queue(redis)
     try:

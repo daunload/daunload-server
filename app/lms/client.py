@@ -12,6 +12,7 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from functools import lru_cache
 from typing import Any, TypeVar
 
 import httpx
@@ -248,8 +249,13 @@ def _json(resp: httpx.Response) -> Any:
         raise LmsError(f"JSON 응답이 아닙니다: {resp.url}") from e
 
 
+@lru_cache(maxsize=16)
+def _list_adapter(model: type[T]) -> TypeAdapter[list[T]]:
+    return TypeAdapter(list[model])
+
+
 def _parse_list(model: type[T], data: Any) -> list[T]:
-    return TypeAdapter(list[model]).validate_python(data or [])
+    return _list_adapter(model).validate_python(data or [])
 
 
 # ----------------------------------------------------------------------

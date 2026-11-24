@@ -41,9 +41,23 @@ def _sqlite_foreign_keys(dbapi_conn, _record) -> None:
     cursor.close()
 
 
-def init_engine(url: str | None = None) -> AsyncEngine:
+def init_engine(
+    url: str | None = None,
+    *,
+    pool_size: int | None = None,
+    max_overflow: int | None = None,
+    pool_recycle: int = 1800,
+) -> AsyncEngine:
     global _engine, _sessionmaker
-    _engine = create_async_engine(url or get_settings().database_url, pool_pre_ping=True)
+    target = url or get_settings().database_url
+    kwargs: dict = {"pool_pre_ping": True}
+    if not target.startswith("sqlite"):
+        kwargs["pool_recycle"] = pool_recycle
+        if pool_size is not None:
+            kwargs["pool_size"] = pool_size
+        if max_overflow is not None:
+            kwargs["max_overflow"] = max_overflow
+    _engine = create_async_engine(target, **kwargs)
     if _engine.dialect.name == "sqlite":  # 테스트용 SQLite에서도 ON DELETE CASCADE가 동작하도록
         event.listen(_engine.sync_engine, "connect", _sqlite_foreign_keys)
     _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)

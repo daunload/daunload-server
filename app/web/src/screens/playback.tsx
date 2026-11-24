@@ -1,6 +1,6 @@
 /* 강의 재생 화면(#playback)과 재생 묶음 폴링.
  * - 진행 중인 묶음이 없으면: 범위(주차·과목·전체)를 골라 재생 계획을 보고 시작한다.
- * - 진행 중이면: 지금 강의(위 카드) + 재생 목록(2개 이상일 때)만 보여 준다. 5초마다 서버에서 새로 받는다.
+ * - 진행 중이면: 지금 강의(위 카드) + 재생 목록(2개 이상일 때)만 보여 준다. 10초마다 서버에서 새로 받는다.
  * - 지난 재생: 실패한 묶음은 펼칠 때 영상별 오류를 불러온다.
  * 폴링(startPolling/stopPolling/finishActive)과 재생 중지(cancelActivePlayback)는 홈·진행 패널도 쓴다.
  */
@@ -466,10 +466,11 @@ export async function cancelActivePlayback(): Promise<void> {
 
 /* ---------- 폴링 ---------- */
 
-// 재생 중이면 5초마다 진행률을 받는다. 대기 중이면 차례가 오기까지 남은 시간의 절반(5~30초)만 기다린다.
+// 재생 중이면 10초마다 진행률을 받는다(서버 워커도 10초마다 DB에 저장한다).
+// 대기 중이면 차례가 오기까지 남은 시간의 절반(10~30초)만 기다린다.
 // 탭이 가려져 있으면 쉬고, 다시 보이면 바로 한 번 받는다. 서버 대기열 계산은 모든 사용자 몫을 다시 하므로
-// 아무도 보지 않는 탭이 5초마다 부르지 않게 한다.
-const POLL_RUNNING_MS = 5000;
+// 아무도 보지 않는 탭이 주기적으로 부르지 않게 한다.
+const POLL_RUNNING_MS = 10000;
 const POLL_QUEUED_MAX_MS = 30000;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let polling = false;

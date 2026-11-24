@@ -113,6 +113,7 @@ async def login(
     existing = await db.get(LmsCredential, user.id) if user else None
     # 승인 전에는 학교 계정에 아무것도 만들지 않는다(승인 후 다음 로그인에 발급).
     issue_token = user is not None and has_access(user) and needs_managed_token(existing)
+    await db.commit()  # 외부 학교 SSO 로그인 동안 DB 트랜잭션·커넥션을 점유하지 않는다.
     managed = None
     # SSU Canvas는 비밀번호 로그인 세션에서만 토큰을 발급·폐기할 수 있으므로 요청 끝까지 이 세션을 유지한다.
     async with auth.new_http_client() as http:
@@ -230,6 +231,7 @@ async def register_personal_token(body: PersonalTokenIn, user: CurrentUser, db: 
     mark = limiter.acquire(limits)
     if mark is None:
         raise HTTPException(429, "토큰 확인 요청이 많습니다. 10분 뒤에 다시 시도하세요.")
+    await db.commit()  # 외부 Canvas 토큰 검증 동안 DB 트랜잭션·커넥션을 점유하지 않는다.
     try:
         session = await personal_token.session_from_token(token, user.student_id)
     except InvalidCredentials as e:

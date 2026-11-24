@@ -343,6 +343,24 @@ async def test_healthy_playback_skips_resume_search(monkeypatch):
     assert calls == {"confirm": 2, "play": 2}
 
 
+async def test_block_heavy_resources_aborts_images_and_fonts_only():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.lms.player import _block_heavy_resources
+
+    for rtype in ("image", "font"):
+        route = SimpleNamespace(request=SimpleNamespace(resource_type=rtype), abort=AsyncMock(), fallback=AsyncMock())
+        await _block_heavy_resources(route)
+        route.abort.assert_awaited_once()
+        route.fallback.assert_not_awaited()
+    for rtype in ("document", "script", "stylesheet", "media", "xhr", "fetch"):
+        route = SimpleNamespace(request=SimpleNamespace(resource_type=rtype), abort=AsyncMock(), fallback=AsyncMock())
+        await _block_heavy_resources(route)
+        route.fallback.assert_awaited_once()
+        route.abort.assert_not_awaited()
+
+
 async def _noop(*args, **kwargs):
     return None
 

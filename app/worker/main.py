@@ -192,9 +192,16 @@ async def prune_notification_logs(ctx) -> int:
         return await prune_notification_log(db)
 
 
+async def prune_old_records(ctx) -> dict[str, int]:
+    async with sessionmaker()() as db:
+        batches = await playback.prune_old_batches(db)
+        todos = await playback.prune_inactive_todos(db)
+        return {"batches": batches, "todos": todos}
+
+
 async def startup(ctx) -> None:
     logging.basicConfig(level=logging.INFO)
-    init_engine()
+    init_engine(pool_size=3, max_overflow=3)
     ctx["queue"] = Queue(ctx["redis"])
 
 
@@ -212,10 +219,11 @@ class WorkerSettings:
         cron(deadline_reminders, minute=set(range(2, 60, 10))),
         cron(prune_daily_activity, hour=4, minute=10),
         cron(prune_notification_logs, hour=4, minute=20),
+        cron(prune_old_records, hour=4, minute=30),
     ]
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
-    max_jobs = 20
+    max_jobs = 4
     keep_result = 0  # 같은 job_id(sync:{user}, autosync:{user})를 바로 다시 넣을 수 있도록 결과를 남기지 않는다
     job_timeout = 24 * 3600

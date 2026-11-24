@@ -32,6 +32,30 @@ async def test_save_list_get_delete(env):
 
 
 @respx.mock
+async def test_list_transcripts_defers_body_columns(env):
+    from sqlalchemy import event
+
+    api, _ = env
+    h = await _with_course(api)
+    await api.put("/courses/45446/videos/11/transcript", headers=h, json=BODY)
+
+    queries: list[str] = []
+
+    def capture(_conn, _cursor, statement, *_args):
+        if "FROM transcripts" in statement:
+            queries.append(statement)
+
+    engine = db_base._engine.sync_engine
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        r = await api.get("/transcripts", headers=h)
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    assert r.status_code == 200 and len(r.json()) == 1
+    assert queries and all("transcripts.text" not in q and "transcripts.segments" not in q for q in queries)
+
+
+@respx.mock
 async def test_other_users_cannot_see_or_write(env):
     api, _ = env
     h = await _with_course(api)

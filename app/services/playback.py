@@ -8,7 +8,7 @@ import time
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
@@ -28,6 +28,13 @@ from app.services.week import week_bounds
 log = logging.getLogger(__name__)
 
 ACTIVE_STATUSES = ("queued", "running")
+PLAYBACK_QUEUE_CHANNEL = "playback_queue"
+
+
+async def _notify_queue(db: AsyncSession, payload: str) -> None:
+    """PostgreSQL LISTEN 중인 재생 워커를 즉시 깨운다. 트랜잭션 커밋 시점에 전달된다."""
+    if db.get_bind().dialect.name == "postgresql":
+        await db.execute(text("SELECT pg_notify(:ch, :payload)"), {"ch": PLAYBACK_QUEUE_CHANNEL, "payload": payload})
 
 
 class ActiveBatchExists(Exception):
@@ -108,6 +115,7 @@ async def create_batch(
             module_item_id=v.module_item_id, title=v.title, duration=v.duration, deadline=v.deadline,
             video=_video_to_json(v), status="queued",
         ))
+    await _notify_queue(db, f"batch:{batch.id}")
     await db.commit()
     return batch
 
@@ -132,8 +140,8 @@ def _video_from_json(data: dict) -> VideoTodo:
 
 
 async def run_batch(
-    batch_id: int, player, settings: Settings | None = None, cancel_poll_seconds: float = 3,
-    *, one_item: bool = False,
+    batch_id: int, player, settings: Settings | None = None, cancel_poll_seconds: float = 10,
+    *, one_item: bool = False, cancel_wake: asyncio.Event | None = None,
 ) -> str:
     """묶음을 실행하고 최종 상태를 반환한다. player는 VideoPlayer(또는 같은 인터페이스)."""
     settings = settings or get_settings()
@@ -173,7 +181,7 @@ async def run_batch(
         await db.commit()
 
     cancel = asyncio.Event()
-    watcher = asyncio.create_task(_watch_cancel(batch_id, cancel, cancel_poll_seconds))
+    watcher = asyncio.create_task(_watch_cancel(batch_id, cancel, cancel_poll_seconds, cancel_wake))
     error: str | None = None
     lost: BrowserLost | None = None
     try:
@@ -335,10 +343,19 @@ def _db_hooks(batch_id: int) -> BatchHooks:
     return BatchHooks(on_item_start=on_item_start, on_item_done=on_item_done, on_progress=on_progress, on_media=on_media)
 
 
-async def _watch_cancel(batch_id: int, cancel: asyncio.Event, poll: float) -> None:
+async def _watch_cancel(
+    batch_id: int, cancel: asyncio.Event, poll: float, wake: asyncio.Event | None = None,
+) -> None:
     sm = sessionmaker()
     while not cancel.is_set():
-        await asyncio.sleep(poll)
+        if wake is None:
+            await asyncio.sleep(poll)
+        else:
+            try:
+                await asyncio.wait_for(wake.wait(), timeout=poll)
+            except TimeoutError:
+                pass
+            wake.clear()
         async with sm() as db:
             batch = await db.get(PlaybackBatch, batch_id)
             if batch is None or batch.cancel_requested:
@@ -398,8 +415,31 @@ async def cancel_batch(db: AsyncSession, batch_id: int, user_id: int) -> Playbac
                 job.status, job.finished_at = "cancelled", utcnow()
         else:
             await settle_stale_cancel(db, batch)
+        await _notify_queue(db, f"cancel:{batch.id}")
     await db.commit()
     return batch
+
+
+async def prune_old_batches(db: AsyncSession, keep_days: int = 90) -> int:
+    """keep_days일보다 오래된 종료 묶음(PlaybackJob·영상 JSON 포함)을 지운다."""
+    cutoff = utcnow() - timedelta(days=keep_days)
+    result = await db.execute(delete(PlaybackBatch).where(
+        PlaybackBatch.status.not_in(ACTIVE_STATUSES),
+        func.coalesce(PlaybackBatch.finished_at, PlaybackBatch.created_at) < cutoff,
+    ))
+    await db.commit()
+    return result.rowcount
+
+
+async def prune_inactive_todos(db: AsyncSession, keep_days: int = 90) -> int:
+    """keep_days일보다 오래된 비활성(완료·마감) 할 일을 지운다."""
+    cutoff = utcnow() - timedelta(days=keep_days)
+    result = await db.execute(delete(TodoRow).where(
+        TodoRow.active.is_(False),
+        TodoRow.updated_at < cutoff,
+    ))
+    await db.commit()
+    return result.rowcount
 
 
 @dataclass(frozen=True)
